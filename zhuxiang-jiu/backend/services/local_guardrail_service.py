@@ -507,7 +507,11 @@ class AsyncHitLogger:
     # -- 刷盘 --------------------------------------------
 
     async def flush(self) -> int:
-        """批量落库(定量取一批; 返回写入条数)"""
+        """批量落库(定量取一批; 返回写入条数)。
+
+        写入失败时批次回队重试(替代直接丢弃——At-Least-Once
+        尽力语义); 回队后队列满则该批丢弃并计数告警。
+        """
         batch: list[dict] = []
         while len(batch) < self._batch_size:
             try:
@@ -527,7 +531,20 @@ class AsyncHitLogger:
             logger.warning(
                 "guardrail_hit_flush_fail n=%s: %s",
                 len(batch), exc)
+            self._requeue(batch)
             return 0
+
+    def _requeue(self, batch: list[dict]) -> None:
+        """失败批次回队(队头); 队满丢弃计数(背压保主链路)"""
+        for rec in batch:
+            try:
+                self._queue.put_nowait(rec)
+            except asyncio.QueueFull:
+                self._dropped += 1
+        if self._dropped:
+            logger.warning(
+                "guardrail_hit_requeue_dropped=%s",
+                self._dropped)
 
     async def _flush_loop(self) -> None:
         while True:

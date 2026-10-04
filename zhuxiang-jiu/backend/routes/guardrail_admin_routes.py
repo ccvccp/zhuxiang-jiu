@@ -432,6 +432,205 @@ async def feedback_hit(
 
 
 # ============================================================
+# 聚合分析(用户方案 Evolution Engine SQL 模板的 Redis 化映射)
+# ============================================================
+
+@router.get("/analytics")
+async def analytics(
+        days: int = 7,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """聚合分析: 日趋势/分类分布/僵尸规则(90 天窗口)
+
+    映射关系(方案 SQL → Redis scan 聚合, 量级百-万级实时算):
+    - 每日误杀率趋势 → by_day[{date,total,fp,rate}]
+    - 分类命中分布   → by_category
+    - 僵尸规则检测    → rules(90d) 命中 < maxHits 的规则
+    """
+    try:
+        _require_admin(x_role)
+        repo = _repo()
+        days = max(1, min(days, 90))
+        hits = await repo.list_hits(limit=500)
+        from core.helpers import ts as _ts
+        today = str(_ts())[:10]
+        # 日趋势(近 N 天)
+        by_day: dict[str, dict] = {}
+        by_category: dict[str, int] = {}
+        word_count: dict[str, int] = {}
+        for h in hits:
+            day = str(h.get("hitTime", ""))[:10]
+            if not day:
+                continue
+            slot = by_day.setdefault(
+                day, {"total": 0, "fp": 0})
+            slot["total"] += 1
+            if h.get("feedbackStatus") == 2:
+                slot["fp"] += 1
+            cat = h.get("category") or "unknown"
+            by_category[cat] = \
+                by_category.get(cat, 0) + 1
+            w = h.get("ruleWord", "")
+            if w:
+                word_count[w] = \
+                    word_count.get(w, 0) + 1
+        trend = []
+        for day in sorted(by_day.keys(),
+                          reverse=True)[:days]:
+            v = by_day[day]
+            trend.append({
+                "date": day,
+                "total": v["total"],
+                "falsePositive": v["fp"],
+                "falsePositiveRate": round(
+                    v["fp"] / v["total"] * 100, 2)
+                if v["total"] else 0.0,
+            })
+        # 僵尸规则: 已发布 BLOCK 规则近窗口命中 < maxHits
+        rules = await repo.list_rules(
+            status=1, rule_type="BLOCK")
+        zombie = []
+        for r in rules:
+            w = r.get("patternValue", "")
+            if w and word_count.get(w, 0) < 3:
+                zombie.append({
+                    "ruleId": r["id"],
+                    "word": w,
+                    "hits": word_count.get(w, 0),
+                    "createdAt":
+                        r.get("createdAt", ""),
+                })
+        zombie.sort(key=lambda z: z["hits"])
+        return {"code": 0, "data": {
+            "windowDays": days,
+            "today": today,
+            "trend": trend,
+            "byCategory": sorted(
+                [{"category": k, "count": v}
+                 for k, v in by_category.items()],
+                key=lambda x: -x["count"]),
+            "zombieRules": zombie[:50],
+            "hitSampleSize": len(hits),
+        }}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
+# SFT/DPO 语料导出(Evolution Engine 数据闭环起点)
+# ============================================================
+
+@router.get("/sft-export")
+async def sft_export(
+        format: str = "jsonl",
+        feedbackStatus: int = -1,
+        limit: int = 1000,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """导出已复核命中样本为 SFT 语料(Alpaca JSONL)
+
+    仅取 feedbackStatus in (1,2) 的人工复核样本——
+    1=确认违规(正例: 教模型拒答), 2=误杀(负例: 教模型
+    放行边界); 文本经 PII 脱敏(手机/身份证/邮箱/卡号)。
+    format=preview 返回前 5 条预览。
+    """
+    try:
+        _require_admin(x_role)
+        if feedbackStatus not in (1, 2):
+            feedbackStatus = 0
+        # 0=全部(取 -1 全量后循环过滤 1/2); 1/2=定向取
+        fetch_status = feedbackStatus \
+            if feedbackStatus in (1, 2) else -1
+        hits = await _repo().list_hits(
+            feedback_status=fetch_status,
+            limit=min(limit, 5000))
+        import re as _re
+        import json as _json
+        _pii = [
+            (_re.compile(r"1[3-9]\d{9}"),
+             "[手机号]"),
+            (_re.compile(
+                r"\d{17}[\dXx]"), "[身份证]"),
+            (_re.compile(
+                r"[a-zA-Z0-9_.+-]+@"
+                r"[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"),
+             "[邮箱]"),
+            (_re.compile(r"\d{16,19}"), "[卡号]"),
+        ]
+
+        def _mask(text: str) -> str:
+            text = str(text or "")
+            for pat, tag in _pii:
+                text = pat.sub(tag, text)
+            return text
+
+        rows = []
+        for h in hits:
+            if feedbackStatus == 0 \
+                    and h.get("feedbackStatus") \
+                    not in (1, 2):
+                continue
+            is_fp = h.get("feedbackStatus") == 2
+            original = _mask(
+                h.get("originalText", ""))
+            processed = _mask(
+                h.get("processedText", ""))
+            if is_fp:
+                instruction = (
+                    "判断以下用户输入是否违规，"
+                    "并给出合理的回复。")
+                output = (f"该输入是安全的，未被拦截。"
+                          f"正常回复：{processed}")
+            else:
+                instruction = (
+                    "判断以下用户输入是否违规，"
+                    "如果违规请给出合规的拒答话术。")
+                output = (
+                    f"该输入命中违规规则 ["
+                    f"{h.get('category', '')}]。"
+                    f"拒答回复：{processed}")
+            rows.append({
+                "instruction": instruction,
+                "input": original,
+                "output": output,
+                "meta": {
+                    "hitId": h.get("id"),
+                    "direction":
+                        h.get("direction"),
+                    "ruleWord":
+                        h.get("ruleWord"),
+                    "feedbackStatus":
+                        h.get("feedbackStatus"),
+                    "hitTime":
+                        h.get("hitTime"),
+                },
+            })
+        if format == "preview":
+            return {"code": 0, "data": {
+                "total": len(rows),
+                "preview": rows[:5]}}
+        # jsonl: 纯文本行流(前端下载)
+        from fastapi.responses import (
+            PlainTextResponse)
+        body = "\n".join(
+            _json.dumps(r, ensure_ascii=False)
+            for r in rows)
+        return PlainTextResponse(
+            content=body + ("\n" if body else ""),
+            media_type="application/x-ndjson",
+            headers={
+                "Content-Disposition":
+                    "attachment; "
+                    "filename=sft_dataset.jsonl"})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
+# ============================================================
 # 发布(热更新) + 沙箱
 # ============================================================
 

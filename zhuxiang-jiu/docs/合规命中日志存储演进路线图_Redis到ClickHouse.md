@@ -119,3 +119,7 @@ SETTINGS index_granularity = 8192;
 | 日期 | 决策 |
 |---|---|
 | 2026-10-04 | CH 方案校准为路线图（三重错位）；TTL 治理 + AsyncHitLogger 已吸收落地；Canal/Kafka/ZK 链路裁剪（无 MySQL 数据源）；触发条件如 §二 |
+| 2026-10-04（二） | **Redis Stream 方案归档至阶段 1.5**：多实例 Consumer Group/XAUTOCLAIM/死信 Stream 代码模板归档（触发条件=多节点部署或 kill -9 丢日志窗口成为实际问题）；当下已吸收其重试语义——AsyncHitLogger flush 失败**批次回队重试**（替代丢弃，At-Least-Once 尽力） |
+| 2026-10-04（二） | **Evolution Engine 聚合 SQL 模板 Redis 化落地**：误杀率日趋势/分类分布/僵尸规则检测 → `GET /api/guardrail/admin/analytics`；SFT/DPO 语料导出（Alpaca JSONL + 四类 PII 脱敏）→ `GET /api/guardrail/admin/sft-export`——数据闭环起点，不再等 CH |
+| 2026-10-04（二） | **物化视图/ETL 脚本/聚合 SQL 原文归档**：AggregatingMergeTree 预聚合 DDL、clickhouse_connect 流式导出、四条 OLAP 模板（误杀率趋势/SFT 语料/僵尸规则/分钟突增告警）——阶段 1 CH 落地时直接复用 |
+| 2026-10-04（二） | **LLM 拒答轨（Few-Shot 向量拒答 + BGE ONNX + Semantic Cache）方向性否定**：与本地拦截架构哲学冲突——DFA 拦截核心价值是 0 Token 成本+微秒延迟+话术运营可控；LLM 生成拒答引入 1s 延迟+Token 成本+组件复杂度（Qdrant/Embedding 服务/Redis Stack），而分类话术已由运营配置且即时稳定。**保留为可选探索项**：仅当用户反馈话术生硬且愿承担延迟时，可对特定分类做异步话术优化（离线批量，非实时拦截轨） |

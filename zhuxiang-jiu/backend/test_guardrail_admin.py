@@ -387,6 +387,90 @@ async def main():
     lg.start()  # 恢复 worker(后续测试可用)
 
     # ========================================================
+    # [07] 聚合分析 + SFT 导出 + flush 重试(Evolution 闭环)
+    # ========================================================
+    print("[07 analytics/sft-export/重试]")
+    from services.local_guardrail_service import (
+        flush_hits as _flush_hits,
+    )
+    # 造数: 已复核样本(确认+误杀各一)
+    await repo.log_hit({
+        "sessionId": "s-ana", "memberId": 1,
+        "direction": "INPUT", "ruleWord": "未成年",
+        "category": "minor_protection",
+        "ruleType": "BLOCK",
+        "originalText": "未成年买酒联系13800001234",
+        "processedText": "拒答话术A"})
+    await repo.log_hit({
+        "sessionId": "s-ana", "memberId": 1,
+        "direction": "INPUT", "ruleWord": "第一",
+        "category": "general_compliance",
+        "ruleType": "BLOCK",
+        "originalText": "本地第一家店",
+        "processedText": "正常回复B"})
+    hits_all = await repo.list_hits(limit=500)
+    for h in hits_all:
+        if h.get("ruleWord") == "未成年":
+            await repo.feedback_hit(h["id"], 1, "t")
+        elif h.get("ruleWord") == "第一":
+            await repo.feedback_hit(h["id"], 2, "t")
+
+    rsp = client.get(f"{BASE}/analytics?days=7",
+                     headers=ADMIN)
+    check("analytics 200", rsp.status_code == 200)
+    ana = rsp.json()["data"]
+    check("analytics 结构齐备",
+          all(k in ana for k in (
+              "trend", "byCategory",
+              "zombieRules", "today")))
+    check("analytics 日趋势含今日",
+          any(t["date"] == ana["today"]
+              for t in ana["trend"]))
+
+    rsp = client.get(
+        f"{BASE}/sft-export?format=preview",
+        headers=ADMIN)
+    check("sft-export preview 200",
+          rsp.status_code == 200)
+    prev = rsp.json()["data"]
+    check("sft 样本含正/负例",
+          prev["total"] >= 2
+          and any("拒答回复" in r["output"]
+                  for r in prev["preview"])
+          and any("未被拦截" in r["output"]
+                  for r in prev["preview"]))
+    masked_ok = all(
+        "13800001234" not in r["input"]
+        for r in prev["preview"])
+    check("sft 导出 PII 脱敏", masked_ok)
+    rsp = client.get(
+        f"{BASE}/sft-export?format=jsonl",
+        headers=ADMIN)
+    check("sft-export jsonl 下载头",
+          rsp.status_code == 200
+          and "sft_dataset.jsonl" in
+          rsp.headers.get(
+              "content-disposition", ""))
+
+    # flush 失败回队重试(monkeypatch 批量写抛错)
+    import repositories.guardrail_repository \
+        as _grmod
+    async def _boom(records):
+        raise RuntimeError("db down")
+    _orig = _grmod.GuardrailRepository\
+        .log_hits_batch
+    _grmod.GuardrailRepository\
+        .log_hits_batch = _boom
+    builtin.check_input("拼酒重试探针")
+    n_fail = await _flush_hits()
+    check("flush 失败返回 0", n_fail == 0)
+    _grmod.GuardrailRepository\
+        .log_hits_batch = _orig
+    n_retry = await _flush_hits()
+    check("失败批次回队后重试成功",
+          n_retry >= 1, f"got {n_retry}")
+
+    # ========================================================
     print(f"\n===== 结果: {PASS} 通过 / {FAIL} 失败 =====")
     return FAIL == 0
 
