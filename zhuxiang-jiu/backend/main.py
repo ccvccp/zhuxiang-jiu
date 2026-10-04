@@ -607,6 +607,12 @@ async def _on_startup():
     from services.pocket_scheduler import (
         start_scheduler as start_pocket_scan)
     start_pocket_scan()
+    # 74号·NexusFlow 发布工作台: 日度巡检(NEXUS74_SCAN_AUTO=off
+    # 可关闭; 2026-10-04 检查升级补齐——原零观测, 供给停摆 3 周
+    # 无人知晓; 纯观测面不改发布铁律)
+    from services.nexus74_scheduler import (
+        start_scheduler as start_nexus74_scan)
+    start_nexus74_scan()
     # 41号·AI智能代驾: 学习回流(RIDE_LEARNING_AUTO=off 可关闭)
     from services.ride_scheduler import start_learning_scheduler as start_ride_learning
     start_ride_learning()

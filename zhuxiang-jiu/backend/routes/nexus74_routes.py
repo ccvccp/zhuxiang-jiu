@@ -1249,6 +1249,39 @@ async def model_status(
         raise _map(exc) from exc
 
 
+# ============================================================
+# 日度巡检(观测面——2026-10-04 检查升级补齐;
+# 原零观测: 供给停摆 3 周无人知晓)
+# ============================================================
+
+@router.get("/admin/overview")
+async def admin_overview(
+        refresh: int = 0,
+        x_role: str = Header(
+            default=None, alias="X-Role")):
+    """巡检总览(表分布/发布状态/回执
+    积压/适配器健康/数据新鲜度;
+    refresh=1 现场重扫, 默认读缓存)"""
+    try:
+        _require_admin(x_role)
+        from services import nexus74_scheduler
+        if refresh:
+            report = await \
+                nexus74_scheduler.run_scan()
+        else:
+            report = (nexus74_scheduler
+                      .last_scan())
+            if not report:
+                report = await \
+                    nexus74_scheduler.run_scan()
+        return {"code": 0,
+                "data": report}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map(exc) from exc
+
+
 def register_nexus74_routes(app):
     """路由注册(main.py 调用)"""
     app.include_router(router)

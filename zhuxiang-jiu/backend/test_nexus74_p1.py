@@ -34,6 +34,7 @@ import asyncio
 import os
 import sys
 
+os.environ.setdefault("AUTH_COMPAT_TRUST_HEADERS", "1")
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ.pop("LLM_API_KEY", None)
