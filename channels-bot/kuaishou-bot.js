@@ -2,7 +2,7 @@
 // 架构镜像 douyin-bot/toutiao-bot 已实证范式: CDP pipe 传输 Chrome +
 // 独立 kuaishou-profile 持久登录态; 与其他 bot 完全隔离。
 // 用法: node kuaishou-bot.js <config.json>
-// config: { action: "probe"|"publish"|"manage", mp4, desc, waitLoginMinutes }
+// config: { action: "probe"|"publish"|"manage", mp4, title, desc, waitLoginMinutes }
 //
 // ⚠ 现场校准项(登录态就绪后逐一实证, 标记 [CAL]):
 //   1. KS_PUBLISH_URL 快手创作者平台视频发布页真实路径(cp.kuaishou.com)
@@ -135,11 +135,53 @@ const KS_PUBLISH_URL = process.env.KS_PUBLISH_URL
   await uploadHandle.uploadFile(CFG.mp4);
   LOG('uploadFile: ' + CFG.mp4);
 
-  // 2. 描述并行填写
+  // 2. 标题 + 描述填写(2026-10-05 快手诊断实证: 标题为独立字段,
+  //    缺失扣标题质量分——发布页 标题input + 描述textarea 分离)
   await sleep(4000);
   try {
-    await page.keyboard.type(String(CFG.desc || ''), { delay: 30 });
-    LOG('desc typed via keyboard (上传中并行填写)');
+    const titleOk = await page.evaluate(() => {
+      const fields = Array.from(document.querySelectorAll(
+        'input, textarea, [contenteditable=true]'))
+        .filter(x => {
+          const r = x.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        });
+      // 优先 placeholder/aria-label 含「标题」; 兜底第一个 input
+      const byPh = fields.find(x =>
+        /标题/.test(x.placeholder || '')
+        || /标题/.test(x.getAttribute('aria-label') || ''));
+      const el = byPh
+        || fields.find(x => x.tagName === 'INPUT');
+      if (!el) return false;
+      el.focus();
+      return true;
+    });
+    if (titleOk) {
+      await page.keyboard.type(String(CFG.title || ''), { delay: 30 });
+      LOG('title typed: [' + String(CFG.title || '').slice(0, 20) + ']');
+    } else {
+      LOG('WARN 标题输入框未定位 — 待校准');
+    }
+  } catch (e) { LOG('title type err: ' + e.message); }
+  try {
+    const descOk = await page.evaluate(() => {
+      const fields = Array.from(document.querySelectorAll(
+        'textarea, [contenteditable=true]'));
+      const el = fields.find(x => {
+        const r = x.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+      if (!el) return false;
+      el.focus();
+      return true;
+    });
+    if (descOk) {
+      await page.keyboard.type(String(CFG.desc || ''), { delay: 30 });
+      LOG('desc typed (描述框聚焦后键入)');
+    } else {
+      await page.keyboard.type(String(CFG.desc || ''), { delay: 30 });
+      LOG('desc typed via keyboard (默认焦点兜底)');
+    }
   } catch (e) { LOG('desc type err: ' + e.message); }
 
   // 3. AIGC 声明(2026-10-05 probe4 实证: 发布设置面板在首屏, AIGC
