@@ -406,13 +406,20 @@ const DOUYIN_UPLOAD = 'https://creator.douyin.com/creator-micro/content/upload/v
           // 平台拦, CDP Input 为输入层真实事件 isTrusted=true,
           // force=0.5 压力校验——视频号/抖音列表页同款已实证)
           await sleep(2500);
-          const cdp = await page.createCDPSession();
-          await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: btnPt.x, y: btnPt.y, button: 'none', pointerType: 'mouse' });
-          await sleep(150);
-          await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: btnPt.x, y: btnPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
-          await sleep(90);
-          await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: btnPt.x, y: btnPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
-          LOG('CDP 真实点击兜底已发');
+          // 2026-10-04 双发实证修正(视频号 273bd05 同款): 合成点击
+          // 已生效时(URL 已跳内容管理页)跳过 CDP 兜底——双击都生效
+          // =同视频双发(59 号 22:52 ×2 实证)
+          if (page.url().includes('/content/manage')) {
+            LOG('合成点击已生效(URL 已跳内容管理) — 跳过 CDP 兜底防双发');
+          } else {
+            const cdp = await page.createCDPSession();
+            await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: btnPt.x, y: btnPt.y, button: 'none', pointerType: 'mouse' });
+            await sleep(150);
+            await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: btnPt.x, y: btnPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+            await sleep(90);
+            await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: btnPt.x, y: btnPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+            LOG('CDP 真实点击兜底已发');
+          }
         }
       } catch (e) { LOG('publish click err: ' + e.message); await sleep(5000); }
     }
