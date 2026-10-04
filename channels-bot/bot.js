@@ -938,6 +938,39 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     process.exit(link ? 0 : 7);
   }
 
+  if (CFG.action === 'stats') {
+    // 数据监控: 作品列表页 dump(标题/时间/状态+可见数据字段) — 首版
+    // 实机校准源: 列表页若有播放/点赞列直接文本提取; 无则需数据
+    // 中心页二次校准(2026-10-04 首版留档 channels_stats_raw.txt)
+    const gotoList = async () => {
+      try { await page.goto('https://channels.weixin.qq.com/platform/post/list', { waitUntil: 'domcontentloaded', timeout: 30000 }); return true; }
+      catch (e) { return false; }
+    };
+    if (!await gotoList()) { await sleep(2500); await gotoList(); }
+    await sleep(4000);
+    if (page.url().includes('login.html')) {
+      LOG('SESSION_EXPIRED — 尝试一键登录(免扫码), 兜底等扫码确认');
+      if (!(await ensureLogin(page, 10 * 60000))) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
+      await sleep(2000);
+      await gotoList(); await sleep(5000);
+    }
+    let f = page.frames().find(x => x.url().includes('/micro/content/post'));
+    if (!f) { LOG('NO_LIST_FRAME'); await browser.close(); process.exit(3); }
+    await page.bringToFront();
+    await sleep(3000);
+    const raw = await f.evaluate(() => (document.body.innerText || '').slice(0, 6000)).catch(() => '');
+    const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16);
+    fs.writeFileSync(`channels_stats_${ts}.txt`, raw);
+    fs.writeFileSync('channels_stats_raw.txt', raw);
+    // 行级摘要(过滤空行, 便于 diff 增量)
+    const lines = raw.split('\n').map(s => s.trim()).filter(Boolean);
+    LOG('STATS_LINES ' + lines.length);
+    lines.slice(0, 40).forEach((t, i) => LOG('  #' + i + ' ' + t.slice(0, 80)));
+    LOG('STATS_DONE (channels_stats_raw.txt + 时间戳留档)');
+    await browser.close();
+    process.exit(0);
+  }
+
   LOG('unknown action');
   await browser.close();
 })().catch(e => { LOG('ERR ' + (e && e.message || e)); process.exit(1); });
