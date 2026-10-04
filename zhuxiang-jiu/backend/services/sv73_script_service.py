@@ -109,8 +109,88 @@ TEMPLATES = {
         "scenePlan": ("dh_oral",),
         "sceneDuration": 15.0,
     },
+    # dh_mix(2026-10-04 A1 多镜混合): 口播钩子(GPU SadTalker)+
+    # 产品卡+合规尾卡(零 GPU Ken Burns)——数字人轨从单镜升级
+    # 多镜; sceneDurations 逐镜注册(口播 9s≈24 字 @warm 0.92 语速,
+    # 卡片镜独立), sceneDuration=均值(兼容快照字段); 合成见
+    # Sv73RenderService.compose_mix(dh_batch 本地编排, GPU 机只
+    # 出口播镜)
+    "dh_mix": {
+        "pageW": 1080, "pageH": 1920,
+        "scenePlan": ("dh_hook", "selling", "compliance"),
+        "sceneDuration": 6.3,
+        "sceneDurations": (9.0, 5.4, 4.5),
+    },
 }
 DEFAULT_TEMPLATE = "vertical"
+
+# 分级生成路由(2026-10-04 降本/归因方案): 热点分值→模板档位
+#   S 级 dh_mix 多镜混合(口播+产品卡, ¥0.1-0.19)——精选热点
+#   A 级 dh_oral 数字人单镜 15s——常规分发
+#   B 级 vertical 零 GPU(¥0)——长尾占位
+# template="tier" 时启用(pipeline 编排层消费; 显式模板优先不受影响)
+TIER_TEMPLATE = "tier"
+TIER_ROUTES = (
+    # (分值下限, 档位, 模板)——自上而下首个命中
+    (80, "S", "dh_mix"),
+    (60, "A", "dh_oral"),
+    (0, "B", "vertical"),
+)
+
+
+def resolve_tier_template(hotspot: dict) -> tuple[str, str]:
+    """热点分值 → (模板名, 档位)——确定性路由, LLM 禁入"""
+    score = float(hotspot.get("score") or 0)
+    for floor, tier, tpl in TIER_ROUTES:
+        if score >= floor:
+            return tpl, tier
+    return TIER_ROUTES[-1][2], TIER_ROUTES[-1][1]
+
+
+# 文案质量护栏(A2, 2026-10-04): 对冲 flash 档口语瑕疵
+# ("好火"——10-04 实验发现#1 实证); 仅门控 LLM 轨(rule 轨为
+# 注册表确定性文案, 热点词透传不担责); 失败→LLM 重生成一次
+# →仍败回落 rule(与 compliance hardFail 同款降级语义)
+ORAL_FLAW_WORDS = (
+    "好火",          # 口语重复瑕疵(glm-4-flash 实证)
+    "嗯嗯", "呃呃",   # 语气词连缀
+    "这个这个", "然后然后", "就是就是",   # 口吃式重复
+)
+SENTENCE_MAX_CHARS = 25    # 单句上限(voiceover, 标点切分)
+
+
+def lint_texts(scenes: list[dict]) -> list[str]:
+    """文案三件套质检——返回违规清单(空=通过)
+
+    规则: ①瑕疵词(text/voiceover) ②voiceover 单句≤25 字
+          ③同字连打≥3(叠字异常)
+    """
+    flaws: list[str] = []
+    for sc in scenes:
+        role = sc.get("role")
+        text = str(sc.get("text") or "")
+        vo = str(sc.get("voiceover") or "")
+        for w in ORAL_FLAW_WORDS:
+            if w in vo or w in text:
+                flaws.append(f"瑕疵词'{w}'@{role}")
+        for sent in re.split(r"[。！？!?，,；;]", vo):
+            if len(sent.strip()) > SENTENCE_MAX_CHARS:
+                flaws.append(
+                    f"单句{len(sent.strip())}字超{SENTENCE_MAX_CHARS}"
+                    f"@{role}")
+        if re.search(r"(.)\1{2,}", vo):
+            flaws.append(f"叠字异常@{role}")
+    return flaws
+# dh_mix 口播镜(dh_hook)文案上限(9s 镜独立口径; 全局
+# VOICEOVER_MAX_CHARS 40 为 dh_oral 15s 单镜口径)
+DH_HOOK_VOICEOVER_MAX = 24
+
+
+def _scene_durations(reg: dict) -> tuple:
+    """模板逐镜时长(注册表单一来源; 均匀模板自动展开)"""
+    if "sceneDurations" in reg:
+        return tuple(reg["sceneDurations"])
+    return (reg["sceneDuration"],) * len(reg["scenePlan"])
 TEXT_MAX_CHARS = 12     # 每镜卡片文案上限
 VOICEOVER_MAX_CHARS = 40
 HIGHLIGHT_MAX_WORDS = 2
@@ -165,16 +245,21 @@ MOCK_SCENE_TEXTS = {
     "action": "主页了解好酒",
     "compliance": COMPLIANCE_TEXT,
     "dh_oral": "竹小妹说{hotword}",
+    # dh_mix 口播钩子(9s 镜): 口语短钩——警示由合规尾镜结构承担
+    "dh_hook": "竹小妹说{hotword}",
 }
 MOCK_SCENE_VOICEOVERS = {
-    "cover": "家人们, 最近{hotword}好火, 竹小妹也来聊聊。",
+    # ("这么火"——2026-10-04 A2 同源清理: "好火"为 lint 瑕疵词,
+    #  注册表文案自身须 lint-clean)
+    "cover": "家人们, 最近{hotword}这么火, 竹小妹也来聊聊。",
     "selling": "这瓶{category}, 竹香工艺酿的, 口感柔和有层次。",
     "proof": "老窖池的底气, 是时间给的味道。",
     "action": "想了解的家人, 点主页看看呀。",
     "compliance": COMPLIANCE_VOICEOVER,
     "dh_oral": (
-        "家人们, {hotword}好火, 竹香酒好喝不上头。"
+        "家人们, {hotword}这么火, 竹香酒好喝不上头。"
         "理性饮酒, 未满18岁请勿饮酒。"),
+    "dh_hook": "家人们, {hotword}这么火, 看这瓶竹香酒。",
 }
 MOCK_HIGHLIGHTS = {
     "cover": ["{hotword}"],
@@ -183,6 +268,7 @@ MOCK_HIGHLIGHTS = {
     "action": ["主页"],
     "compliance": [],
     "dh_oral": ["{hotword}", "竹香工艺"],
+    "dh_hook": ["{hotword}"],
 }
 
 # 落盘目录(仿 36号生产线 VIDEO_DIR 惯例)
@@ -219,15 +305,20 @@ def assert_schema(sb: dict) -> None:
     assert sb["track"] in (TRACK_PRIMARY, TRACK_FALLBACK, TRACK_RULE)
     assert sb["persona"] in IP_PERSONAS
     # 模板段(P1): 注册表快照——plan/duration/页面尺寸全由模板决定
+    # (dh_mix 类多镜模板额外携带逐镜 sceneDurations 快照)
     tpl = sb["template"]
-    assert set(tpl.keys()) == {
-        "name", "pageW", "pageH", "sceneDuration", "fade"}
     assert tpl["name"] in TEMPLATES, f"未注册模板: {tpl['name']}"
     reg = TEMPLATES[tpl["name"]]
+    tpl_keys = {"name", "pageW", "pageH", "sceneDuration", "fade"}
+    if "sceneDurations" in reg:
+        tpl_keys |= {"sceneDurations"}
+        assert tuple(tpl["sceneDurations"]) == reg["sceneDurations"]
+    assert set(tpl.keys()) == tpl_keys
     assert tpl["pageW"] == reg["pageW"]
     assert tpl["pageH"] == reg["pageH"]
     assert tpl["sceneDuration"] == reg["sceneDuration"]
     assert tpl["fade"] == SCENE_FADE
+    durs = _scene_durations(reg)
     assert isinstance(sb["scenes"], list) and len(sb["scenes"]) == len(
         reg["scenePlan"]), "镜头数必须模板注册表决定"
     for i, sc in enumerate(sb["scenes"]):
@@ -235,7 +326,7 @@ def assert_schema(sb: dict) -> None:
         assert sc["index"] == i
         assert sc["role"] == reg["scenePlan"][i], (
             f"镜头{i}角色序列必须模板注册表决定: {sc['role']}")
-        assert sc["duration"] == reg["sceneDuration"]
+        assert sc["duration"] == durs[i]
         assert 0 < len(sc["text"]) <= TEXT_MAX_CHARS
         assert 0 < len(sc["voiceover"]) <= VOICEOVER_MAX_CHARS
         assert len(sc["highlightWords"]) <= HIGHLIGHT_MAX_WORDS
@@ -246,7 +337,7 @@ def assert_schema(sb: dict) -> None:
             sc["ipOverlay"]["anchor"]]["size"]
     n = len(sb["scenes"])
     expected_total = round(
-        n * reg["sceneDuration"] - (n - 1) * SCENE_FADE, 2)
+        sum(durs) - (n - 1) * SCENE_FADE, 2)
     assert abs(sb["totalDuration"] - expected_total) < 0.01
     assert (TOTAL_DURATION_BOUNDS[0] <= sb["totalDuration"]
             <= TOTAL_DURATION_BOUNDS[1]), "总时长须在 15-25s 验收区间"
@@ -373,10 +464,12 @@ class Sv73ScriptService:
 
     def _build_scenes(self, category: str, hotword: str,
                       llm_texts: dict | None,
-                      plan: tuple, duration: float) -> list[dict]:
+                      plan: tuple, durs) -> list[dict]:
         """镜头组装: 结构/数字全模板注册表, 文案缺位回落 mock 模板"""
         scenes = []
         for i, role in enumerate(plan):
+            vo_limit = (DH_HOOK_VOICEOVER_MAX if role == "dh_hook"
+                        else VOICEOVER_MAX_CHARS)
             mock = {
                 "text": _clip(
                     MOCK_SCENE_TEXTS[role].format(
@@ -385,7 +478,7 @@ class Sv73ScriptService:
                 "voiceover": _clip(
                     MOCK_SCENE_VOICEOVERS[role].format(
                         hotword=hotword, category=category),
-                    VOICEOVER_MAX_CHARS),
+                    vo_limit),
                 "highlightWords": [
                     _clip(w.format(hotword=hotword, category=category),
                           HIGHLIGHT_MAX_CHARS)
@@ -396,6 +489,18 @@ class Sv73ScriptService:
                 chosen = {"text": COMPLIANCE_TEXT,
                           "voiceover": COMPLIANCE_VOICEOVER,
                           "highlightWords": []}
+            elif (role == "dh_hook" and llm_texts
+                    and "cover" in llm_texts):
+                # dh_mix 口播钩子消费 LLM cover 文案(钩子语义同位);
+                # 口播镜 9s 档独立截断(全局 40 字为 15s 单镜口径)
+                cand = llm_texts["cover"]
+                chosen = {
+                    "text": cand["text"] or mock["text"],
+                    "voiceover": _clip(
+                        cand["voiceover"], vo_limit) or mock["voiceover"],
+                    "highlightWords": [w for w in cand["highlightWords"]
+                                       if w],
+                }
             elif llm_texts and role in llm_texts:
                 cand = llm_texts[role]
                 chosen = {
@@ -412,7 +517,7 @@ class Sv73ScriptService:
                 "text": chosen["text"],
                 "voiceover": chosen["voiceover"],
                 "highlightWords": chosen["highlightWords"],
-                "duration": duration,
+                "duration": durs[i],
                 "ipOverlay": _ip_overlay(role),
             })
         return scenes
@@ -459,12 +564,30 @@ class Sv73ScriptService:
         hotword = _hotword(hotspot)
         persona_def = IP_PERSONAS[persona]
         plan = TEMPLATES[template]["scenePlan"]
-        duration = TEMPLATES[template]["sceneDuration"]
+        durs = _scene_durations(TEMPLATES[template])
 
         llm_texts, track = self._llm_scene_texts(
             hotspot, category, persona_def)
         scenes = self._build_scenes(
-            category, hotword, llm_texts, plan, duration)
+            category, hotword, llm_texts, plan, durs)
+
+        # 质量护栏(A2): LLM 轨 lint 失败 → 重生成一次 → 仍败回落
+        # rule(仅门控 LLM 轨——rule 文案为注册表确定性产物)
+        if track != TRACK_RULE:
+            flaws = lint_texts(scenes)
+            if flaws:
+                logger.warning("sv73_llm_lint_retry: %s", flaws)
+                llm_texts, track = self._llm_scene_texts(
+                    hotspot, category, persona_def)
+                scenes = self._build_scenes(
+                    category, hotword, llm_texts, plan, durs)
+                flaws = lint_texts(scenes)
+                if flaws:
+                    logger.warning(
+                        "sv73_llm_lint_rule_fallback: %s", flaws)
+                    scenes = self._build_scenes(
+                        category, hotword, None, plan, durs)
+                    track = TRACK_RULE
 
         # 三审闸门前置: hardFail 整体回落 rule 模板轨
         compliance = self._compliance(scenes)
@@ -472,9 +595,19 @@ class Sv73ScriptService:
             logger.warning("sv73_llm_hard_fail: %s -> rule 模板回落",
                            compliance["hardFail"])
             scenes = self._build_scenes(
-                category, hotword, None, plan, duration)
+                category, hotword, None, plan, durs)
             track = TRACK_RULE
             compliance = self._compliance(scenes)
+
+        tpl_snapshot = {
+            "name": template,
+            "pageW": TEMPLATES[template]["pageW"],
+            "pageH": TEMPLATES[template]["pageH"],
+            "sceneDuration": TEMPLATES[template]["sceneDuration"],
+            "fade": SCENE_FADE,
+        }
+        if "sceneDurations" in TEMPLATES[template]:
+            tpl_snapshot["sceneDurations"] = list(durs)
 
         n = len(scenes)
         sb = {
@@ -491,18 +624,12 @@ class Sv73ScriptService:
                 "score": hotspot.get("score", 0),
             },
             "category": category,
-            "template": {
-                "name": template,
-                "pageW": TEMPLATES[template]["pageW"],
-                "pageH": TEMPLATES[template]["pageH"],
-                "sceneDuration": duration,
-                "fade": SCENE_FADE,
-            },
+            "template": tpl_snapshot,
             "bgm": {"mood": DEFAULT_BGM_MOOD,
                     **BGM_MOODS[DEFAULT_BGM_MOOD]},
             "scenes": scenes,
             "totalDuration": round(
-                n * duration - (n - 1) * SCENE_FADE, 2),
+                sum(durs) - (n - 1) * SCENE_FADE, 2),
             "compliance": compliance,
             "generatedAt": _now(),
         }

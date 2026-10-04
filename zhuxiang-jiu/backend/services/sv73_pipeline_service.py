@@ -33,7 +33,7 @@ import os
 
 from services.sv73_script_service import (
     Sv73ScriptService, current_mode, DEFAULT_CATEGORY,
-    DEFAULT_TEMPLATE,
+    DEFAULT_TEMPLATE, TIER_TEMPLATE, resolve_tier_template,
 )
 from services.sv73_render_service import Sv73RenderService
 from services.sv73_match_service import Sv73MatchService
@@ -191,6 +191,12 @@ class Sv73PipelineService:
         if platform not in SV73_PLATFORMS:
             raise ValueError(f"不支持的平台: {platform}")
 
+        # 0.5 分级路由(2026-10-04): template="tier" → 热点分值
+        # 决定 B/A/S 档模板(确定性, LLM 禁入; 显式模板不受影响)
+        tier = ""
+        if template == TIER_TEMPLATE:
+            template, tier = resolve_tier_template(hotspot)
+
         # 0. 品类匹配(P1: auto 档——确定性规则, LLM 禁入)
         match_result = None
         if category == CATEGORY_AUTO:
@@ -235,6 +241,7 @@ class Sv73PipelineService:
             content.get("contentId"), reused, current_mode())
         return {
             "mode": current_mode(),
+            "tier": tier,
             "match": match_result,
             "storyboard": storyboard,
             "render": built,
@@ -268,10 +275,20 @@ class Sv73PipelineService:
                       "upload_pic/upload_url_text 三步图文卡, "
                       "--mblog_statement 1 必带)")
         sv73 = content.get("sv73") or {}
-        if sv73.get("template") == "dh_oral":
-            base = (base + "(数字人 GPU 轨 dh_oral: 口播 mp4 由算力机 "
+        # 归因冷启动(2026-10-04): 短码即 attract /r/ 短链——发布
+        # 载体(主页链接/评论区置顶/描述文案)携带 rLink, 点击→302
+        # 落地(clickId)→注册自动归并→下单回写→_link_metrics 聚合
+        short_code = content.get("shortCode") or ""
+        if short_code:
+            base = (base + f"(引流短链 zxjiu.com/r/{short_code}: "
+                    "发布描述/评论区置顶/主页链接载体——点击即入 "
+                    "attract 归因漏斗)")
+        if sv73.get("template") in ("dh_oral", "dh_mix"):
+            base = (base + f"(数字人 GPU 轨 {sv73.get('template')}: "
+                    "口播 mp4 由算力机 "
                     "build_dh_dev.py 渲染——SV73_DH_MODE=real + "
                     "SV73_SADTALKER_DIR, 经 render/attach 回填; "
+                    "dh_mix 多镜由 dh_batch.py 本地 compose_mix 合成; "
                     "影子对照: 与零 GPU 轨同剧对比完播率)")
         if platform == "xiaohongshu":
             return base + (

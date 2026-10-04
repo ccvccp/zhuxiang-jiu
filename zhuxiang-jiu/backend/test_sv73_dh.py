@@ -175,3 +175,118 @@ def test_t6_next_steps_dh_oral(monkeypatch):
     steps_xhs = Sv73PipelineService._next_steps(
         dict(content, sv73={"template": "dh_oral"}), "xiaohongshu")
     assert "21 轮全自动闭环" in steps_xhs
+
+
+# ------------------------------------------------------------
+# T7 dh_mix 多镜混合模板(2026-10-04 A1: 口播 GPU 镜+卡片 Ken Burns)
+# ------------------------------------------------------------
+
+def test_t7_dh_mix_template_registered():
+    """dh_mix 注册: 三镜逐镜时长(9/5.4/4.5), 9:16 出片口径,
+    总时长在验收界内"""
+    tpl = sv73mod.TEMPLATES["dh_mix"]
+    assert tpl["scenePlan"] == ("dh_hook", "selling", "compliance")
+    assert tpl["sceneDurations"] == (9.0, 5.4, 4.5)
+    assert (tpl["pageW"], tpl["pageH"]) == (1080, 1920)
+    total = sum(tpl["sceneDurations"]) - 2 * sv73mod.SCENE_FADE
+    assert sv73mod.TOTAL_DURATION_BOUNDS[0] <= total <= \
+        sv73mod.TOTAL_DURATION_BOUNDS[1]
+
+
+def test_t7_dh_mix_generate_schema(monkeypatch):
+    """generate 真链(dh_mix) → 逐镜时长/快照 sceneDurations/总时长"""
+    _patch_rule(monkeypatch)
+    sb = _gen(template="dh_mix")
+    assert sb["template"]["name"] == "dh_mix"
+    assert [sc["duration"] for sc in sb["scenes"]] == [9.0, 5.4, 4.5]
+    assert [sc["role"] for sc in sb["scenes"]] == [
+        "dh_hook", "selling", "compliance"]
+    assert sb["template"]["sceneDurations"] == [9.0, 5.4, 4.5]
+    assert sb["totalDuration"] == 17.7   # 18.9 - 2*0.6
+    assert_schema(sb)   # fail-hard: 任何失配即 AssertionError
+
+
+def test_t7_dh_mix_compliance_and_hook(monkeypatch):
+    """口播钩子 9s 档文案上限 + 合规由尾镜结构承担(hardFail 空)"""
+    _patch_rule(monkeypatch)
+    sb = _gen(template="dh_mix")
+    hook = sb["scenes"][0]
+    assert 0 < len(hook["voiceover"]) <= sv73mod.DH_HOOK_VOICEOVER_MAX
+    assert not sb["compliance"]["hardFail"]
+    tail = sb["scenes"][-1]
+    assert tail["role"] == "compliance"
+    assert tail["voiceover"] == sv73mod.COMPLIANCE_VOICEOVER
+
+
+def test_t7_dh_mix_llm_cover_maps_to_hook(monkeypatch):
+    """LLM cover 文案映射口播钩子(钩子语义同位)+9s 档独立截断
+    (2026-10-04 A2 起 LLM 轨过 lint——样本用规范长文案验证截断)"""
+    fake = {"scenes": [
+        {"role": "cover", "text": "国庆家宴火了",
+         "voiceover": ("家人们, 国庆家宴快到了, "
+                       "聊聊选酒这件事, 一次说明白。"),
+         "highlightWords": ["国庆"]},
+        {"role": "selling", "text": "竹香工艺封坛",
+         "voiceover": "家人们, 这瓶封坛的竹香, 是时间给的温柔。",
+         "highlightWords": ["竹香"]},
+    ]}
+    monkeypatch.setattr(
+        Sv73ScriptService, "_chat_json",
+        lambda self, system, user: (fake, "glm-4-flash"))
+    sb = _gen(template="dh_mix")
+    hook = sb["scenes"][0]
+    assert hook["text"] == "国庆家宴火了"
+    assert len(hook["voiceover"]) <= sv73mod.DH_HOOK_VOICEOVER_MAX
+    assert hook["highlightWords"] == ["国庆"]
+    selling = sb["scenes"][1]
+    assert selling["text"] == "竹香工艺封坛"
+
+
+def test_t7_dh_mix_service_mock(monkeypatch):
+    """DH 服务接受 dh_mix: 只出口播镜(durationSeconds=9.0≠总 17.7)"""
+    _patch_rule(monkeypatch)
+    monkeypatch.setenv("SV73_DH_MODE", "mock")
+    monkeypatch.setattr(dhmod, "DH_IMAGE",
+                         Path(sv73mod.__file__).parent.parent
+                         / "assets" / "ip" / "ip-square.png")
+    sb = _gen(template="dh_mix")
+    wav = dhmod.SV73_VIDEO_DIR / f"{sb['scriptId']}_tts.wav"
+    wav.write_bytes(b"RIFF")
+    built = Sv73DigitalHumanService().build(sb, wav)
+    assert built["engine"] == "mock"
+    assert built["durationSeconds"] == 9.0
+    assert built["durationSeconds"] != sb["totalDuration"]
+
+
+def test_t7_oral_scene_guard(monkeypatch):
+    """口播镜守卫: 零口播镜(vertical 剧本)→ ValueError"""
+    _patch_rule(monkeypatch)
+    from services.sv73_digital_human_service import _oral_scene
+    sb_vertical = _gen(template="vertical")
+    with pytest.raises(ValueError, match="口播镜"):
+        _oral_scene(sb_vertical)
+
+
+def test_t7_mix_plan_math(monkeypatch):
+    """compose_mix 编排数学: 注册表计划偏移 + 口播实际时长贴偏"""
+    _patch_rule(monkeypatch)
+    from services.sv73_render_service import Sv73RenderService
+    sb = _gen(template="dh_mix")
+    plan = Sv73RenderService.mix_plan(sb)
+    assert plan["durations"] == [9.0, 5.4, 4.5]
+    assert plan["offsets"] == [8.4, 13.2]
+    assert plan["total"] == 17.7
+    # 口播实际 9.8s(TTS 物理真值)→ 偏移整体后移防截断
+    plan2 = Sv73RenderService.mix_plan(sb, oral_duration=9.8)
+    assert plan2["offsets"] == [9.2, 14.0]
+    assert plan2["total"] == 18.5
+
+
+def test_t7_next_steps_dh_mix(monkeypatch):
+    """pipeline 指引: dh_mix 同获 GPU 轨口径+compose_mix 提示"""
+    _patch_rule(monkeypatch)
+    content = {"contentId": 97, "status": "pending",
+               "sv73": {"template": "dh_mix"}}
+    steps = Sv73PipelineService._next_steps(content, "douyin")
+    assert "build_dh_dev.py" in steps
+    assert "compose_mix" in steps

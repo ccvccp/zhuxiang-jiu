@@ -73,6 +73,23 @@ DEFAULT_DH_CMD = (
 # GPU 推理超时(单条 15s 口播 5090D 实测约 1-3 分钟; 留裕量防慢实例)
 DH_TIMEOUT_SECONDS = 900
 
+# 数字人模板族(2026-10-04 A1): dh_oral 单镜 15s / dh_mix 多镜混合
+# (口播 9s+卡片镜——本服务只出口播镜, 卡片由本地 compose_mix 合成)
+DH_TEMPLATES = ("dh_oral", "dh_mix")
+# 口播镜角色(dh_mix 的 dh_hook 与 dh_oral 同语义不同时长档)
+DH_ORAL_ROLES = ("dh_oral", "dh_hook")
+
+
+def _oral_scene(storyboard: dict) -> dict:
+    """取唯一口播镜(dh_oral/dh_hook; 恰一个, 否则 ValueError)"""
+    shots = [sc for sc in storyboard.get("scenes") or []
+             if sc.get("role") in DH_ORAL_ROLES]
+    if len(shots) != 1:
+        raise ValueError(
+            f"须恰有一个口播镜({'/'.join(DH_ORAL_ROLES)}), "
+            f"实际 {len(shots)} 个")
+    return shots[0]
+
 
 def dh_mode(mode: str | None = None) -> str:
     """SV73_DH_MODE(off|mock|real, 默认 off——生产铁律)
@@ -92,17 +109,22 @@ class Sv73DigitalHumanService:
     """dh_oral 模板视频主轨: IP 基准图 + TTS 音频 → 口播 mp4"""
 
     def build(self, storyboard: dict, tts_wav: Path) -> dict:
-        """storyboard(dh_oral)+TTS 音频 → 口播产物清单
+        """storyboard(dh_oral/dh_mix 口播镜)+TTS 音频 → 口播产物清单
+
+        dh_mix 多镜模板: 本服务只渲染唯一口播镜(dh_hook), 卡片镜
+        由 dh_batch 本地 compose_mix 合成(拆链铁律——GPU 机零
+        卡片渲染依赖)。
 
         Raises:
-            ValueError: 模板非 dh_oral / 音频缺失 / mode=off /
-                        mode=real 未配 SV73_SADTALKER_DIR
+            ValueError: 模板非数字人族/口播镜数≠1/音频缺失/
+                        mode=off / mode=real 未配 SV73_SADTALKER_DIR
         """
         tpl = (storyboard.get("template") or {}).get("name")
-        if tpl != "dh_oral":
+        if tpl not in DH_TEMPLATES:
             raise ValueError(
-                f"数字人轨仅服务 dh_oral 模板(当前 {tpl})——"
+                f"数字人轨仅服务 dh_oral/dh_mix 模板(当前 {tpl})——"
                 "零 GPU 模板走 Sv73RenderService")
+        oral = _oral_scene(storyboard)
         if not (tts_wav and Path(tts_wav).is_file()):
             raise ValueError(
                 f"TTS 音频缺失或不存在: {tts_wav}(先经 "
@@ -122,7 +144,8 @@ class Sv73DigitalHumanService:
             engine = "mock"
             logger.info("sv73_dh_mock script=%s image=%s", sid, DH_IMAGE)
             return self._result(storyboard, out_mp4, tts_wav,
-                                engine=engine, size_bytes=0)
+                                engine=engine, size_bytes=0,
+                                duration_seconds=oral["duration"])
         # mode=real: SadTalker GPU 推理
         if not SADTALKER_DIR:
             raise ValueError(
@@ -147,19 +170,28 @@ class Sv73DigitalHumanService:
                 f"{result.stderr.decode('utf-8', 'replace')[-400:]}")
         return self._result(storyboard, out_mp4, tts_wav,
                             engine=engine,
-                            size_bytes=out_mp4.stat().st_size)
+                            size_bytes=out_mp4.stat().st_size,
+                            duration_seconds=oral["duration"])
 
     @staticmethod
     def _result(storyboard: dict, video: Path, audio: Path,
-                engine: str, size_bytes: int) -> dict:
-        """产物清单(对齐 Sv73RenderService.build 返回结构)"""
+                engine: str, size_bytes: int,
+                duration_seconds: float | None = None) -> dict:
+        """产物清单(对齐 Sv73RenderService.build 返回结构)
+
+        durationSeconds: 口播镜时长(dh_mix ≠ storyboard.totalDuration
+        ——多镜总时长含卡片镜, 口播产物只计口播镜)
+        """
         return {
             "scriptId": storyboard["scriptId"],
             "video": str(video),
             "pages": [],          # PNG 主题卡由 render_pages 另产
             "audioTrack": str(audio),
             "sizeBytes": int(size_bytes),
-            "durationSeconds": storyboard["totalDuration"],
+            "durationSeconds": (
+                duration_seconds
+                if duration_seconds is not None
+                else storyboard["totalDuration"]),
             "engine": engine,     # sadtalker|mock
             "dhImage": str(DH_IMAGE),
         }

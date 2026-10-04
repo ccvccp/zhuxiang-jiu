@@ -55,11 +55,17 @@ class Sv73P2Service:
         if sv.get("learningFed"):
             raise ValueError("已回流过, 幂等不重复提交")
 
-        # 引流指标: 缺省经 36号 attract 归因聚合(shortCode)
+        # 引流指标: 缺省经 36号 attract 归因聚合(shortCode——点击/
+        # 注册/下单/GMV 全量自动, 2026-10-04 归因冷启动补全;
+        # 显式传参优先(人工修正通道))
+        m = await self.promo._link_metrics(
+            [content.get("shortCode", "")])
         if clicks is None:
-            clicks = (await self.promo._link_metrics(
-                [content.get("shortCode", "")])
-            ).get("clicks", 0)
+            clicks = m.get("clicks", 0)
+        if registrations is None:
+            registrations = m.get("registered", 0)
+        if orders is None:
+            orders = m.get("ordered", 0)
         clicks = int(clicks or 0)
 
         from services.sv73_scorer import factors_from_content

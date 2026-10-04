@@ -129,7 +129,10 @@ def test_t3_llm_overridden_by_registry(monkeypatch):
     fake = {
         "scenes": [
             {"role": "cover", "text": "超" * 30,
-             "voiceover": "词" * 200,
+             # (2026-10-04 A2 起 LLM 轨过 lint——超长截断样本改用
+             # 规范长文案, 保留"LLM 文案被采"的原断言口径)
+             "voiceover": ("家人们, 这瓶竹香酒是时间给的味道, "
+                           "口感层次分明, 回味悠长。" * 2),
              "highlightWords": ["长词" * 10] * 10,
              "duration": 99, "index": 7},
             {"role": "selling", "text": "竹香工艺封坛",
@@ -314,3 +317,90 @@ def test_t8_routes_mode_gate(monkeypatch):
     r = client.post("/api/sv73/script/generate", headers=admin,
                     json={"hotspot": HOTSPOT, "persona": "no-such"})
     assert r.status_code == 409
+
+
+# ------------------------------------------------------------
+# T9 分级生成路由(2026-10-04: 热点分值→B/A/S 模板)
+# ------------------------------------------------------------
+
+def test_t9_resolve_tier_template():
+    """分值三档边界: ≥80→S(dh_mix) / ≥60→A(dh_oral) / <60→B(vertical)"""
+    from services.sv73_script_service import resolve_tier_template
+    assert resolve_tier_template({"score": 92}) == ("dh_mix", "S")
+    assert resolve_tier_template({"score": 80}) == ("dh_mix", "S")
+    assert resolve_tier_template({"score": 79.9}) == ("dh_oral", "A")
+    assert resolve_tier_template({"score": 60}) == ("dh_oral", "A")
+    assert resolve_tier_template({"score": 59}) == ("vertical", "B")
+    assert resolve_tier_template({}) == ("vertical", "B")  # 缺省 0
+
+
+# ------------------------------------------------------------
+# T10 文案质量护栏(A2: 瑕疵词/单句长/叠字, LLM 轨重生成+回落)
+# ------------------------------------------------------------
+
+def test_t10_lint_texts_rules():
+    """lint 三规则命中 + 干净文案零违规"""
+    from services.sv73_script_service import lint_texts
+    assert any("好火" in f for f in lint_texts(
+        [{"role": "cover", "text": "x", "voiceover": "这个好火呀"}]))
+    assert any("单句" in f for f in lint_texts(
+        [{"role": "selling", "text": "x",
+          "voiceover": "今天给大家带来一款特别好的酒" + "字" * 15}]))
+    assert any("叠字" in f for f in lint_texts(
+        [{"role": "cover", "text": "x", "voiceover": "家人们看看看"}]))
+    assert lint_texts([{"role": "cover", "text": "竹香酒",
+                        "voiceover": "家人们, 这瓶竹香酒很棒。"}]) == []
+
+
+def test_t10_lint_retry_then_fallback(monkeypatch):
+    """LLM 带瑕疵词 → 重生成一次(仍瑕疵) → 回落 rule(文案 mock 化)"""
+    bad = {"scenes": [
+        {"role": "cover", "text": "国庆好火",
+         "voiceover": "国庆家宴好火, 家人们快看呀。",
+         "highlightWords": []},
+        {"role": "selling", "text": "竹香工艺",
+         "voiceover": "这瓶竹香酒好火, 口感很棒。",
+         "highlightWords": []},
+    ]}
+    calls = {"n": 0}
+
+    def fake_chat(self, system, user):
+        calls["n"] += 1
+        return (bad, "glm-4-flash")
+
+    monkeypatch.setattr(Sv73ScriptService, "_chat_json", fake_chat)
+    sb = _run(Sv73ScriptService().generate(dict(HOTSPOT)))
+    assert calls["n"] == 2            # 重生成恰好一次
+    assert sb["track"] == TRACK_RULE  # 仍瑕疵 → rule 回落
+    assert "好火" not in sb["scenes"][0]["voiceover"]
+
+
+def test_t10_lint_retry_success(monkeypatch):
+    """首答带瑕疵 → 重答干净 → 保留 LLM 轨"""
+    bad = {"scenes": [{"role": "cover", "text": "国庆好火",
+                       "voiceover": "国庆家宴好火呀。",
+                       "highlightWords": []}]}
+    good = {"scenes": [
+        {"role": "cover", "text": "国庆家宴",
+         "voiceover": "家人们, 国庆家宴备好酒。",
+         "highlightWords": []},
+        {"role": "selling", "text": "竹香工艺",
+         "voiceover": "这瓶竹香酒, 口感柔和有层次。",
+         "highlightWords": []}]}
+    seq = [bad, good]
+    monkeypatch.setattr(
+        Sv73ScriptService, "_chat_json",
+        lambda self, s, u: (seq.pop(0), "glm-4-flash"))
+    sb = _run(Sv73ScriptService().generate(dict(HOTSPOT)))
+    assert sb["track"] == "glm-4-flash"
+    assert sb["scenes"][0]["voiceover"] == "家人们, 国庆家宴备好酒。"
+
+
+def test_t10_rule_track_lint_clean(monkeypatch):
+    """rule 轨注册表文案自身 lint-clean(mock '好火'同源清理回归)"""
+    from services.sv73_script_service import lint_texts
+    _patch_rule(monkeypatch)
+    for tpl in ("vertical", "dh_oral", "dh_mix", "fast"):
+        sb = _run(Sv73ScriptService().generate(
+            dict(HOTSPOT), template=tpl))
+        assert lint_texts(sb["scenes"]) == [], tpl

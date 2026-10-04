@@ -57,6 +57,7 @@ ROLE_LABELS = {
     "action": "立即行动",
     "compliance": "健康提示",
     "dh_oral": "竹小妹口播",   # 数字人轨 P1: PNG 主题卡标签
+    "dh_hook": "竹小妹口播",   # dh_mix 多镜口播钩子(A1)
 }
 
 # P1-2 BGM 情绪档 → TTS 语速(48号 joyvoice MOOD_SPEED 同值锚定:
@@ -255,6 +256,132 @@ class Sv73RenderService:
                 f"{result.stderr.decode('utf-8', 'replace')[-400:]}")
         logger.info("sv73_video_composed -> %s (%s bytes)",
                     out_mp4, out_mp4.stat().st_size)
+        return out_mp4
+
+    # ---------- dh_mix 合成(口播 GPU 镜 + 卡片 Ken Burns) ----------
+
+    @staticmethod
+    def mix_plan(storyboard: dict,
+                 oral_duration: float | None = None) -> dict:
+        """dh_mix xfade 编排参数(纯函数——注册表逐镜时长口径)
+
+        oral_duration: 口播镜实际时长(ffprobe 物理真值, 缺省取
+        注册表计划值)——SadTalker 出片时长由 TTS 音频物理决定,
+        偏移须贴实际防 xfade 截断口播(计划值仅验收口径)。
+        """
+        durs = [float(sc["duration"])
+                for sc in storyboard["scenes"]]
+        if oral_duration and oral_duration > 0:
+            durs[0] = float(oral_duration)
+        fade = storyboard["template"]["fade"]
+        offsets: list[float] = []
+        total = durs[0]
+        for d in durs[1:]:
+            offsets.append(round(total - fade, 2))
+            total += d - fade
+        return {"durations": durs, "offsets": offsets,
+                "fade": fade, "total": round(total, 2)}
+
+    @staticmethod
+    def _probe_duration(mp4: Path) -> float | None:
+        """容器时长秒(ffprobe 优先; 便携版仅 ffmpeg.exe 时解析
+        `ffmpeg -i` stderr 的 Duration 行兜底; 双失败返回 None
+        ——回落注册表计划值)"""
+        import re
+        try:
+            ff = Path(_ffmpeg_bin())
+            probe = ff.with_name(
+                ff.name.replace("ffmpeg", "ffprobe"))
+            r = subprocess.run(
+                [str(probe), "-v", "error", "-show_entries",
+                 "format=duration", "-of",
+                 "default=nw=1:nk=1", str(mp4)],
+                capture_output=True, timeout=60)
+            return float(r.stdout.decode().strip())
+        except (ValueError, OSError, subprocess.TimeoutExpired):
+            pass
+        try:
+            r = subprocess.run(
+                [_ffmpeg_bin(), "-i", str(mp4)],
+                capture_output=True, timeout=60)
+            m = re.search(
+                r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)",
+                r.stderr.decode("utf-8", "replace"))
+            if m:
+                h, mnt, sec = m.groups()
+                return int(h) * 3600 + int(mnt) * 60 + float(sec)
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            pass
+        return None
+
+    def compose_mix(self, oral_mp4: Path, card_pages: list,
+                    storyboard: dict, out_mp4: Path) -> Path:
+        """dh_mix 成片合成: 口播镜(SadTalker 实拍含音轨)+卡片镜
+        (PNG 大字卡 zoompan 缓推) xfade 渐变链
+
+        - 口播镜尺寸/编码由 dh_batch._h264ize 预规整(1080×1920
+          avc1), 此处防御性再规整; 音轨=口播原声 apad 至总时长
+          (卡片段静音——对齐零 GPU 轨无声卡片同态)
+        - 卡片镜时长/过渡全注册表(sceneDurations 逐镜口径);
+          口播偏移贴 ffprobe 实际时长
+        """
+        tpl = storyboard["template"]
+        if tpl["name"] != "dh_mix":
+            raise ValueError(
+                f"compose_mix 仅服务 dh_mix 模板(当前 {tpl['name']})")
+        if not card_pages:
+            raise ValueError("dh_mix 缺卡片镜页面")
+        if len(card_pages) != len(storyboard["scenes"]) - 1:
+            raise ValueError(
+                f"卡片镜页数失配: {len(card_pages)} 页 / "
+                f"{len(storyboard['scenes']) - 1} 镜")
+        out_mp4 = Path(out_mp4)
+        out_mp4.parent.mkdir(parents=True, exist_ok=True)
+        w, h = tpl["pageW"], tpl["pageH"]
+        plan = self.mix_plan(
+            storyboard, self._probe_duration(Path(oral_mp4)))
+        fade = plan["fade"]
+
+        args = [_ffmpeg_bin(), "-y", "-i", str(oral_mp4)]
+        for p, d in zip(card_pages, plan["durations"][1:]):
+            args += ["-loop", "1", "-t", f"{d:.2f}",
+                     "-r", str(INPUT_FPS), "-i", str(p)]
+
+        parts = [
+            f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,"
+            f"crop={w}:{h},setsar=1,fps={INPUT_FPS},settb=AVTB[v0]"]
+        for i, d in enumerate(plan["durations"][1:], 1):
+            frames = max(2, int(d * INPUT_FPS))
+            parts.append(
+                f"[{i}:v]scale={w}:{h},setsar=1,"
+                f"zoompan=z='1+{ZOOM_MAX - 1:.2f}*on/{frames - 1}'"
+                f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+                f":d=1:s={w}x{h}:fps={INPUT_FPS},"
+                f"settb=AVTB[v{i}]")
+        prev = "[v0]"
+        for i, off in enumerate(plan["offsets"], 1):
+            nxt = f"[x{i}]"
+            parts.append(
+                f"{prev}[v{i}]xfade=transition=fade:"
+                f"duration={fade:.2f}:offset={off:.2f}{nxt}")
+            prev = nxt
+        parts.append(
+            f"{prev}format=yuv420p[v];"
+            f"[0:a]apad=whole_dur={plan['total']:.2f},"
+            f"atrim=0:{plan['total']:.2f}[a]")
+        fc = ";".join(parts)
+        args += ["-filter_complex", fc,
+                 "-map", "[v]", "-map", "[a]",
+                 "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                 "-r", str(INPUT_FPS), "-c:a", "aac",
+                 "-movflags", "+faststart", str(out_mp4)]
+        result = subprocess.run(args, capture_output=True, timeout=600)
+        if result.returncode != 0 or not out_mp4.is_file():
+            raise RuntimeError(
+                f"dh_mix 合成失败(exit={result.returncode}): "
+                f"{result.stderr.decode('utf-8', 'replace')[-400:]}")
+        logger.info("sv73_dh_mix_composed -> %s (%s bytes, total %.2fs)",
+                    out_mp4, out_mp4.stat().st_size, plan["total"])
         return out_mp4
 
     # ---------- TTS 配音轨(可选, 48号小竹语音) ----------

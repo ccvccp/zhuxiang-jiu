@@ -5,14 +5,24 @@
       python dh_batch.py --boot --sids s1,s2                 # 自动开机+跑批+自动关机
       python dh_batch.py --boot --pro --sids s1,s2           # Pro 实例全自动(API 开关机)
 
-链路(build_dh_dev 四步的拆链形态——GPU 机 import 巨网不可控的分段铁律):
+模板支持(2026-10-04 A1 起):
+  dh_oral  单镜 15s 口播(原形态)
+  dh_mix   多镜混合: 口播钩子 9s(GPU)+产品卡/合规卡(本地 Ken Burns
+           合成 compose_mix→{sid}_mix.mp4 为 attach 成片)
+
+周产量口径(2026-10-04 定标): 5 条/周——单次跑批 5 条一次开机
+连跑, 摊薄模型加载 60-90s(周中段可 --no-shutdown 补批)。
+
+链路(build_dh_dev 四步的拆链形式——GPU 机 import 巨网不可控的分段铁律):
   0.(--boot) AutoDL API 开机(adh_power on) → 轮询 SSH 就绪
   1. 拉生产 storyboard(SSH 容器管道取 token)
-  2. 本地 TTS(78号竹语; LLM_API_KEY 经生产容器管道注入, 不落盘)
+  2. 本地 TTS(78号竹语; LLM_API_KEY 经生产容器管道注入, 不落盘;
+     dh_mix 仅 TTS 口播镜 voiceover——全量拼接会拉长 GPU 出片)
   3. 算力机推理(分块 base64+md5 双端校验上传 wav/sb → importlib
      独立加载 sv73_digital_human_service → 5090D → {sid}_dh.mp4
      → 分块下载回本地)
-  4. attach 生产回填(POST /api/sv73/render/attach)
+  4. attach 生产回填(POST /api/sv73/render/attach; dh_mix 先本地
+     compose_mix 合成多镜成片)
   5.(默认) 远端 shutdown 自动关机(普通实例容器指令 / Pro 实例 API
     power_off)——按量计费形态下保持在线=持续扣费, 跑完即关;
     --no-shutdown 仅限同会话连续补批(用完手动关机止费)
@@ -77,8 +87,8 @@ def wallet_balance() -> float | None:
     return None
 
 ADH = {
-    "host": "connect.westd.seetacloud.com",
-    "port": 15639, "user": "root", "password": "oKvKX3BbXI7A",
+    "host": "connect.weste.seetacloud.com",
+    "port": 26657, "user": "root", "password": "/u9tQeN02hTs",
 }
 # 口播基准图: 本地(随代码版本) → 每次跑批前自动上传远端(md5 校验)
 DH_IMAGE_LOCAL = Path(__file__).resolve().parent / "assets" / "ip" / "zhuxiaomei_front.jpg"
@@ -274,16 +284,22 @@ def build_one(ssh, sid: str, token: str, key: str) -> bool:
         print("    拉取失败:", s, str(b)[:150])
         return False
     sb = b["data"]
-    if (sb.get("template") or {}).get("name") != "dh_oral":
-        print("    非 dh_oral:", (sb.get("template") or {}).get("name"))
+    tpl = (sb.get("template") or {}).get("name")
+    if tpl not in ("dh_oral", "dh_mix"):
+        print("    非数字人模板:", tpl)
         return False
 
-    # ② 本地 TTS(竹语)
+    # ② 本地 TTS(竹语)——dh_mix 仅口播镜(dh_hook): 全量拼接会把
+    #    卡片镜配音也送 GPU, 口播出片时长超计划致 xfade 编排漂移
     import os
     os.environ["LLM_API_KEY"] = key
     os.environ["SV73_TTS_MODE"] = "on"
+    tts_sb = sb
+    if tpl == "dh_mix":
+        tts_sb = {**sb, "scenes": [
+            sc for sc in sb["scenes"] if sc["role"] == "dh_hook"]}
     from services.sv73_render_service import Sv73RenderService
-    wav = Sv73RenderService()._tts_audio(sb)
+    wav = Sv73RenderService()._tts_audio(tts_sb)
     if wav is None or not Path(wav).is_file():
         print("    TTS 失败")
         return False
@@ -341,8 +357,18 @@ print('E2E PASS')
     run(ssh, f"find {REMOTE_ROOT} -mindepth 1 -maxdepth 1 -type d"
              f" -empty -delete")
 
+    # ③b dh_mix 多镜合成(本地): 口播镜(刚转码)+卡片镜 Ken Burns
+    #    → {sid}_mix.mp4 为 attach 成片(口播单镜留档不 attach)
+    rs = Sv73RenderService()
+    pages = rs.render_pages(sb)
+    if tpl == "dh_mix":
+        final = Path(f"sv73_videos/{sid}_mix.mp4")
+        rs.compose_mix(local_mp4, pages[1:], sb, final)
+        size = final.stat().st_size
+        print(f"    mix: {size}B")
+        local_mp4 = final
+
     # ④ attach
-    pages = Sv73RenderService().render_pages(sb)
     s, b = http("POST", "/api/sv73/render/attach",
                 {"scriptId": sid, "video": str(local_mp4.resolve()),
                  "pages": [str(Path(p).resolve()) for p in pages],

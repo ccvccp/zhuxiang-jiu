@@ -279,3 +279,28 @@ def test_r8_pages_distinct():
     pages = Sv73RenderService().render_pages(sb)
     blobs = [Path(p).read_bytes() for p in pages]
     assert len(set(blobs)) == len(blobs), "四页存在同图"
+
+
+# ------------------------------------------------------------
+# R9 分级路由 + 归因短链指引(2026-10-04)
+# ------------------------------------------------------------
+
+
+def test_r9_tier_routing(monkeypatch):
+    """template=tier 按热点分值选 B/A/S 档; real 态短码→nextSteps
+    带 /r/ 引流短链(归因冷启动载体指引)"""
+    monkeypatch.setenv("SV73_MODE", "real")
+    hi = _run(Sv73PipelineService().run(
+        {**HOTSPOT, "fingerprint": "fp-sv73-pipe-tier-s",
+         "title": "元旦跨年酒单", "score": 88},
+        template="tier"))
+    assert hi["tier"] == "S"
+    assert hi["storyboard"]["template"]["name"] == "dh_mix"
+    lo = _run(Sv73PipelineService().run(
+        {**HOTSPOT, "fingerprint": "fp-sv73-pipe-tier-b",
+         "title": "小雪节气谈酒", "score": 42},
+        template="tier"))
+    assert lo["tier"] == "B"
+    assert lo["storyboard"]["template"]["name"] == "vertical"
+    # 归因冷启动: real 态过闸建短码 → nextSteps 注入 rLink 指引
+    assert "zxjiu.com/r/" in hi["nextSteps"]
