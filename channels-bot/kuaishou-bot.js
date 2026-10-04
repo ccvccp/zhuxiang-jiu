@@ -164,6 +164,12 @@ const KS_PUBLISH_URL = process.env.KS_PUBLISH_URL
     }
   } catch (e) { LOG('title type err: ' + e.message); }
   try {
+    // AIGC 软声明(2026-10-05 双重实证: Web 发布页无主动声明入口——
+    // 人工未找到+bot 滚底扫描未命中; App 端「更多设置」可能有但
+    // Web RPA 不可达)——desc 尾部自动补自声明, 已含 AI 字样则不重复
+    const DECL = '（本视频由AI辅助制作）';
+    let descText = String(CFG.desc || '');
+    if (!/AI|人工智能/.test(descText)) descText += DECL;
     const descOk = await page.evaluate(() => {
       const fields = Array.from(document.querySelectorAll(
         'textarea, [contenteditable=true]'));
@@ -176,11 +182,11 @@ const KS_PUBLISH_URL = process.env.KS_PUBLISH_URL
       return true;
     });
     if (descOk) {
-      await page.keyboard.type(String(CFG.desc || ''), { delay: 30 });
-      LOG('desc typed (描述框聚焦后键入)');
+      await page.keyboard.type(descText, { delay: 30 });
+      LOG('desc typed (描述框聚焦后键入, 含 AIGC 软声明)');
     } else {
-      await page.keyboard.type(String(CFG.desc || ''), { delay: 30 });
-      LOG('desc typed via keyboard (默认焦点兜底)');
+      await page.keyboard.type(descText, { delay: 30 });
+      LOG('desc typed via keyboard (默认焦点兜底, 含 AIGC 软声明)');
     }
   } catch (e) { LOG('desc type err: ' + e.message); }
 
