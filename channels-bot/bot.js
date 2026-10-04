@@ -978,6 +978,82 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     process.exit(0);
   }
 
+  if (CFG.action === 'delone') {
+    // 删除指定时间戳的作品(重复双发清理): targetDate 精准匹配,
+    // 找不到匹配条目则不动任何东西(破坏性操作保守原则)
+    const target = String(CFG.targetDate || '');
+    if (!target) { LOG('delone 需要 targetDate(如 2026年10月04日 17:31)'); await browser.close(); process.exit(3); }
+    const gotoList = async () => {
+      try { await page.goto('https://channels.weixin.qq.com/platform/post/list', { waitUntil: 'domcontentloaded', timeout: 30000 }); return true; }
+      catch (e) { return false; }
+    };
+    if (!await gotoList()) { await sleep(2500); await gotoList(); }
+    await sleep(4000);
+    if (page.url().includes('login.html')) {
+      if (!(await ensureLogin(page, 10 * 60000))) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
+      await sleep(2000); await gotoList(); await sleep(5000);
+    }
+    let f = page.frames().find(x => x.url().includes('/micro/content/post'));
+    if (!f) { LOG('NO_LIST_FRAME'); await browser.close(); process.exit(3); }
+    await page.bringToFront();
+    await sleep(2000);
+    // 定位: 含 targetDate 文本的元素 → 向上找同时含「删除」按钮的作品卡片容器
+    const found = await f.evaluate((tg) => {
+      const all = Array.from(document.querySelectorAll('div,span'));
+      const dateEl = all.find(e => e.children.length === 0 && (e.innerText || '').trim() === tg);
+      if (!dateEl) return { ok: false, why: 'date-not-found' };
+      let card = dateEl;
+      for (let k = 0; k < 15 && card; k++) {
+        const del = Array.from(card.querySelectorAll('div,span,a,button'))
+          .find(e => e.children.length === 0 && (e.innerText || '').trim() === '删除');
+        if (del) {
+          const r = del.getBoundingClientRect();
+          const cr = card.getBoundingClientRect();
+          return { ok: true, x: r.x + r.width / 2, y: r.y + r.height / 2, card: { x: cr.x, y: cr.y, w: cr.width, h: cr.height } };
+        }
+        card = card.parentElement;
+      }
+      return { ok: false, why: 'del-btn-not-found' };
+    }, target);
+    LOG('delone target=' + target + ' -> ' + JSON.stringify(found));
+    if (!found.ok) { await browser.close(); process.exit(5); }
+    // 列表操作列 x~1090 曾实证视口外 — 滚动条目入视口再点
+    await f.evaluate((pt) => window.scrollBy(0, pt.y - 400), found).catch(() => {});
+    await sleep(800);
+    const cdp = await page.createCDPSession();
+    const iframeOff = await page.evaluate(() => {
+      const ifr = document.querySelector('iframe');
+      if (!ifr) return { x: 0, y: 0 };
+      const r = ifr.getBoundingClientRect();
+      return { x: r.x, y: r.y };
+    });
+    const px = iframeOff.x + found.x, py = iframeOff.y + found.y;
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: px, y: py, button: 'none', pointerType: 'mouse' });
+    await sleep(150);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: px, y: py, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+    await sleep(90);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: px, y: py, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+    LOG('cdpClick 删除 @' + Math.round(px) + ',' + Math.round(py));
+    await sleep(3000);
+    // 确认弹窗(层归属不定, 自动点击已实证不稳 2026-10-04): 混合模式 —
+    // bot 已点「删除」触发弹窗, 保持窗口等人工点弹窗确认(3 分钟),
+    // 轮询 target 消失即收口
+    LOG('=== 请在 Chrome 窗口点删除确认弹窗(等待 3 分钟) ===');
+    let gone = false;
+    const dl = Date.now() + 180 * 1000;
+    while (Date.now() < dl) {
+      await sleep(5000);
+      const raw2 = await f.evaluate(() => (document.body.innerText || '').slice(0, 6000)).catch(() => '');
+      if (!raw2.includes(target)) { gone = true; break; }
+    }
+    const raw = await f.evaluate(() => (document.body.innerText || '').slice(0, 6000)).catch(() => '');
+    const still = !gone && raw.includes(target);
+    LOG('DELONE_DONE target_still_exists=' + still);
+    fs.writeFileSync('channels_delone_after.txt', raw);
+    await browser.close();
+    process.exit(still ? 6 : 0);
+  }
+
   LOG('unknown action');
   await browser.close();
 })().catch(e => { LOG('ERR ' + (e && e.message || e)); process.exit(1); });
