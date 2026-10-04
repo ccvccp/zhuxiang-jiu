@@ -14,10 +14,33 @@
   color: $color-text-white;
 }
 
+// 品牌行: 标题 + 官网入口同行(2026-10-04 入口上移)
+.brandRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .brandTitle {
   font-size: $font-size-xxl;
   font-weight: $font-weight-bold;
   margin-bottom: $spacing-xs;
+}
+
+// 官网直达胶囊(融品牌绿底, 半透明白)
+.officialEntry {
+  flex-shrink: 0;
+  padding: 8rpx 20rpx;
+  border-radius: 999rpx;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.16);
+  color: $color-text-white;
+  font-size: $font-size-sm;
+  letter-spacing: 2rpx;
+
+  &:active {
+    opacity: 0.7;
+  }
 }
 
 .brandDesc {

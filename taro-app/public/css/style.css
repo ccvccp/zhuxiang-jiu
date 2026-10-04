@@ -132,6 +132,32 @@ input, textarea, select {
     height: 80px;
 }
 
+/* 返回商城按钮(2026-10-04: 移动端官网从商城 SPA 进入的回路; PC 官网
+   有完整导航不需要, 仅移动端显示) */
+.back-to-mall {
+    display: none;
+    width: 34px;
+    height: 34px;
+    margin-right: 10px;
+    border-radius: 50%;
+    border: 1px solid rgba(53, 92, 68, 0.35);
+    background: rgba(53, 92, 68, 0.06);
+    color: #355c44;
+    font-size: 20px;
+    line-height: 1;
+    padding: 0;
+    flex-shrink: 0;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+}
+
+@media (max-width: 768px) {
+    .back-to-mall {
+        display: inline-flex;
+    }
+}
+
 .logo {
     display: flex;
     align-items: center;
@@ -1138,12 +1164,12 @@ input, textarea, select {
 .service-entries {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 20px;
+    gap: 16px;
 }
 
 .service-entry {
     background: #fff;
-    padding: 32px 20px;
+    padding: 22px 14px;
     border-radius: var(--radius-lg);
     text-align: center;
     box-shadow: var(--shadow-sm);
@@ -1168,11 +1194,11 @@ input, textarea, select {
 }
 
 .service-entry .icon {
-    width: 64px;
-    height: 64px;
+    width: 56px;
+    height: 56px;
     background: rgba(74, 124, 89, 0.1);
     border-radius: 50%;
-    margin: 0 auto 16px;
+    margin: 0 auto 12px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1181,13 +1207,22 @@ input, textarea, select {
     transition: var(--transition);
 }
 
+/* 金刚区图片图标(2026-10-02 竹绿扁平图标): 圆底改为承托图片, 微圆角 */
+.service-entry .icon img {
+    width: 46px;
+    height: 46px;
+    border-radius: 12px;
+    display: block;
+    object-fit: cover;
+}
+
 .service-entry h3 {
-    font-size: 16px;
-    margin-bottom: 6px;
+    font-size: 14px;
+    margin-bottom: 4px;
 }
 
 .service-entry p {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--color-text-light);
     transition: var(--transition);
 }

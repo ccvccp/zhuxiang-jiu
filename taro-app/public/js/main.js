@@ -73,6 +73,16 @@ function showToast(msg) {
 }
 
 // ---------- 渲染头部导航 ----------
+// 返回商城(移动端官网从商城 SPA 进入的回路): 优先回上一页(从商城
+// 来→回商城 SPA), 无历史(直接打开/新标签)→根路径按 UA 分流兜底
+function goBackToMall() {
+    const before = location.href;
+    history.back();
+    setTimeout(() => {
+        if (location.href === before) { location.href = '/'; }
+    }, 350);
+}
+
 function renderHeader(active = '') {
     const navItems = [
         { name: '首页', url: 'official.html', key: 'home' },
@@ -92,6 +102,7 @@ function renderHeader(active = '') {
     </div>
     <header class="header">
         <div class="container header-inner">
+            <button class="back-to-mall" onclick="goBackToMall()" aria-label="返回商城">‹</button>
             <a href="official.html" class="logo">
                 <span class="logo-icon">竹</span>
                 <span class="logo-text">竹香酒<small>ZHUXIANG JIU</small></span>

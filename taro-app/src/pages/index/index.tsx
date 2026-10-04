@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, Image } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import styles from './index.module.scss';
@@ -347,7 +347,16 @@ const IndexPage: React.FC = () => {
     <View className={styles.page}>
       {/* 品牌头部 */}
       <View className={styles.header}>
-        <View className={styles.brandTitle}>竹香酒</View>
+        <View className={styles.brandRow}>
+          <View className={styles.brandTitle}>竹香酒</View>
+          {/* 官网直达(2026-10-04 入口上移: 左下浮标撤除, 品牌名右侧内联) */}
+          <View
+            className={styles.officialEntry}
+            onClick={() => { window.location.href = '/official.html'; }}
+          >
+            🏛 官网
+          </View>
+        </View>
         <View className={styles.brandDesc}>竹韵佳酿 · 雅致生活</View>
         <View className={styles.warning}>过量饮酒有害健康</View>
       </View>
