@@ -41,15 +41,17 @@ from services.promo_service import PromoService
 
 logger = logging.getLogger(__name__)
 
-# 发布平台(36号 RPA_PLATFORMS 成员; 2026-09-30 P2 平台扩展
-# 四平台全开——36号 rpa_pending 清单/回执闭环平台无关)
+# 发布平台(36号 RPA_PLATFORMS 成员; 2026-09-30 P2 平台扩展四平台
+# 全开——36号 rpa_pending 清单/回执闭环平台无关;
+# 2026-10-05 快手入列: kuaishou-bot E2E 首发实证, video 直传,
+# AIGC 软声明由 bot 在 desc 尾部自动追加)
 SV73_PLATFORMS = ("wechat_channels", "douyin",
-                  "xiaohongshu", "weibo")
+                  "xiaohongshu", "weibo", "kuaishou")
 DEFAULT_PLATFORM = "wechat_channels"
 
 # 平台内容形态注册表(发布执行层口径)
-#   video: mp4 直传(bot 实证: channels/douyin; xhs 视频笔记
-#          ——发布流待登录态联调, 形态支持)
+#   video: mp4 直传(bot 实证: channels/douyin/kuaishou; xhs 视频
+#          笔记——发布流待登录态联调, 形态支持)
 #   card : 平台无视频通道——降级图文卡(封面 PNG+文案);
 #          weibo-cli C 系无视频命令(2026-09-27 实证), 走
 #          36号 coverUrl 封面 + upload_pic/upload_url_text 三步
@@ -58,6 +60,7 @@ SV73_PLATFORM_FORMS = {
     "douyin": "video",
     "xiaohongshu": "video",
     "weibo": "card",
+    "kuaishou": "video",
 }
 
 # 品类自动档(P1: category="auto" 经匹配引擎推荐)
@@ -295,7 +298,11 @@ class Sv73PipelineService:
                 "(xhs-bot.js 视频笔记——21 轮全自动闭环: 转码绿标"
                 "等待+CDP pierce 穿透 shadow 定位发布钮+published=true"
                 "特征收口)")
-        return base + f"(channels/douyin-bot RPA {form} 直传)"
+        bot_map = {"douyin": "douyin-bot",
+                   "kuaishou": "kuaishou-bot",
+                   "wechat_channels": "bot.js"}
+        bot = bot_map.get(platform, "douyin-bot")
+        return base + f"(channels/{bot} RPA {form} 直传)"
 
     # ---------- 产物挂载(分段语义: 开发机渲染 → 元数据回填) ----------
 

@@ -66,7 +66,7 @@ CHANNEL_MODE_UNKNOWN = "unknown"
 CHANNEL_MODE_RPA_PENDING = "rpa_pending"
 CHANNEL_MODE_RPA = "rpa"   # RPA 执行完成态(回执登记成功)
 RPA_PLATFORMS = {"xiaohongshu", "douyin", "weibo",
-                 "wechat_channels"}
+                 "wechat_channels", "kuaishou"}  # 2026-10-05 快手入列(kuaishou-bot E2E 实证)
 
 # ============================================================
 # 平台认证风格(2026-09-02 实测校准)
