@@ -1333,7 +1333,10 @@ class XiaozhuService:
         from services.local_guardrail_service import (
             get_guardrail,
         )
-        _gr = get_guardrail().check_input(resolved)
+        _gr = get_guardrail().check_input(
+            resolved,
+            {"sessionId": session.get("sessionId", ""),
+             "memberId": session.get("memberId", 0)})
         if _gr["blocked"]:
             return await self._save_turn(
                 session, channel, text, "blocked",
@@ -2219,7 +2222,12 @@ class XiaozhuService:
                 get_guardrail,
             )
             _reply = get_guardrail() \
-                .filter_output(_reply)
+                .filter_output(
+                    _reply,
+                    {"sessionId":
+                         session.get("sessionId", ""),
+                     "memberId":
+                         session.get("memberId", 0)})
             return await self._save_turn(
                 session, channel, text, "chat",
                 {"reply": _reply, "card": None},

@@ -4,6 +4,16 @@
 DFA(Trie) O(N) 引擎 + 酒类/招商场景专属词库(一级拦截/
 二级替换/分类话术) + Redis 热更新。
 
+2026-10-04 运营后台升级(用户方案二期):
+    - 白名单豁免(allowlist): 命中敏感词后若上下文含豁免
+      模式则放行("第一家店"豁免"第一"式误杀治理)
+    - 命中日志(gr_hit_log): 输入拦截/输出替换 fire-and-forget
+      留痕(sessionId/memberId/direction/原文脱敏)——Evolution
+      Engine 数据源, 后台打标误杀/确认违规
+    - 热更新双通道: Pub/Sub(zhuxiang:guardrail:update 即时
+      重建) + 60s 版本轮询兜底(丢消息自愈)——此前 reload
+      无调用点的洞一并补上
+
 架构定位(方案校准):
     本引擎承接「关键词过滤 + 格式脱敏」职能(输入端前置
     +输出端后验, 微秒级); 语义理解型合规(暗示疗效/多轮
@@ -20,13 +30,14 @@ DFA(Trie) O(N) 引擎 + 酒类/招商场景专属词库(一级拦截/
     二级替换(replacemap, 输出端): 广告法绝对化用语/
         价格敏感/加盟夸大 → 合规话术(不阻断)
     PII 脱敏: 沿用 xiaozhu_service.mask_pii(已有手机/
-        卡号/身份证正则——落库前红线, 不在本引擎重复)
+        卡号/身份证正则——落库前红线, 不在本引擎重复;
+        命中日志原文仅做手机号快速脱敏)
 
 热更新:
     Redis zhuxiang:xiaozhu:guardrail:rules = JSON
-    {version, blocklist, replacemap, block_responses};
-    版本变更时进程内重建 DFA(构建 ~ms 级); 无键用内置
-    默认词库——运营后台改词库零重启生效。
+    {version, blocklist, replacemap, block_responses,
+     allowlist}; 版本变更时进程内重建 DFA(构建 ~ms 级);
+    无键用内置默认词库——运营后台改词库零重启生效。
 
 性能: DFA 查询 O(len(text)) 与词库规模无关(对比词表
     in 全扫 O(N×M)); 拦截决策 <1ms, 零 Token 成本。
@@ -41,6 +52,8 @@ logger = logging.getLogger("local_guardrail")
 
 _REDIS_RULES_KEY = \
     "zhuxiang:xiaozhu:guardrail:rules"
+_UPDATE_CHANNEL = "zhuxiang:guardrail:update"
+_RELOAD_POLL_SEC = 60
 
 # ---------------------------------------------------------------------------
 # 内置默认词库(2026-10-04 v1.0.0——运营可经 Redis 全量覆盖)
@@ -109,19 +122,29 @@ DEFAULT_REPLACEMAP = {
 # 字母数字——"未 成 年"/"未*成*年"均命中), 统一小写
 _STRIP_RE = re.compile(r"[^\u4e00-\u9fffa-z0-9]")
 
+# 命中日志原文快速脱敏(手机号; 完整 PII 脱敏在
+# xiaozhu_service.mask_pii 落库红线, 此处仅日志面)
+_PHONE_RE = re.compile(r"1[3-9]\d{9}")
+
 
 class LocalGuardrail:
     """DFA 本地合规引擎(进程内单例语义; 词库热更新自动重建)"""
 
     def __init__(self, blocklist: dict | None = None,
                  replacemap: dict | None = None,
-                 responses: dict | None = None):
+                 responses: dict | None = None,
+                 allowlist: dict | None = None):
         self._blocklist = dict(blocklist
                                or DEFAULT_BLOCKLIST)
         self._replacemap = dict(replacemap
                                 or DEFAULT_REPLACEMAP)
         self._responses = dict(responses
                                or DEFAULT_BLOCK_RESPONSES)
+        # 白名单豁免: 敏感词→[豁免模式](运营后台维护,
+        # 命中后上下文含豁免模式则放行——误杀治理)
+        self._allowlist: dict[str, list[str]] = {
+            str(w): list(ps) for w, ps in
+            (allowlist or {}).items()}
         # 词→分类倒排(拦截命中时归因分类)
         self._word_cat: dict[str, str] = {}
         for cat, words in self._blocklist.items():
@@ -165,43 +188,142 @@ class LocalGuardrail:
                     return text[i:j]
         return None
 
+    def _dfa_search_all(self,
+                        text: str) -> list[str]:
+        """全部命中词(去重保序)——白名单逐词豁免判定用"""
+        n = len(text)
+        seen: list[str] = []
+        for i in range(n):
+            node = self._dfa
+            j = i
+            while j < n:
+                node = node.get(text[j])
+                if node is None:
+                    break
+                j += 1
+                if "" in node:
+                    w = text[i:j]
+                    if w not in seen:
+                        seen.append(w)
+        return seen
+
+    def _is_allowed(self, word: str,
+                    original: str,
+                    cleaned: str) -> bool:
+        """白名单豁免: 命中词的豁免模式出现在原文或清洗
+        文本中即放行(豁免词本身也做变体穿透——豁免模式
+        清洗后比对, "第 一 家 店"同样豁免)"""
+        patts = self._allowlist.get(word)
+        if not patts:
+            return False
+        for p in patts:
+            p_clean = _STRIP_RE.sub(
+                "", str(p)).lower()
+            if (p in original
+                    or (p_clean and p_clean in cleaned)):
+                return True
+        return False
+
+    # ------------------------------------------------------------
+    # 命中日志(fire-and-forget——仅拦截/替换发生时; 无事件
+    # 循环的纯同步调用场景静默跳过, 如单元测试)
+    # ------------------------------------------------------------
+
+    def _log_hit(self, *, direction: str,
+                 rule_type: str, word: str,
+                 category: str, original: str,
+                 processed: str,
+                 context: dict | None) -> None:
+        ctx = context or {}
+        record = {
+            "traceId": ctx.get("traceId", ""),
+            "sessionId": ctx.get("sessionId", ""),
+            "memberId": ctx.get("memberId", 0),
+            "direction": direction,
+            "ruleWord": word,
+            "category": category,
+            "ruleType": rule_type,
+            "originalText": _PHONE_RE.sub(
+                "1**********", str(original)[:500]),
+            "processedText": str(processed)[:500],
+        }
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._write_hit(record))
+
+    @staticmethod
+    async def _write_hit(record: dict) -> None:
+        try:
+            from repositories.guardrail_repository \
+                import get_guardrail_repo
+            await get_guardrail_repo().log_hit(record)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "guardrail_hit_log_skip: %s", exc)
+
     # ------------------------------------------------------------
     # 对外接口
     # ------------------------------------------------------------
 
-    def check_input(self, text: str) -> dict:
+    def check_input(self, text: str,
+                    context: dict | None = None) -> dict:
         """输入端前置校验(<1ms)
+
+        context(可选, 命中日志归因用): {sessionId,
+        memberId, traceId}
 
         Returns: {"blocked", "category", "word",
                   "response", "sanitized"}
             blocked=True → 拦截, response=分类话术
         """
-        cleaned = _STRIP_RE.sub(
-            "", str(text or "")).lower()
-        hit = self._dfa_search(cleaned)
-        if hit:
+        raw = str(text or "")
+        cleaned = _STRIP_RE.sub("", raw).lower()
+        # 全量命中→逐词白名单豁免→首个未豁免词拦截
+        for hit in self._dfa_search_all(cleaned):
+            if self._is_allowed(hit, raw, cleaned):
+                continue
             cat = self._word_cat.get(hit, "default")
             logger.info(
                 "voice48_guardrail_block category=%s "
                 "word=%s", cat, hit)
+            response = self._responses.get(
+                cat, self._responses["default"])
+            self._log_hit(
+                direction="INPUT", rule_type="BLOCK",
+                word=hit, category=cat, original=raw,
+                processed=response, context=context)
             return {
                 "blocked": True,
                 "category": cat,
                 "word": hit,
-                "response": self._responses.get(
-                    cat, self._responses["default"]),
+                "response": response,
                 "sanitized": "",
             }
         return {"blocked": False, "category": "",
                 "word": "", "response": "",
-                "sanitized": str(text or "")}
+                "sanitized": raw}
 
-    def filter_output(self, text: str) -> str:
-        """输出端二级替换(广告法/价格/加盟夸大——不阻断)"""
+    def filter_output(self, text: str,
+                      context: dict | None = None) -> str:
+        """输出端二级替换(广告法/价格/加盟夸大——不阻断)
+
+        替换发生时留痕(direction=OUTPUT, ruleType=REPLACE)
+        供运营审计输出面替换密度。
+        """
         out = str(text or "")
+        hit_words: list[str] = []
         for word, repl in self._replacemap.items():
             if word in out:
                 out = out.replace(word, repl)
+                hit_words.append(word)
+        if hit_words:
+            self._log_hit(
+                direction="OUTPUT", rule_type="REPLACE",
+                word="|".join(hit_words), category="",
+                original=str(text or ""),
+                processed=out, context=context)
         return out
 
     # ------------------------------------------------------------
@@ -231,12 +353,14 @@ class LocalGuardrail:
             blocklist = data.get("blocklist")
             replacemap = data.get("replacemap")
             responses = data.get("block_responses")
+            allowlist = data.get("allowlist")
             fresh = LocalGuardrail(
                 blocklist=blocklist or DEFAULT_BLOCKLIST,
                 replacemap=replacemap
                 or DEFAULT_REPLACEMAP,
                 responses=responses
-                or DEFAULT_BLOCK_RESPONSES)
+                or DEFAULT_BLOCK_RESPONSES,
+                allowlist=allowlist or {})
             fresh._rules_version = version
             # 原子替换 self 状态(引用互换——并发读者安全)
             self._blocklist = fresh._blocklist
@@ -244,11 +368,13 @@ class LocalGuardrail:
             self._responses = fresh._responses
             self._word_cat = fresh._word_cat
             self._dfa = fresh._dfa
+            self._allowlist = fresh._allowlist
             self._rules_version = version
             logger.info(
                 "voice48_guardrail_rules_reloaded "
-                "version=%s block_words=%s",
-                version, len(self._word_cat))
+                "version=%s block_words=%s allow_words=%s",
+                version, len(self._word_cat),
+                len(self._allowlist))
             return True
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -267,3 +393,64 @@ def get_guardrail() -> LocalGuardrail:
 async def reload_guardrail() -> bool:
     """热更新入口(管理端/巡检调用)"""
     return await _guardrail.reload_if_updated()
+
+
+# ------------------------------------------------------------
+# 热更新监听(Pub/Sub 即时 + 轮询兜底; 惯例 A scheduler)
+# ------------------------------------------------------------
+
+_reload_task: asyncio.Task | None = None
+
+
+async def _reload_loop() -> None:
+    """订阅发布广播即时重建; 兜底每 60s 版本轮询自愈
+
+    内存模式(测试)无 Redis——纯轮询跳过即可(引擎用内置
+    词库, 测试自行构造实例)。
+    """
+    pubsub = None
+    client = None
+    from repositories.backend import (
+        is_redis_mode, get_redis_client,
+    )
+    if is_redis_mode():
+        try:
+            client = await get_redis_client()
+            pubsub = client.pubsub()
+            await pubsub.subscribe(_UPDATE_CHANNEL)
+            logger.info("guardrail_listener_subscribed "
+                        "channel=%s", _UPDATE_CHANNEL)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "guardrail_listener_sub_fail: %s", exc)
+            pubsub = None
+    while True:
+        try:
+            if pubsub is not None:
+                msg = await pubsub.get_message(
+                    ignore_subscribe_messages=True,
+                    timeout=_RELOAD_POLL_SEC)
+                if msg:
+                    await _guardrail.reload_if_updated()
+                    continue
+            else:
+                await asyncio.sleep(_RELOAD_POLL_SEC)
+            # 超时窗口(=轮询周期)兜底校验一次版本
+            await _guardrail.reload_if_updated()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "guardrail_listener_tick_fail: %s", exc)
+            await asyncio.sleep(_RELOAD_POLL_SEC)
+
+
+def start_guardrail_listener() -> None:
+    """幂等启动热更新监听(main startup 挂载)"""
+    global _reload_task
+    if _reload_task is not None \
+            and not _reload_task.done():
+        return
+    _reload_task = asyncio.get_event_loop()\
+        .create_task(_reload_loop())
+    logger.info("guardrail_listener_started")

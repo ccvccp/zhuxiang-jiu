@@ -408,6 +408,12 @@ register_sv73_routes(app)
 from routes.nexus74_routes import register_nexus74_routes
 register_nexus74_routes(app)
 
+# 小竹合规引擎运营后台(2026-10-04 用户方案二期: 规则CRUD/
+# 白名单豁免/命中打标闭环/发布热更/测试沙箱)
+from routes.guardrail_admin_routes import (
+    register_guardrail_admin_routes)
+register_guardrail_admin_routes(app)
+
 # AI智能系统升级决策(61号)
 from routes.dm61_routes import register_dm61_routes
 register_dm61_routes(app)
@@ -613,6 +619,17 @@ async def _on_startup():
     from services.nexus74_scheduler import (
         start_scheduler as start_nexus74_scan)
     start_nexus74_scan()
+    # 小竹合规引擎: 词库 seed(幂等)+热更新监听(Pub/Sub 即时
+    # +60s 轮询兜底——补 reload 无调用点的洞, 2026-10-04)
+    from repositories.guardrail_repository import (
+        get_guardrail_repo as _gr_repo)
+    try:
+        await _gr_repo().ensure_seeded()
+    except Exception as _exc:  # noqa: BLE001
+        print(f"[startup] guardrail seed skip: {_exc}")
+    from services.local_guardrail_service import (
+        start_guardrail_listener)
+    start_guardrail_listener()
     # 41号·AI智能代驾: 学习回流(RIDE_LEARNING_AUTO=off 可关闭)
     from services.ride_scheduler import start_learning_scheduler as start_ride_learning
     start_ride_learning()
