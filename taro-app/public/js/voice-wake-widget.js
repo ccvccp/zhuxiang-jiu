@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=95";
+  var VER = "v=96";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -818,14 +818,20 @@
     }, 600);
   });
 
+  /* 握手单飞锁(2026-10-04 连接风暴根治): preconnect 只查
+     preWs(已入池)——握手期 preWs 仍空, 退避重试再建新连接,
+     先入池者之外的成孤儿连接堆积(容器重启日实测 4 连并发,
+     音频流互踩识别为空)。armed 入池/onclose 任一出口解锁 */
+  var preConnecting = false;
   function preconnect() {
-    if (preWs || !wakeOn() || !authToken()) { return; }
+    if (preWs || preConnecting || !wakeOn() || !authToken()) { return; }
     var proto = location.protocol === "https:" ? "wss://" : "ws://";
     var ws;
     try {
       ws = new WebSocket(proto + location.host + "/api/xiaozhu/ws/asr");
       ws.binaryType = "arraybuffer";
-    } catch (e) { return; }
+    } catch (e) { preConnecting = false; return; }
+    preConnecting = true;
     ws._xzV2 = true;
     ws.onopen = function () {
       try {
@@ -839,6 +845,7 @@
     ws.onclose = function () {
       if (preWs === ws) { preWs = null; stopPing(); }
       if (eng.ws === ws) { teardownSeg(); }
+      preConnecting = false;  /* 握手出口解锁(失败/正常关) */
       /* 前台断连自动重建(带退避): 网络抖动/nginx 超时拆连接后
          池空——下一段虽可临时建连, 但 VAD 不起段的哑引擎场景
          需要连接层主动自愈 */
@@ -860,7 +867,7 @@
           try { ws.send(JSON.stringify({ type: "arm", wakeword: getWord() })); }
           catch (ex) { teardownSeg(); }
         } else if (!preWs) {
-          preWs = ws; startPing();  /* 预热完成入池 */
+          preWs = ws; preConnecting = false; startPing();  /* 预热完成入池(握手锁解锁) */
         }
       } else if (m.type === "ready") {
         eng.wsReady = true;

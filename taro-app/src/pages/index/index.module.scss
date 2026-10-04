@@ -555,6 +555,9 @@
 }
 
 // 小竹语音购物悬浮入口(48号·右下角)
+// 2026-10-04 移动端整合: 移动隐藏(右下唤醒球为统一入口——点击
+// 可开全功能语音面板, 双球并排拥挤且麦克风多实例抢占放大识别
+// 抖动); PC 屏宽保留
 .voiceFab {
   position: fixed;
   right: $page-padding;
@@ -573,6 +576,10 @@
 
   &:active {
     transform: scale(0.93);
+  }
+
+  @media (max-width: 767px) {
+    display: none;
   }
 }
 
