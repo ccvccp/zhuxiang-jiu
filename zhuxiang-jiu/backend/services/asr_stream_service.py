@@ -112,6 +112,12 @@ class AsrStreamSession:
         self._failed = ""
         self._started = asyncio.Event()
         self._done = asyncio.Event()
+        # ready 前音频缓冲(2026-10-06 唤醒迟缓修复): v2 协议
+        # arm→建流→ready 约 1s 窗口内用户已开口——唤醒词短促,
+        # 前部音频被丢 → ASR 无 partial → final 空转写(text=None)
+        # → 唤醒多次才成功(22:35:12 arm→22:35:14 None 实证,
+        # 24h 内 9/20 段空转写); started 后统一补投, 零客户端改动
+        self._pending: list[bytes] = []
 
     @property
     def failed(self) -> str:
@@ -210,6 +216,7 @@ class AsrStreamSession:
                 ev = (m.get("header") or {}).get("event")
                 if ev == "task-started":
                     self._started.set()
+                    await self._flush_pending()
                 elif ev == "result-generated":
                     payload = m.get("payload") or {}
                     sentence = (payload.get("output") or {}
@@ -237,18 +244,43 @@ class AsrStreamSession:
     async def feed(self, pcm: bytes) -> None:
         """转发音频二进制帧(16k 16bit mono PCM, 段内专用连接)
 
-        2026-10-03 晚高峰回归加固: 发送失败(1007 断连/超时)时
-        置 _failed 并拆除连接——原先只 warning 吞掉, 段中死连接
-        要拖到 finish 的 8s done 超时才暴露, H5 回退整段轨的
-        error 事件晚到; 快速置败让 finish 立即走 fallback。"""
-        if self._ws is not None and self._started.is_set() and pcm:
-            try:
-                await self._ws.send(pcm)
-            except Exception as exc:
-                logger.warning("stream_feed_failed: %s", exc)
-                if not self._done.is_set():
-                    self._failed = str(exc)
-                    self._done.set()
+        ready(task-started)前缓冲不丢(2026-10-06 唤醒迟缓修复,
+        见 __init__ 注记); 2026-10-03 晚高峰回归加固: 发送失败
+        (1007 断连/超时)时置 _failed 并拆除连接——原先只 warning
+        吞掉, 段中死连接要拖到 finish 的 8s done 超时才暴露, H5
+        回退整段轨的 error 事件晚到; 快速置败让 finish 立即走
+        fallback。"""
+        if self._ws is None:
+            return
+        if not self._started.is_set():
+            if pcm:   # 缓冲保护: 超限丢最旧(段生命周期内常态 <64KB)
+                self._pending.append(pcm)
+                if sum(len(b) for b in self._pending) > 512 * 1024:
+                    self._pending.pop(0)
+            return
+        if not pcm:
+            return
+        try:
+            await self._ws.send(pcm)
+        except Exception as exc:
+            logger.warning("stream_feed_failed: %s", exc)
+            if not self._done.is_set():
+                self._failed = str(exc)
+                self._done.set()
+
+    async def _flush_pending(self) -> None:
+        """task-started 后补投 ready 前缓冲的音频(唤醒词前部)"""
+        if not self._pending:
+            return
+        buf = b"".join(self._pending)
+        self._pending = []
+        try:
+            await self._ws.send(buf)
+        except Exception as exc:
+            logger.warning("stream_flush_failed: %s", exc)
+            if not self._done.is_set():
+                self._failed = str(exc)
+                self._done.set()
 
     async def finish(self, timeout: float = 8) -> str | None:
         """finish-task → 等终态, 返回最终文本(失败/空返回 None)"""
