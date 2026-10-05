@@ -815,3 +815,99 @@ def test_t21_collect_endpoint(_skill_dirs, monkeypatch):
     r = client.post("/api/v1/resonance/collect", json=body)
     assert r.status_code == 409
     monkeypatch.delenv("AGENT75_RESONANCE_KILL")
+
+
+# ------------------------------------------------------------
+# RA-P2(2026-10-05): 决策接线(安抚注入/决策清单/连击进化提议)
+# ------------------------------------------------------------
+
+from services.agent75_resonance_service import (  # noqa: E402
+    ResonanceService as _RS)
+
+
+def _mk_session(rs, sid, user_id, events):
+    return rs.run_session(sid, events, user_id=user_id)
+
+
+def _frustrated_events(sid):
+    # error+retry → frustration 1.0 严格占优(避开与困惑平手)
+    return [_ev("error", session=sid), _ev("click", session=sid, retry=True),
+            _ev("scroll", session=sid)]
+
+
+def test_t22_should_comfort_and_decisions(_skill_dirs):
+    rs = _RS()
+    # u_fru 上会话挫败 / u_ok 愉悦 / 陌生人 → 判定三态
+    _mk_session(rs, "task_t_f1", "u_fru", _frustrated_events("task_t_f1"))
+    _mk_session(rs, "task_t_f2", "u_ok",
+                [_ev("complete", session="task_t_f2"),
+                 _ev("long_stay", session="task_t_f2")])
+    assert rs.should_comfort("u_fru") is True
+    assert rs.should_comfort("u_ok") is False
+    assert rs.should_comfort("u_nope") is False
+    assert rs.should_comfort(None) is False
+    # 决策清单: 安抚类置顶 + 字段齐
+    rows = rs.recent_decisions(10)
+    assert rows, "决策清单为空"
+    top = rows[0]
+    assert {"session_id", "emotion", "strategy", "ui_layout",
+            "incentive", "incentive_message"} <= set(top)
+    support_rows = [r for r in rows if r.get("incentive") == "support"]
+    assert support_rows and rows.index(support_rows[0]) < \
+        next(i for i, r in enumerate(rows) if r.get("incentive") != "support")
+
+
+def test_t23_comfort_injection(_skill_dirs, monkeypatch):
+    class ComfortGW(MockGateway):
+        def __init__(self):
+            super().__init__()
+            self.prompts = []
+
+        def call(self, model_id, system, user):
+            if model_id != "glm-flash":
+                self.prompts.append(system)
+            return super().call(model_id, system, user)
+
+    _RS().run_session(
+        "task_t_cf1", [_ev("error"), _ev("click", retry=True)],
+        user_id="u_sad")
+
+    gw = ComfortGW()
+    task = WebsiteAgentOrchestrator(gw).run("帮帮我", user_id="u_sad")
+    assert task.status == "completed"
+    assert task.execution_trace[1].get("comfort") is True
+    assert any("暖心话" in p for p in gw.prompts)
+
+    # 愉悦用户/无用户 → 不注入
+    t2 = WebsiteAgentOrchestrator(ComfortGW()).run("正常问题",
+                                                   user_id="u_ok2")
+    assert t2.execution_trace[1].get("comfort") is False
+    # COMFORT=off → 独立停
+    monkeypatch.setenv("AGENT75_COMFORT", "off")
+    t3 = WebsiteAgentOrchestrator(ComfortGW()).run("再帮帮我",
+                                                   user_id="u_sad")
+    assert t3.execution_trace[1].get("comfort") is False
+    monkeypatch.delenv("AGENT75_COMFORT")
+
+
+def test_t24_frustrated_streak_evolution(_skill_dirs):
+    import services.agent75_resonance_service as RS
+    rs = _RS()
+    # 连击 <3 → 不提议
+    assert rs.propose_evolution(gateway=AgentModelGateway()) is None
+    # 造 3 连挫败(最新在前——追加即最新)
+    for i in range(3):
+        sid = f"task_t_st{i}"
+        _mk_session(rs, sid, None, _frustrated_events(sid))
+    out = rs.propose_evolution(
+        gateway=ProposeMockGateway(answer=""))
+    assert out and out["type"] == "prompt" \
+        and out["validation_status"] == "pending"
+    # 节流: 立即再提议 → None(600s 窗口)
+    assert rs.propose_evolution(
+        gateway=ProposeMockGateway(answer="")) is None
+    # 候选已入进化面
+    from services.agent75_evolution_service import AgentEvolutionService
+    evo = AgentEvolutionService()
+    assert any(c.get("source_task_id") == out["source_task_id"]
+               for c in evo.list())

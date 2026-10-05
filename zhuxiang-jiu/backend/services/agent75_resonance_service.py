@@ -35,6 +35,19 @@ def resonance_kill() -> bool:
         "AGENT75_RESONANCE_KILL", "").strip().lower() in ("on", "1", "true")
 
 
+def comfort_enabled() -> bool:
+    """RA-P2 安抚注入开关(AGENT75_COMFORT=off 独立停)"""
+    return os.environ.get(
+        "AGENT75_COMFORT", "on").strip().lower() not in ("off", "0", "false")
+
+
+COMFORT_PREFIX = ("注意: 该用户上一会话体验不顺, 回答开头先用一句简短"
+                  "暖心话致意, 再进入正题。\n\n")
+FRUSTRATED_STREAK_TRIGGER = 3        # 连续挫败会话 → 进化提议
+_EVOLVE_MIN_INTERVAL_S = 600         # 提议节流(防刷)
+_last_evolve_at: float = 0.0
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -302,8 +315,88 @@ class ResonanceService:
                 break
         return rows
 
-    def replay_task(self, task_id: str) -> dict[str, Any] | None:
-        """通道 A: 75号任务轨迹回放(创新点数据源反转)"""
+    # ---------- RA-P2: 决策消费面(仅产出记录, 人工/后续消费) ----------
+
+    def recent_decisions(self, limit: int = 30) -> list[dict]:
+        """决策清单: 快照 → 扁平决策行(安抚/support 优先可见)"""
+        out = []
+        for s in self.list_sessions(max(limit * 2, 60)):
+            emo = (s.get("emotion") or {}).get("emotion")
+            dec = s.get("decisions") or {}
+            inc = dec.get("incentive")
+            out.append({
+                "session_id": s.get("session_id"),
+                "user_id": s.get("user_id"),
+                "emotion": emo,
+                "mode": (s.get("intent") or {}).get("mode"),
+                "strategy": (dec.get("content") or {}).get("strategy"),
+                "ui_layout": (dec.get("ui") or {}).get("layout_mode"),
+                "incentive": (inc or {}).get("type"),
+                "incentive_message": (inc or {}).get("payload", {}).get(
+                    "message"),
+                "created_at": s.get("created_at")})
+            if len(out) >= limit:
+                break
+        # 安抚类置顶(运营优先看)
+        return sorted(out, key=lambda r: r.get("incentive") != "support")
+
+    def should_comfort(self, user_id: str | None) -> bool:
+        """该用户最近一次会话是否挫败(通道A快照带 user_id)"""
+        if not user_id or not comfort_enabled():
+            return False
+        for s in self.list_sessions(50):
+            if s.get("user_id") == user_id:
+                return ((s.get("emotion") or {}).get("emotion")
+                        == "frustrated")
+        return False
+
+    # ---------- RA-P2: 挫败连击 → 会话级进化提议 ----------
+
+    def _frustrated_streak(self) -> int:
+        n = 0
+        for s in self.list_sessions(FRUSTRATED_STREAK_TRIGGER + 5):
+            if ((s.get("emotion") or {}).get("emotion")
+                    == "frustrated"):
+                n += 1
+            else:
+                break
+        return n
+
+    def propose_evolution(self, gateway=None) -> dict | None:
+        """连续挫败 ≥3 → 既有 EvolutionEngine 提议链(prompt 安抚话术);
+        节流 600s; 复用 propose→人工 approve 闸门, 不自动生效"""
+        global _last_evolve_at
+        if self._frustrated_streak() < FRUSTRATED_STREAK_TRIGGER:
+            return None
+        now = time.time()
+        if now - _last_evolve_at < _EVOLVE_MIN_INTERVAL_S:
+            return None
+        _last_evolve_at = now
+        try:
+            from services.agent75_evolution_service import (
+                AgentEvolutionService)
+            from services.agent75_orchestrator_service import (
+                AgentModelGateway, TaskRecord, TaskStatus)
+            shim = TaskRecord(
+                task_id=f"resonance_streak_{int(now):x}",
+                user_id=None, query="(会话级连续挫败——安抚话术改进)",
+                intent="chat", status=TaskStatus.FAILED,
+                evaluation={"needs_evolution": True,
+                            "issues": ["frustrated_streak"],
+                            "score": 0.0})
+            cand = AgentEvolutionService(
+                gateway or AgentModelGateway()).propose(shim)
+            if cand:
+                logger.info("agent75_resonance_evolution_proposed "
+                            "id=%s", cand.evolution_id)
+                return cand.model_dump()
+        except Exception as exc:   # noqa: BLE001
+            logger.warning("agent75_resonance_evolve_skip: %s", exc)
+        return None
+
+    def replay_task(self, task_id: str, gateway=None) -> dict[str, Any] | None:
+        """通道 A: 75号任务轨迹回放(创新点数据源反转);
+        通道A跑在 daemon 线程——连击进化提议在此触发(不占请求时延)"""
         from services.agent75_orchestrator_service import (
             WebsiteAgentOrchestrator)
         task = WebsiteAgentOrchestrator().load(task_id)
@@ -314,5 +407,7 @@ class ResonanceService:
             events = [PerceptionRecord(
                 session_id=task_id, page_id="agent75",
                 event_type="click", timestamp=_now())]
-        return self.run_session(f"task_{task_id}", events,
+        snap = self.run_session(f"task_{task_id}", events,
                                 user_id=task.user_id)
+        self.propose_evolution(gateway=gateway)   # RA-P2 连击进化
+        return snap

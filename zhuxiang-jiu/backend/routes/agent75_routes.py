@@ -343,6 +343,14 @@ async def list_res_sessions(limit: int = 20,
     return {"code": 0, "data": ResonanceService().list_sessions(limit)}
 
 
+@res_router.get("/decisions")
+async def list_res_decisions(limit: int = 30,
+                             x_role: str | None = Header(default=None)):
+    """RA-P2 决策消费面: 快照决策扁平清单(安抚类置顶, 人工消费)"""
+    _res_guard(x_role)
+    return {"code": 0, "data": ResonanceService().recent_decisions(limit)}
+
+
 # ---------- RA-P1 通道B: 公开采集端点(beacon 无 admin 头) ----------
 # 安全闸: 事件白名单 + session 正则 + 批量/体积上限 + 内存滑动窗限流
 #         + COLLECT 独立停 + RESONANCE_KILL 总闸; 无 PII

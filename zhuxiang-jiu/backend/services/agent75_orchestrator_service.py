@@ -283,7 +283,8 @@ class WebsiteAgentOrchestrator:
                         "status": "success" if ok else "fallback",
                         "latency_ms": ms, "output": intent}
 
-    def _execute_via_skill(self, rt, query: str, intent: str
+    def _execute_via_skill(self, rt, query: str, intent: str,
+                           user_id: str | None = None
                            ) -> tuple[str, dict[str, Any]]:
         s = rt.resolve("generate", intent)
         if s is None:
@@ -300,6 +301,16 @@ class WebsiteAgentOrchestrator:
         else:
             prompt = (s.spec.get("prompt_template")
                       or _PROMPTS.get(intent, _PROMPTS["chat"]))
+        # RA-P2 挫败安抚: 上会话挫败的用户 → 暖心前缀(COMFORT=off 停)
+        comfort = False
+        try:
+            from services.agent75_resonance_service import (
+                COMFORT_PREFIX, ResonanceService)
+            if ResonanceService().should_comfort(user_id):
+                prompt = COMFORT_PREFIX + prompt
+                comfort = True
+        except Exception:   # noqa: BLE001 共鸣面异常不拖累主链
+            pass
         content, ok, ms = self.gateway.call(model_id, prompt, query)
         retries = 0
         if not ok:
@@ -310,6 +321,7 @@ class WebsiteAgentOrchestrator:
         rt.record_invocation(s.skill_id, ok, ms)
         return content, {"step_id": "exec_answer", "skill_id": s.skill_id,
                          "model_id": model_id, "retries": retries,
+                         "comfort": comfort,
                          "status": "success" if ok else "failed",
                          "latency_ms": ms}
 
@@ -448,18 +460,19 @@ class WebsiteAgentOrchestrator:
                               ).strip().lower() in ("off", "0", "false"):
                 return
             threading.Thread(target=self._run_resonance,
-                             args=(task_id,), daemon=True).start()
+                             args=(task_id, self.gateway),
+                             daemon=True).start()
         except Exception:   # noqa: BLE001 共鸣面异常不碰主链
             pass
 
     @staticmethod
-    def _run_resonance(task_id: str) -> None:
+    def _run_resonance(task_id: str, gateway=None) -> None:
         try:
             from services.agent75_resonance_service import (
                 ResonanceService, resonance_kill)
             if resonance_kill():
                 return
-            ResonanceService().replay_task(task_id)
+            ResonanceService().replay_task(task_id, gateway=gateway)
         except Exception as exc:   # noqa: BLE001
             logger.warning("agent75_resonance_replay_skip: %s", exc)
 
@@ -566,7 +579,8 @@ class WebsiteAgentOrchestrator:
 
             task.status = TaskStatus.EXECUTING
             if rt is not None:
-                answer, trace = self._execute_via_skill(rt, query, intent)
+                answer, trace = self._execute_via_skill(
+                    rt, query, intent, user_id=task.user_id)
                 self._spawn_shadows(rt, query, intent)   # P3c 影子
             else:
                 answer, trace = self._execute(query, intent)
