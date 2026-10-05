@@ -1,5 +1,5 @@
 {
   "action": "assist",
-  "waitMinutes": 10,
+  "waitMinutes": 60,
   "waitLoginMinutes": 2
 }

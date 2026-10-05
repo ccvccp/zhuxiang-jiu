@@ -246,11 +246,29 @@ const TT_PUBLISH_URL = process.env.TT_PUBLISH_URL
                 : 'WARN AI声明「AI生成」叶子未找到 — [CAL] 待人审(不阻断)');
   } catch (e) { LOG('AI label err: ' + e.message); }
 
-  // 4. 等上传完成(60s 下限铁律) → 发布按钮
-  //    [实证首试] 合成+CDP 双点击后 URL 未离开发布页且 manage 核对未发布
-  //    (疑似「完善账号信息」权限拦截) → 单轮点击+状态留档, 防双发不重试
+  // 4. 等上传完成(60s 下限铁律) → 发布
+  //    [assist 模式 2026-10-05] 表单三件套(上传/标题/AI声明)已实证稳定,
+  //    发布按钮合成+CDP 点击均无效且无弹窗(疑似字段级校验/隐藏条件)——
+  //    CFG.assistPublish=true 时人工点发布, bot 监听结果(B站 assist 先例)
   for (let i = 0; i < 12; i++) { await sleep(5000); }
   LOG('upload wait done (>=60s), enter publish-btn flow');
+  if (CFG.assistPublish) {
+    LOG('>>> 请人工: 在窗口中点击「发布」按钮(10 分钟) — 若有红色校验提示请截图/记录 <<<');
+    const dl = Date.now() + 10 * 60000;
+    let ok = false;
+    while (Date.now() < dl) {
+      await sleep(5000);
+      const url = page.url();
+      let bt = '';
+      try { bt = await page.evaluate(() => (document.body.innerText || '').slice(0, 600)); } catch (e) {}
+      if (!/upload-video|publish/.test(url) || /发布成功/.test(bt)) { ok = true; break; }
+    }
+    await page.screenshot({ path: 'tt_publish_end.png' });
+    if (ok) { LOG('PUBLISH_OK (人工点击) url=' + page.url()); }
+    else { LOG('ASSIST_PUBLISH_TIMEOUT — 10 分钟未成功, 请记录页面提示后关窗'); }
+    await browser.close();
+    process.exit(ok ? 0 : 8);
+  }
   const btnState = async () => page.evaluate(() => {
     const btns = Array.from(document.querySelectorAll('button, [role=button]'));
     const b = btns.find(x => /^(发布|发表)$/.test((x.innerText || '').trim()));
