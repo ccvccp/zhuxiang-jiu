@@ -1515,3 +1515,130 @@ def test_t36_purchase_route(monkeypatch):
     assert d["sceneType"] == "drama_super"
     assert d["orderId"].startswith("DSUPER-super_forever-")
     assert d["payMethod"] == "wap"   # alipay → wap 渠道映射
+
+
+# ------------------------------------------------------------
+# 76号 DP4(2026-10-06): 共鸣驱动卡点动态排序
+# ------------------------------------------------------------
+
+@pytest.fixture()
+def _dp4_dirs(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "services.agent75_resonance_service.AGENT_TASK_DIR", tmp_path)
+    return tmp_path
+
+
+_BASE_METHODS = [
+    {"type": "register", "title": "注册即可免费解锁本剧后段",
+     "action_url": "/login.html"},
+    {"type": "invite", "title": "邀 1 位好友注册观看 → 解锁一部短剧后段",
+     "action_url": "/drama.html"},
+    {"type": "member", "title": "开通超级会员全站免费看",
+     "action_url": "/index.html"},
+]
+
+
+def test_t37_dp4_group_and_order(_dp4_dirs, monkeypatch):
+    import asyncio
+    from services.agent75_resonance_service import ResonanceService
+    from services.drama76_series_service import DramaSeriesService
+
+    async def run():
+        svc = DramaSeriesService(repo=_DP1_REPO)
+        # 纯函数分组判定
+        assert svc.dp4_group_of(None) == "default"
+        assert svc.dp4_group_of({"emotion": {"emotion": "neutral"},
+                                 "intent": {}}) == "default"
+        assert svc.dp4_group_of({   # 高粘性最优先
+            "emotion": {"emotion": "anxious", "anxiety_score": 0.9},
+            "intent": {"stickiness_score": 0.9}}) == "sticky"
+        assert svc.dp4_group_of({
+            "emotion": {"emotion": "anxious", "anxiety_score": 0.9},
+            "intent": {"stickiness_score": 0.3}}) == "hesitant"
+        assert svc.dp4_group_of({
+            "emotion": {"emotion": "confused", "confusion_score": 0.2,
+                        "anxiety_score": 0.1},
+            "intent": {}}) == "hesitant"
+        assert svc.dp4_group_of({
+            "emotion": {"emotion": "pleasant", "pleasure_score": 0.3},
+            "intent": {}}) == "eager"
+        assert svc.dp4_group_of({
+            "emotion": {"emotion": "neutral", "pleasure_score": 0.7},
+            "intent": {}}) == "eager"
+        # 门控未开(默认 500, 快照 0 条) → 固定序 + 影子留痕
+        monkeypatch.setattr(DramaSeriesService, "DP4_GATE_SESSIONS", 500)
+        ordered, meta = svc.order_unlock_methods(_BASE_METHODS, "s_none")
+        assert [m["type"] for m in ordered] == [
+            "register", "invite", "member"]
+        assert meta["dynamic"] is False
+        assert "gate_not_met" in meta["reason"]
+        # 门控开(gate=0): 真实快照驱动三档排序
+        monkeypatch.setattr(DramaSeriesService, "DP4_GATE_SESSIONS", 0)
+        rs = ResonanceService()
+        s_anx = rs.run_session("s_dp4_anx", [
+            _ev("click", session="s_dp4_anx", interval_ms=120),
+            _ev("click", session="s_dp4_anx", interval_ms=200),
+            _ev("scroll", session="s_dp4_anx")])
+        assert s_anx["emotion"]["emotion"] == "anxious"
+        ordered, meta = svc.order_unlock_methods(_BASE_METHODS, "s_dp4_anx")
+        assert meta["group"] == "hesitant" and meta["dynamic"] is True
+        assert [m["type"] for m in ordered] == [
+            "invite", "register", "member"]
+        # 高粘性: 手工快照 stickiness 0.9 → member 置顶 + 彩蛋话术
+        rs.persist({"session_id": "s_dp4_stk",
+                    "emotion": {"emotion": "pleasant",
+                                "pleasure_score": 0.8},
+                    "intent": {"stickiness_score": 0.9}, "events": 3,
+                    "created_at": ""})
+        ordered, meta = svc.order_unlock_methods(_BASE_METHODS, "s_dp4_stk")
+        assert meta["group"] == "sticky"
+        assert ordered[0]["type"] == "member"
+        assert "彩蛋" in ordered[0]["reward_hint"]
+        # 门控开但无该会话快照 → default
+        ordered, meta = svc.order_unlock_methods(_BASE_METHODS, "s_ghost")
+        assert meta["dynamic"] is False and meta["reason"] == "no_snapshot"
+        assert [m["type"] for m in ordered] == [
+            "register", "invite", "member"]
+        # 影子留痕: 每次排序一行(4 次调用)
+        shadow = (_dp4_dirs / "drama76_checkpoint_shadow.jsonl").read_text(
+            encoding="utf-8").strip().splitlines()
+        assert len(shadow) == 4
+        import json as _j
+        last = _j.loads(shadow[-1])
+        assert last["group"] == "default" and last["dynamic"] is False
+
+    asyncio.run(run())
+
+
+def test_t38_dp4_checkpoint_route(_dp4_dirs, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from routes.drama76_routes import register_drama76_routes
+    from services.agent75_resonance_service import ResonanceService
+    from services.drama76_series_service import DramaSeriesService
+
+    monkeypatch.setattr(DramaSeriesService, "DP4_GATE_SESSIONS", 0)
+    monkeypatch.setattr(
+        "routes.drama76_routes._svc",
+        DramaSeriesService(repo=_DP1_REPO))
+    # 造 anxious 快照(drama_cp 卡点集 402)
+    ResonanceService().run_session("s_dp4_route", [
+        _ev("click", session="s_dp4_route", interval_ms=100),
+        _ev("click", session="s_dp4_route", interval_ms=150),
+        _ev("scroll", session="s_dp4_route")])
+    app = FastAPI()
+    register_drama76_routes(app)
+    client = TestClient(app)
+
+    # 带 session_id: anxious → invite 置顶 + dp4 meta
+    r = client.get("/api/v1/dramas/drama_cp/episodes/402/checkpoint",
+                   params={"session_id": "s_dp4_route"})
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["unlock_methods"][0]["type"] == "invite"
+    assert d["dp4"]["group"] == "hesitant" and d["dp4"]["dynamic"] is True
+    # 无 session_id(或未知会话): 固定序 + dynamic False
+    r = client.get("/api/v1/dramas/drama_cp/episodes/402/checkpoint")
+    d = r.json()["data"]
+    assert d["unlock_methods"][0]["type"] == "register"
+    assert d["dp4"]["group"] == "default" and d["dp4"]["dynamic"] is False

@@ -315,6 +315,29 @@ class ResonanceService:
                 break
         return rows
 
+    # ---------- DP4(76号): 卡点动态排序查询面 ----------
+
+    def count_sessions(self) -> int:
+        """快照总数(DP4 门控: ≥500 会话才开动态)"""
+        p = self._store()
+        if not p.is_file():
+            return 0
+        try:
+            return len([l for l in
+                        p.read_text(encoding="utf-8").strip().splitlines()
+                        if l.strip()])
+        except Exception:   # noqa: BLE001
+            return 0
+
+    def session_snapshot(self, session_id: str) -> dict | None:
+        """该会话最新快照(倒序首条匹配)"""
+        if not session_id:
+            return None
+        for s in self.list_sessions(100):
+            if s.get("session_id") == session_id:
+                return s
+        return None
+
     # ---------- RA-P2: 决策消费面(仅产出记录, 人工/后续消费) ----------
 
     def recent_decisions(self, limit: int = 30) -> list[dict]:

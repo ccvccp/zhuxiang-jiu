@@ -378,3 +378,105 @@ class DramaSeriesService:
                     order.get("payNo"))
         return {"action": "purchased", "plan_id": plan_id,
                 "days": days, "expire_at": expire}
+
+    # ---------- DP4: 共鸣驱动卡点动态排序 ----------
+
+    # 门控: 共鸣快照 ≥N 会话才开动态(N=0 恒开——测试/灰度);
+    # 未达标回退 DP1 固定排序(register 优先)
+    DP4_GATE_SESSIONS = int(
+        __import__("os").environ.get("DRAMA76_DP4_GATE", "500"))
+    STICKINESS_TOP = 0.85        # 高粘性线(设计方案 §1.4)
+    NEGATIVE_TOP = 0.5           # 高犹豫线(anxiety/confusion)
+    PLEASURE_TOP = 0.5           # 高意向线
+
+    # 分组 → unlock_methods 优先序(设计方案 §1.4 表)
+    GROUP_ORDER = {
+        # 高犹豫: 零门槛邀请优先
+        "hesitant": ["invite", "register", "member"],
+        # 高意向: 注册直解, 会员紧随
+        "eager": ["register", "member", "invite"],
+        # 高粘性: 超级会员置顶 + 彩蛋话术
+        "sticky": ["member", "register", "invite"],
+        # 默认(无信号/门控未开): DP1 固定序
+        "default": ["register", "invite", "member"],
+    }
+
+    @classmethod
+    def dp4_group_of(cls, snapshot: dict | None) -> str:
+        """共鸣快照 → 用户分组(快照缺失=无信号→default)"""
+        if not snapshot:
+            return "default"
+        emo = snapshot.get("emotion") or {}
+        intent = snapshot.get("intent") or {}
+        stick = float(intent.get("stickiness_score") or 0.0)
+        if stick > cls.STICKINESS_TOP:
+            return "sticky"
+        e = str(emo.get("emotion") or "")
+        if (e in ("anxious", "confused", "frustrated")
+                or float(emo.get("anxiety_score") or 0) >= cls.NEGATIVE_TOP
+                or float(emo.get("confusion_score") or 0) >= cls.NEGATIVE_TOP):
+            return "hesitant"
+        if (e == "pleasant"
+                or float(emo.get("pleasure_score") or 0) >= cls.PLEASURE_TOP):
+            return "eager"
+        return "default"
+
+    def order_unlock_methods(self, methods: list[dict],
+                             session_id: str = "") -> tuple[list[dict], dict]:
+        """卡点解锁方式动态排序(共鸣消费)。
+
+        门控未开(快照 < DRAMA76_DP4_GATE)或无信号 → 固定序;
+        每次动态排序写影子留痕(drama76_checkpoint_shadow.jsonl,
+        为 75号 testing 技能化累积对照指标)。
+        Returns: (ordered_methods, meta) meta 带 group/dynamic/reason。
+        """
+        meta = {"group": "default", "dynamic": False,
+                "reason": "", "session_id": session_id}
+        group = "default"
+        try:
+            from services.agent75_resonance_service import ResonanceService
+            rs = ResonanceService()
+            total = rs.count_sessions()
+            gate = self.DP4_GATE_SESSIONS
+            if gate > 0 and total < gate:
+                meta["reason"] = f"gate_not_met({total}/{gate})"
+            else:
+                snap = rs.session_snapshot(session_id)
+                group = self.dp4_group_of(snap)
+                meta["dynamic"] = group != "default"
+                meta["reason"] = ("no_snapshot" if not snap
+                                  else f"emotion={snap.get('emotion', {}).get('emotion')}"
+                                  f"/stick={snap.get('intent', {}).get('stickiness_score')}")
+        except Exception as exc:   # noqa: BLE001 共鸣不可用不阻断卡点
+            meta["reason"] = f"resonance_unavailable: {exc}"
+        meta["group"] = group
+        order = self.GROUP_ORDER[group]
+        by_type = {m.get("type"): dict(m) for m in methods}
+        ordered = [by_type[t] for t in order if t in by_type]
+        ordered += [m for m in methods
+                    if m.get("type") not in order]   # 未知类型殿后
+        if group == "sticky":
+            for m in ordered:
+                if m.get("type") == "member":
+                    m["reward_hint"] = "老朋友彩蛋：现在开通立享全站永久免费"
+        self._shadow_log_order(session_id, group, ordered, meta)
+        return ordered, meta
+
+    @staticmethod
+    def _shadow_log_order(session_id: str, group: str,
+                          ordered: list[dict], meta: dict) -> None:
+        """影子留痕: 每次排序决策一行(75号技能化前的对照基线)"""
+        try:
+            from services.agent75_resonance_service import AGENT_TASK_DIR
+            import json as _json
+            AGENT_TASK_DIR.mkdir(parents=True, exist_ok=True)
+            rec = {"session_id": session_id, "group": group,
+                   "order": [m.get("type") for m in ordered],
+                   "dynamic": meta.get("dynamic"),
+                   "reason": meta.get("reason"),
+                   "created_at": _now()}
+            with open(AGENT_TASK_DIR / "drama76_checkpoint_shadow.jsonl",
+                      "a", encoding="utf-8") as f:
+                f.write(_json.dumps(rec, ensure_ascii=False) + "\n")
+        except Exception:   # noqa: BLE001 留痕失败不影响主链
+            pass

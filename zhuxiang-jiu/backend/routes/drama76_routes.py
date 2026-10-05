@@ -128,8 +128,9 @@ async def unlock_episode(body: UnlockRequest,
 
 @router.get("/{drama_id}/episodes/{episode_id}/checkpoint")
 async def episode_checkpoint(drama_id: str, episode_id: str,
-                             src: str = ""):
-    """卡点落地页配置(DP1 固定排序 register 优先; DP4 接共鸣动态排序)"""
+                             src: str = "", session_id: str = ""):
+    """卡点落地页配置(DP1 固定排序 register 优先; DP4 共鸣驱动动态排序
+    —— hesitant→invite 优先 / eager→register 直解 / sticky→member 置顶)"""
     d = await _svc.get(drama_id)
     if not d:
         raise HTTPException(status_code=404, detail="drama not found")
@@ -141,19 +142,22 @@ async def episode_checkpoint(drama_id: str, episode_id: str,
     n = int(ep.get("episode_number") or 0)
     if n <= free_n:
         raise HTTPException(status_code=409, detail="该集免费无卡点")
+    methods = [
+        {"type": "register", "title": "注册即可免费解锁本剧后段",
+         "action_url": f"/login.html?redirect=/drama.html?d={drama_id}"},
+        {"type": "invite", "title": REWARD_LADDERS[0]["title"],
+         "action_url": f"/drama.html?d={drama_id}"},
+        {"type": "member", "title": "开通超级会员全站免费看",
+         "action_url": "/index.html"},
+    ]
+    ordered, meta = _svc.order_unlock_methods(methods, session_id)
     return {"code": 0, "data": {
         "drama_id": drama_id, "episode_id": episode_id,
         "checkpoint_type": "register_to_unlock",
         "free_preview_seconds": 10,
         "src": src[:32],
-        "unlock_methods": [
-            {"type": "register", "title": "注册即可免费解锁本剧后段",
-             "action_url": f"/login.html?redirect=/drama.html?d={drama_id}"},
-            {"type": "invite", "title": REWARD_LADDERS[0]["title"],
-             "action_url": f"/drama.html?d={drama_id}"},
-            {"type": "member", "title": "开通超级会员全站免费看",
-             "action_url": "/index.html"},
-        ]}}
+        "dp4": meta,
+        "unlock_methods": ordered}}
 
 
 # ---------- DP2: 超级会员(判定/开通面/个人视图/权益校验) ----------

@@ -413,6 +413,33 @@
     superBox.scrollIntoView({ behavior: "smooth" });
   };
 
+  /* ---------- DP4: 锁层按钮按共鸣动态排序(checkpoint 响应) ---------- */
+  var LOCK_SUB_DEFAULT = document.getElementById("lockSub").textContent;
+  var lockBtnByType = {
+    register: document.getElementById("lockBtn"),
+    invite: document.getElementById("lockInviteBtn"),
+    member: document.getElementById("lockMemberBtn"),
+  };
+
+  function reorderLockLayer(ep) {
+    fetch("/api/v1/dramas/" + dramaId + "/episodes/" + ep.episode_id +
+          "/checkpoint?session_id=" + encodeURIComponent(SESSION))
+      .then(function (r) { return r.json(); })
+      .then(function (b) {
+        var ms = (b.data || {}).unlock_methods || [];
+        if (!ms.length) { return; }
+        var hint = "";
+        ms.forEach(function (m) {
+          var el = lockBtnByType[m.type];
+          if (!el) { return; }
+          lock.appendChild(el);            /* appendChild 移动即重排 */
+          if (m.reward_hint) { hint = m.reward_hint; }
+        });
+        document.getElementById("lockSub").textContent =
+          hint || LOCK_SUB_DEFAULT;
+      }).catch(function () { });
+  }
+
   function playEp(ep, title) {
     curEp = ep;
     document.getElementById("epTitle").textContent =
@@ -429,6 +456,7 @@
       var btn = document.getElementById("lockBtn");
       btn.onclick = function (ev) {
         ev.preventDefault(); doUnlock(ep); };
+      reorderLockLayer(ep);                /* DP4 动态排序(失败保持默认) */
       return;
     }
     lock.style.display = "none";
