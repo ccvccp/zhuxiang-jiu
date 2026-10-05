@@ -1642,3 +1642,55 @@ def test_t38_dp4_checkpoint_route(_dp4_dirs, monkeypatch):
     d = r.json()["data"]
     assert d["unlock_methods"][0]["type"] == "register"
     assert d["dp4"]["group"] == "default" and d["dp4"]["dynamic"] is False
+
+
+def test_t39_public_path_optional_identity():
+    """公开路径可选身份(2026-10-06 生产闭环实测发现的中间件缺口):
+    /api/v1/dramas GET 前缀公开 → episodes/me 被判公开 → Bearer 不解析
+    → 生产登录态 401。修复: 公开路径带合法 Bearer 仍注入身份头;
+    无/坏 token 按游客放行且剥离伪造头(公开面零信任不变)。"""
+    import asyncio
+    from core.auth_middleware import JWTAuthMiddleware
+
+    mw = JWTAuthMiddleware.__new__(JWTAuthMiddleware)
+
+    class FakeSvc:
+        async def get_current_member(self, token):
+            if token == "good":
+                return {"memberId": 43, "role": "member"}
+            raise RuntimeError("expired")
+
+    mw._service = FakeSvc()
+
+    def mk(auth="", fake=False):
+        headers = []
+        if auth:
+            headers.append((b"authorization", auth.encode()))
+        if fake:
+            headers += [(b"x-member-id", b"99999"), (b"x-role", b"admin")]
+        return {"type": "http", "method": "GET",
+                "path": "/api/v1/dramas/x/episodes/me", "headers": headers}
+
+    def h(scope):
+        return {k.decode(): v.decode() for k, v in scope["headers"]}
+
+    async def run():
+        # 合法 token → 注入真实身份(覆盖伪造值)
+        scope = mk(auth="Bearer good", fake=True)
+        await mw._try_identity(scope)
+        assert h(scope)["x-member-id"] == "43"
+        assert h(scope)["x-role"] == "member"
+        # 无 token → 剥伪造
+        scope = mk(fake=True)
+        await mw._try_identity(scope)
+        assert "x-member-id" not in h(scope) and "x-role" not in h(scope)
+        # 坏/过期 token → 游客放行(剥)
+        scope = mk(auth="Bearer bad", fake=True)
+        await mw._try_identity(scope)
+        assert "x-member-id" not in h(scope)
+        # 格式错(非 Bearer) → 游客
+        scope = mk(auth="Basic zzz")
+        await mw._try_identity(scope)
+        assert "x-member-id" not in h(scope)
+
+    asyncio.run(run())

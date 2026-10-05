@@ -308,6 +308,11 @@ class JWTAuthMiddleware:
             return
 
         if is_public_path(path, method):
+            # 公开路径可选身份(2026-10-06 DP4 实测发现): 公开 GET 前缀下
+            # 存在登录态端点(/dramas/{id}/episodes/me)——携带合法 Bearer
+            # 仍注入身份头; 无/无效 token 按游客放行(过期 token 不挡公开
+            # 浏览), 伪造身份头照旧剥离(公开面零信任不变)
+            await self._try_identity(scope)
             await self.app(scope, receive, send)
             return
 
@@ -335,6 +340,23 @@ class JWTAuthMiddleware:
                 _strip_identity_headers(scope)
 
         await self.app(scope, receive, send)
+
+    async def _try_identity(self, scope: dict) -> None:
+        """公开路径可选身份注入(不阻断, 不发错误响应)
+
+        合法 Bearer → 注入真实身份头(先剥伪造值);
+        无/格式错/过期/无效 token → 剥离身份头按游客放行。
+        """
+        authorization = _get_header(scope, "authorization")
+        token = _extract_bearer(authorization) if authorization else ""
+        if token:
+            try:
+                member = await self._service.get_current_member(token)
+                inject_identity(scope, member)
+                return
+            except Exception:   # noqa: BLE001 公开面宽容: 坏 token=游客
+                logger.info("public_path_token_invalid guest_fallback")
+        _strip_identity_headers(scope)
 
     async def _validate(self, send, token: str):
         """校验 Token, 失败时发送错误响应并返回 None"""

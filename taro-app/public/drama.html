@@ -294,7 +294,7 @@
              (next.title || "继续邀请得奖励"))
           : ("已邀 " + (d.valid_count || 0) + " 人 · 阶梯奖励已全部解锁");
         inviteStatEl.innerHTML =
-          '我的邀请码 <span class="code">' + (myCode || "—") +
+          '我的邀请码 <span class="code" id="inviteCode">' + (myCode || "—") +
           "</span><br>" + tip;
       }).catch(function () { });
   }
