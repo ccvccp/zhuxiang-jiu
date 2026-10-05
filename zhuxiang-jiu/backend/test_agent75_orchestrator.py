@@ -275,3 +275,111 @@ def test_t8_evolution_routes(tmp_path):
                     headers=admin)
     assert r.status_code == 404
     monkeypatch.undo()
+
+
+# ------------------------------------------------------------
+# P3a(2026-10-05): Skill 层(注册表/工作流/生命周期/淘汰/进化技能)
+# ------------------------------------------------------------
+
+from services.agent75_skill_service import (  # noqa: E402
+    SkillDefinition, SkillKind, SkillRuntime, SkillStatus)
+
+
+@pytest.fixture()
+def _skill_dirs(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "services.agent75_orchestrator_service.AGENT_TASK_DIR",
+        tmp_path)
+    monkeypatch.setattr(
+        "services.agent75_evolution_service.AGENT_TASK_DIR",
+        tmp_path)
+    monkeypatch.setattr(
+        "services.agent75_skill_service.AGENT_TASK_DIR",
+        tmp_path)
+    return tmp_path
+
+
+def test_t9_skill_registry_lifecycle_demote(_skill_dirs):
+    rt = SkillRuntime()
+    assert {"intent_classify", "answer_chat", "answer_summary",
+            "draft_copy", "critic_review"} <= set(rt.skills)
+    # slot 解析
+    assert rt.resolve("classify").skill_id == "intent_classify"
+    assert rt.resolve("generate", "draft").skill_id == "draft_copy"
+    # 生命周期可逆: deprecate → 该槽无 active → activate 恢复
+    rt.set_status("draft_copy", SkillStatus.DEPRECATED)
+    assert rt.resolve("generate", "draft") is None
+    rt.set_status("draft_copy", SkillStatus.ACTIVE)
+    assert rt.resolve("generate", "draft").skill_id == "draft_copy"
+    # 淘汰: 连续 20 败 → 自动降 testing(19 次不动, 第 20 次触发)
+    for _ in range(19):
+        assert rt.record_invocation("draft_copy", False, 8) is None
+    d = rt.record_invocation("draft_copy", False, 8)
+    assert d and d["skill_id"] == "draft_copy"
+    assert rt.get("draft_copy").status is SkillStatus.TESTING
+    # 重启不丢(文件权威)
+    rt2 = SkillRuntime()
+    assert rt2.get("draft_copy").status is SkillStatus.TESTING
+
+
+def test_t10_skill_layer_execution_and_kill(_skill_dirs, monkeypatch):
+    o = WebsiteAgentOrchestrator(MockGateway())
+    task = o.run("帮我总结这篇内容")
+    assert task.status == "completed"
+    # 轨迹走技能层(带 skill_id), 行为与 P0 等价
+    assert task.execution_trace[0]["skill_id"] == "intent_classify"
+    assert task.execution_trace[1]["skill_id"] == "answer_summary"
+    # metrics 已回写
+    rt = SkillRuntime()
+    assert rt.get("intent_classify").metrics["invocations"] == 1
+    # SKILL_KILL → 整层旁路回落 P0 直连(降级不降能):
+    # 直连轨迹的 skill_id 是语义标签("intent"), 非注册表技能 id
+    monkeypatch.setenv("AGENT75_SKILL_KILL", "on")
+    t2 = WebsiteAgentOrchestrator(MockGateway()).run("再来一条")
+    assert t2.status == "completed"
+    assert t2.execution_trace[0]["skill_id"] == "intent"
+    monkeypatch.delenv("AGENT75_SKILL_KILL")
+
+
+class SkillProposeMockGateway(AgentModelGateway):
+    """意图=draft / 生成空回答 / 进化提议=skill 型"""
+
+    PROPOSAL = ('{"type":"skill","intent":"draft",'
+                '"prompt_text":"你是进化文案技能，写有故事感的短文案。",'
+                '"model_id":"glm-reason","rationale":"补 draft 生成位"}')
+
+    def call(self, model_id, system, user):
+        if model_id == "glm-flash":
+            return "draft", True, 3
+        if "进化顾问" in system:
+            return self.PROPOSAL, True, 4
+        return "", True, 5
+
+
+def test_t11_evolution_skill_loop(_skill_dirs):
+    task = WebsiteAgentOrchestrator(
+        SkillProposeMockGateway()).run("写一段文案")
+    assert task.status == "failed"
+    cand_ids = [t["candidate_id"] for t in task.execution_trace
+                if t.get("step_id") == "evolution_propose"]
+    assert cand_ids
+    evo = AgentEvolutionService()
+    assert evo.get(cand_ids[0])["type"] == "skill"
+
+    # approve → 注册表落 testing(不直接 active——灰度闸门)
+    evo.approve(cand_ids[0])
+    rt = SkillRuntime()
+    sid = f"evo_{cand_ids[0]}_draft"
+    s = rt.get(sid)
+    assert s.status is SkillStatus.TESTING
+    assert s.kind is SkillKind.PROMPT_TOOL and s.slot == "generate"
+    # testing 不入主链: draft 生成位仍是内置
+    assert rt.resolve("generate", "draft").skill_id == "draft_copy"
+    # 人工 activate + 内置让位 → 进化技能上岗
+    rt.set_status("draft_copy", SkillStatus.DEPRECATED)
+    rt.set_status(sid, SkillStatus.ACTIVE)
+    assert rt.resolve("generate", "draft").skill_id == sid
+    # 候选回滚 → 该来源技能降 deprecated(新实例复读文件)
+    out = evo.rollback_candidate(cand_ids[0])
+    assert out["type"] == "skill" and out["skill_id"] == sid
+    assert SkillRuntime().get(sid).status is SkillStatus.DEPRECATED

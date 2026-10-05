@@ -252,6 +252,62 @@ class WebsiteAgentOrchestrator:
             pass
         return _PROMPTS[intent]
 
+    # -- P3a: 技能层执行路径(SKILL_KILL=on 或技能面异常 → 回落直连) --
+
+    @staticmethod
+    def _skill_runtime():
+        try:
+            from services.agent75_skill_service import skill_kill, SkillRuntime
+            if skill_kill():
+                return None
+            return SkillRuntime()
+        except Exception:   # noqa: BLE001
+            return None
+
+    def _plan_via_skill(self, rt, query: str) -> tuple[str, dict[str, Any]]:
+        s = rt.resolve("classify")
+        if s is None or s.kind.value != "prompt_tool":
+            return self._plan(query)
+        model_id = s.spec.get("model_id", "glm-flash")
+        content, ok, ms = self.gateway.call(
+            model_id, s.spec.get("prompt_template", _INTENT_PROMPT),
+            f"用户输入: {query[:200]}")
+        self.router.record(model_id, "classification", ok, ms)
+        rt.record_invocation(s.skill_id, ok, ms)
+        intent = content.strip().lower() if ok else ""
+        if intent not in INTENTS or intent == "unknown":
+            intent = "chat"
+        return intent, {"step_id": "plan_intent", "skill_id": s.skill_id,
+                        "model_id": model_id,
+                        "status": "success" if ok else "fallback",
+                        "latency_ms": ms, "output": intent}
+
+    def _execute_via_skill(self, rt, query: str, intent: str
+                           ) -> tuple[str, dict[str, Any]]:
+        s = rt.resolve("generate", intent)
+        if s is None or s.kind.value != "prompt_tool":
+            return self._execute(query, intent)
+        model_id = s.spec.get("model_id", "glm-reason")
+        # prompt 优先级: P2 意图覆盖(仅当命中内置技能时) > 技能自身
+        # 模板 > 内置注册表——进化技能被选中即用其自带 prompt
+        if s.source == "builtin" and intent in _PROMPTS:
+            prompt = self._prompt_for(intent)
+        else:
+            prompt = (s.spec.get("prompt_template")
+                      or _PROMPTS.get(intent, _PROMPTS["chat"]))
+        content, ok, ms = self.gateway.call(model_id, prompt, query)
+        retries = 0
+        if not ok:
+            retries = 1
+            content, ok, ms2 = self.gateway.call(model_id, prompt, query)
+            ms += ms2
+        self.router.record(model_id, "generation", ok, ms)
+        rt.record_invocation(s.skill_id, ok, ms)
+        return content, {"step_id": "exec_answer", "skill_id": s.skill_id,
+                         "model_id": model_id, "retries": retries,
+                         "status": "success" if ok else "failed",
+                         "latency_ms": ms}
+
     # -- Planner(意图识别走分类路由; 失败回落 chat) --
 
     def _plan(self, query: str) -> tuple[str, dict[str, Any]]:
@@ -344,13 +400,20 @@ class WebsiteAgentOrchestrator:
                           status=TaskStatus.PLANNING,
                           created_at="", updated_at="")
         try:
-            intent, trace = self._plan(query)
+            rt = self._skill_runtime()      # P3a: 技能层(可 None)
+            if rt is not None:
+                intent, trace = self._plan_via_skill(rt, query)
+            else:
+                intent, trace = self._plan(query)
             task.intent = intent
             task.execution_trace.append(trace)
             self._save(task)
 
             task.status = TaskStatus.EXECUTING
-            answer, trace = self._execute(query, intent)
+            if rt is not None:
+                answer, trace = self._execute_via_skill(rt, query, intent)
+            else:
+                answer, trace = self._execute(query, intent)
             task.answer = answer
             task.execution_trace.append(trace)
             self._save(task)
