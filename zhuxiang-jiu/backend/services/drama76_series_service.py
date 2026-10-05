@@ -450,7 +450,12 @@ class DramaSeriesService:
         except Exception as exc:   # noqa: BLE001 共鸣不可用不阻断卡点
             meta["reason"] = f"resonance_unavailable: {exc}"
         meta["group"] = group
-        order = self.GROUP_ORDER[group]
+        # DP4+: 技能化消费(active 权重覆盖内置) + 影子对照留痕
+        self.ensure_dp4_skill()
+        order_map, sk_meta = self._effective_group_order()
+        if sk_meta.get("skill"):
+            meta["skill"] = sk_meta["skill"]
+        order = order_map.get(group) or self.GROUP_ORDER[group]
         by_type = {m.get("type"): dict(m) for m in methods}
         ordered = [by_type[t] for t in order if t in by_type]
         ordered += [m for m in methods
@@ -460,6 +465,7 @@ class DramaSeriesService:
                 if m.get("type") == "member":
                     m["reward_hint"] = "老朋友彩蛋：现在开通立享全站永久免费"
         self._shadow_log_order(session_id, group, ordered, meta)
+        self._shadow_compare_skill(group, [m.get("type") for m in ordered])
         return ordered, meta
 
     @staticmethod
@@ -479,4 +485,83 @@ class DramaSeriesService:
                       "a", encoding="utf-8") as f:
                 f.write(_json.dumps(rec, ensure_ascii=False) + "\n")
         except Exception:   # noqa: BLE001 留痕失败不影响主链
+            pass
+
+    # ---------- DP4+: 排序策略 75号 技能化(testing 种子→影子→人工转正) ----------
+
+    DP4_SKILL_ID = "drama76_checkpoint_order"
+
+    _skill_rt: Any = None
+    _skill_rt_at: float = 0.0
+
+    @classmethod
+    def _skill_runtime(cls):
+        """SkillRuntime 进程内缓存(60s TTL——checkpoint 高频端点)"""
+        import time as _time
+        now = _time.time()
+        if cls._skill_rt is None or now - cls._skill_rt_at > 60:
+            try:
+                from services.agent75_skill_service import SkillRuntime
+                cls._skill_rt = SkillRuntime()
+                cls._skill_rt_at = now
+            except Exception:   # noqa: BLE001 技能层不可用不阻断
+                cls._skill_rt = None
+                cls._skill_rt_at = now
+        return cls._skill_rt
+
+    @classmethod
+    def ensure_dp4_skill(cls) -> None:
+        """注册排序策略技能(幂等; testing 种子——权重=内置三档拷贝,
+        人工 approve(activate) 后生效; 未来可经 evolution 提议新权重)"""
+        rt = cls._skill_runtime()
+        if rt is None or cls.DP4_SKILL_ID in rt.skills:
+            return
+        from services.agent75_skill_service import (
+            SkillDefinition, SkillKind, SkillStatus)
+        rt.upsert(SkillDefinition(
+            skill_id=cls.DP4_SKILL_ID,
+            name="76号卡点排序策略·共鸣三档权重",
+            status=SkillStatus.TESTING,      # 影子对照, 不入主链
+            kind=SkillKind.BUILTIN_FN, slot="generate", intent=None,
+            spec={"fn": "checkpoint_order",
+                  "group_order": {k: list(v)
+                                  for k, v in cls.GROUP_ORDER.items()}},
+            source="drama76_dp4"))
+
+    @classmethod
+    def _effective_group_order(cls) -> tuple[dict, dict]:
+        """生效排序表: active 技能 spec.group_order 覆盖内置;
+        Returns: (order_map, meta) meta 带 skill 来源"""
+        meta = {"skill": None}
+        rt = cls._skill_runtime()
+        if rt is not None:
+            try:
+                from services.agent75_skill_service import SkillStatus
+                s = rt.get(cls.DP4_SKILL_ID)
+                if s is not None and s.status == SkillStatus.ACTIVE:
+                    go = (s.spec or {}).get("group_order") or {}
+                    if go and all(k in go for k in cls.GROUP_ORDER):
+                        meta["skill"] = cls.DP4_SKILL_ID
+                        return go, meta
+            except Exception:   # noqa: BLE001
+                pass
+        return cls.GROUP_ORDER, meta
+
+    @classmethod
+    def _shadow_compare_skill(cls, group: str,
+                              order_used: list[str]) -> None:
+        """影子对照: 技能建议序 vs 本轮实际序(agree 记入技能 metrics,
+        ready 判据复用 SkillRuntime ≥20 影子闸)"""
+        rt = cls._skill_runtime()
+        if rt is None:
+            return
+        try:
+            from services.agent75_skill_service import SkillStatus
+            s = rt.get(cls.DP4_SKILL_ID)
+            if s is None or s.status == SkillStatus.ACTIVE:
+                return   # 无技能(active 已是实际序)不留影子
+            sk = ((s.spec or {}).get("group_order") or {}).get(group)
+            agree = bool(sk) and list(sk) == list(order_used)
+            rt.record_shadow(cls.DP4_SKILL_ID, ok=agree, latency_ms=1)
+        except Exception:   # noqa: BLE001
             pass

@@ -1694,3 +1694,65 @@ def test_t39_public_path_optional_identity():
         assert "x-member-id" not in h(scope)
 
     asyncio.run(run())
+
+
+def test_t40_dp4_skillization(_skill_dirs, _dp4_dirs, monkeypatch):
+    """DP4+: 排序策略 75号 技能化(设计方案 §1.4「排序策略注册 testing
+    技能→影子→转正」): 首次排序自动注册 testing 种子(权重=内置拷贝)→
+    影子对照记 metrics→≥20 影子 ready 提示→人工 activate 后权重生效。"""
+    import asyncio
+    from services.agent75_resonance_service import ResonanceService
+    from services.agent75_skill_service import SkillRuntime, SkillStatus
+    from services.drama76_series_service import DramaSeriesService
+
+    async def run():
+        monkeypatch.setattr(DramaSeriesService, "DP4_GATE_SESSIONS", 0)
+        DramaSeriesService._skill_rt = None   # 清进程内缓存
+        # 造 anxious 快照
+        rs = ResonanceService()
+        rs.run_session("s_dp4_sk", [
+            _ev("click", session="s_dp4_sk", interval_ms=100),
+            _ev("click", session="s_dp4_sk", interval_ms=150),
+            _ev("scroll", session="s_dp4_sk")])
+        svc = DramaSeriesService(repo=_DP1_REPO)
+        # ① 首次排序: 自动注册 testing 种子 + 内置序生效(不消费)
+        ordered, meta = svc.order_unlock_methods(_BASE_METHODS, "s_dp4_sk")
+        assert [m["type"] for m in ordered] == [
+            "invite", "register", "member"]
+        assert "skill" not in meta      # testing 不入主链
+        rt = SkillRuntime()
+        sk = rt.get(DramaSeriesService.DP4_SKILL_ID)
+        assert sk is not None and sk.status == SkillStatus.TESTING
+        assert sk.source == "drama76_dp4"
+        # 种子权重=内置拷贝 → 影子对照 agree=True 已记
+        assert sk.metrics["shadow_runs"] == 1
+        assert sk.metrics["shadow_recent"][0]["ok"] is True
+        # ② 影子累积 ≥20 → ready 转正提示(人工闸门不动)
+        for _ in range(19):
+            svc.order_unlock_methods(_BASE_METHODS, "s_dp4_sk")
+        rt2 = SkillRuntime()
+        assert rt2.get(DramaSeriesService.DP4_SKILL_ID
+                       ).metrics["shadow_runs"] == 20
+        rows = [r for r in rt2.list()
+                if r["skill_id"] == DramaSeriesService.DP4_SKILL_ID]
+        assert rows[0].get("ready") is True
+        assert rt2.get(DramaSeriesService.DP4_SKILL_ID
+                       ).status is SkillStatus.TESTING   # 仅提示不动作
+        # ③ 人工 approve(activate) + 调权重 → 生效排序表切换
+        sk2 = rt2.get(DramaSeriesService.DP4_SKILL_ID)
+        sk2.spec["group_order"]["hesitant"] = [
+            "member", "invite", "register"]
+        rt2.set_status(DramaSeriesService.DP4_SKILL_ID,
+                       SkillStatus.ACTIVE)
+        DramaSeriesService._skill_rt = None   # 清缓存读新表
+        ordered, meta = svc.order_unlock_methods(_BASE_METHODS, "s_dp4_sk")
+        assert [m["type"] for m in ordered] == [
+            "member", "invite", "register"]   # 技能权重覆盖
+        assert meta["skill"] == DramaSeriesService.DP4_SKILL_ID
+        # active 后影子不再累计(实际序=技能序)
+        rt3 = SkillRuntime()
+        assert rt3.get(DramaSeriesService.DP4_SKILL_ID
+                       ).metrics["shadow_runs"] == 20
+        DramaSeriesService._skill_rt = None
+
+    asyncio.run(run())
