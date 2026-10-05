@@ -93,12 +93,23 @@ ADH = {
 # 口播基准图: persona → (本地, 远端)——每次跑批前全部自动上传远端
 # (md5 校验); 2026-10-05 第二人设小竹帅哥入列(竹林帅哥解说竹奕酒
 # 定版图 1.9MB, SadTalker 非标分辨率由 dh 服务 720x1280 归一处理)
+# 2026-10-06 网站角色库 +4 中老年(1728x2304 竖版统一规格; 儿童
+# role_tong_* 不入出片链——广告法§40, 见 sv73_script_service 出片闸)
 _ASSET_IP = Path(__file__).resolve().parent / "assets" / "ip"
+_ROLES = _ASSET_IP / "roles"
 DH_IMAGES = {
     "zhuxiaomei": (_ASSET_IP / "zhuxiaomei_front.jpg",
                    "/root/assets/ip/zhuxiaomei_front.jpg"),
     "xiaozhushuaige": (_ASSET_IP / "xiaozhushuaige_front.jpg",
                        "/root/assets/ip/xiaozhushuaige_front.jpg"),
+    "role_zhongnian_f": (_ROLES / "role_zhongnian_f.jpg",
+                         "/root/assets/ip/roles/role_zhongnian_f.jpg"),
+    "role_zhongnian_m": (_ROLES / "role_zhongnian_m.jpg",
+                         "/root/assets/ip/roles/role_zhongnian_m.jpg"),
+    "role_laonian_f": (_ROLES / "role_laonian_f.jpg",
+                       "/root/assets/ip/roles/role_laonian_f.jpg"),
+    "role_laonian_m": (_ROLES / "role_laonian_m.jpg",
+                       "/root/assets/ip/roles/role_laonian_m.jpg"),
 }
 # 兼容旧引用(缺省人设)
 DH_IMAGE_LOCAL = DH_IMAGES["zhuxiaomei"][0]

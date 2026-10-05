@@ -505,6 +505,63 @@ def test_t12b_persona_voice_and_image_routing():
 
 
 # ------------------------------------------------------------
+# T12c/T12d 网站角色数字人形象库(2026-10-06 P0): 6 人设注册+素材在位+
+#     儿童出片合规闸(广告法§40)+ dh 基准图路由中老年四角
+# ------------------------------------------------------------
+
+_ROLE_IDS = {
+    "role_zhongnian_f": ("竹林惠姐", "female", True),
+    "role_zhongnian_m": ("竹林大哥", "male", True),
+    "role_laonian_f": ("竹林奶奶", "jam", True),
+    "role_laonian_m": ("竹林爷爷", "luodo", True),
+    "role_tong_f": ("竹芽妹妹", "chuichui", False),
+    "role_tong_m": ("竹笋弟弟", "kazi", False),
+}
+
+
+def test_t12c_roles_registry_and_assets():
+    import dh_batch
+    from services.sv73_render_service import IP_VOICE
+    for rid, (name, voice, allow) in _ROLE_IDS.items():
+        p = sv73mod.IP_PERSONAS[rid]
+        assert p["name"] == name
+        assert p["voice"] == voice and IP_VOICE[rid] == voice
+        assert p["allow_alcohol"] is allow
+        # 两套装扮素材在位 + prompt 带合规红线
+        for outfit in p["outfits"].values():
+            assert (Path(__file__).resolve().parent / outfit).is_file(), \
+                f"素材缺失: {outfit}"
+        assert ("理性饮酒" in p["personaPrompt"]
+                if allow else "从不提及任何酒类" in p["personaPrompt"])
+    # dh 基准图: 中老年四角注册(儿童不入出片链)
+    for rid in ("role_zhongnian_f", "role_zhongnian_m",
+                "role_laonian_f", "role_laonian_m"):
+        assert dh_batch.dh_image_for(rid) == \
+            f"/root/assets/ip/roles/{rid}.jpg"
+        assert Path(dh_batch.DH_IMAGES[rid][0]).is_file()
+        assert "role_tong" not in dh_batch.DH_IMAGES
+
+
+def test_t12d_roles_alcohol_gate(monkeypatch):
+    _patch_rule(monkeypatch)
+    # 中老年: 正常出片(口吻注入生效)
+    sb = _run(Sv73ScriptService().generate(
+        {**HOTSPOT, "fingerprint": "fp-roles-1"},
+        persona="role_laonian_m", template="drama_monologue"))
+    assert_schema(sb)
+    assert sb["persona"] == "role_laonian_m"
+    # 儿童: 全模板拒绝(广告法§40 出片闸)
+    for tpl in ("vertical", "dh_oral", "drama_monologue"):
+        try:
+            _run(Sv73ScriptService().generate(
+                {**HOTSPOT, "fingerprint": "fp-roles-gate"},
+                persona="role_tong_f", template=tpl))
+            raise AssertionError(f"儿童人设 {tpl} 应被出片闸拒绝")
+        except ValueError as exc:
+            assert "酒类" in str(exc)
+
+
+# ------------------------------------------------------------
 # T13 drama LLM 三段拆分拼接(2026-10-05 实证: flash 把三段独白
 #     拆成多个 cover 场景返回——只取首个=纯铺垫段必败 lint)
 # ------------------------------------------------------------
