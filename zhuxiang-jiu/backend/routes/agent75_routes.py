@@ -263,8 +263,81 @@ async def sandbox_health(x_role: str | None = Header(default=None)):
 
 
 def register_agent75_routes(app):
-    """注册75号·网站Agent中枢路由(任务+进化+技能+沙箱四面)"""
+    """注册75号·网站Agent中枢路由(任务+进化+技能+沙箱+共鸣五面)"""
     app.include_router(router)
     app.include_router(evo_router)
     app.include_router(skills_router)
     app.include_router(sbx_router)
+    app.include_router(res_router)
+
+
+# ---------- RA-P0: 增强型 Agent 感知认知面(共鸣) ----------
+
+from pydantic import BaseModel as _BM2, Field as _F2  # noqa: E402
+from services.agent75_resonance_service import (  # noqa: E402
+    MAX_EVENTS_PER_BATCH, PerceptionRecord, ResonanceService,
+    resonance_kill)
+
+res_router = APIRouter(
+    prefix="/api/v1/resonance",
+    tags=["网站Agent中枢(75号)·共鸣面"],
+)
+
+
+def _res_guard(x_role: str | None) -> None:
+    _require_admin(x_role)
+    if resonance_kill():
+        raise HTTPException(status_code=409, detail="resonance killed")
+
+
+class EventItem(_BM2):
+    event_type: str = _F2(..., min_length=2, max_length=32)
+    page_id: str = _F2("", max_length=64)
+    payload: dict = _F2(default_factory=dict)
+
+
+class EventsRequest(_BM2):
+    session_id: str = _F2(..., min_length=3, max_length=64)
+    user_id: str | None = None
+    events: list[EventItem] = _F2(..., min_length=1)
+
+
+@res_router.post("/events")
+async def ingest_events(body: EventsRequest,
+                        x_role: str | None = Header(default=None)):
+    """通道 B: 行为事件批量上报(≤200/批)→ 会话快照"""
+    _res_guard(x_role)
+    if len(body.events) > MAX_EVENTS_PER_BATCH:
+        raise HTTPException(status_code=413, detail="batch too large")
+    events = [PerceptionRecord(
+        session_id=body.session_id, page_id=e.page_id,
+        event_type=e.event_type, payload=e.payload)
+        for e in body.events]
+    snap = ResonanceService().run_session(
+        body.session_id, events, user_id=body.user_id)
+    return {"code": 0, "data": {
+        "session_id": snap["session_id"],
+        "emotion": snap["emotion"]["emotion"],
+        "mode": snap["intent"]["mode"],
+        "stickiness_score": snap["intent"]["stickiness_score"]}}
+
+
+@res_router.post("/session")
+async def replay_session(body: dict,
+                         x_role: str | None = Header(default=None)):
+    """通道 A: 75号任务轨迹回放 → 会话快照"""
+    _res_guard(x_role)
+    task_id = str((body or {}).get("task_id") or "")
+    if not task_id:
+        raise HTTPException(status_code=409, detail="task_id required")
+    snap = ResonanceService().replay_task(task_id)
+    if snap is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return {"code": 0, "data": snap}
+
+
+@res_router.get("/sessions")
+async def list_res_sessions(limit: int = 20,
+                            x_role: str | None = Header(default=None)):
+    _res_guard(x_role)
+    return {"code": 0, "data": ResonanceService().list_sessions(limit)}

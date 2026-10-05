@@ -601,3 +601,117 @@ def test_t16_ready_gate(_skill_dirs):
     assert flags["t_15_100"] is False
     assert flags["t_14_100"] is False
     assert flags["t_20_200"] is False
+
+
+# ------------------------------------------------------------
+# RA-P0(2026-10-05): 增强型 Agent 感知认知核心(共鸣面)
+# ------------------------------------------------------------
+
+from services.agent75_resonance_service import (  # noqa: E402
+    DualAxisScorer, EmotionEngine, EmotionState, PerceptionRecord,
+    ResonanceService, transpose_agent_task)
+from services.agent75_orchestrator_service import (  # noqa: E402
+    TaskRecord, TaskStatus)
+
+
+def _ev(etype, session="s1", **payload):
+    return PerceptionRecord(session_id=session, event_type=etype,
+                            payload=payload)
+
+
+def test_t17_emotion_engine_and_scorer():
+    eng = EmotionEngine()
+    # 焦虑: 快速连点(interval<300ms)
+    snap = eng.compute([_ev("click", interval_ms=120),
+                        _ev("click", interval_ms=200),
+                        _ev("scroll")])
+    assert snap.emotion is EmotionState.ANXIOUS and snap.anxiety_score > 0.5
+    # 困惑: 返回+报错
+    snap = eng.compute([_ev("back"), _ev("error"), _ev("scroll")])
+    assert snap.emotion is EmotionState.CONFUSED
+    # 愉悦: 完成+长停留
+    snap = eng.compute([_ev("complete"), _ev("long_stay")])
+    assert snap.emotion is EmotionState.PLEASANT
+    # 挫败: 报错+重试
+    snap = eng.compute([_ev("error"), _ev("click", retry=True)])
+    assert snap.emotion is EmotionState.FRUSTRATED
+    # 双螺旋: 粘性公式 + 四模式
+    sc = DualAxisScorer()
+    assert sc.compute(1.0, 1.0) == 1.0
+    assert sc.decide_intent(0.9, 0.2)["mode"] == "efficiency"
+    assert sc.decide_intent(0.2, 0.9)["mode"] == "explore"
+    assert sc.decide_intent(0.8, 0.8)["mode"] == "flow"
+    assert sc.decide_intent(0.5, 0.5)["mode"] == "balanced"
+    assert abs(sc.decide_intent(0.8, 0.6)["stickiness_score"]
+               - round(0.6 * 0.8 + 0.4 * 0.6, 4)) < 1e-9
+
+
+def test_t18_transpose_agent_task(_skill_dirs):
+    # 失败任务(fallback 意图 + 生成失败重试 + 进化提议) → back/error/retry
+    task = TaskRecord(
+        task_id="t_x1", query="q", status=TaskStatus.FAILED,
+        execution_trace=[
+            {"step_id": "plan_intent", "status": "fallback"},
+            {"step_id": "exec_answer", "status": "failed", "retries": 1},
+            {"step_id": "evolution_propose", "status": "proposed"}])
+    evs = transpose_agent_task(task)
+    types = [e.event_type for e in evs]
+    assert "back" in types and "error" in types
+    assert any(e.payload.get("retry") for e in evs)
+    # 快照: 失败任务 → 挫败主导 + 安抚决策
+    snap = ResonanceService().run_session("task_t_x1", evs)
+    assert snap["emotion"]["emotion"] == "frustrated"
+    assert snap["decisions"]["incentive"]["type"] == "support"
+    # 完成任务 → complete 事件 → 愉悦/物质分
+    ok_task = TaskRecord(
+        task_id="t_x2", query="q", status=TaskStatus.COMPLETED,
+        execution_trace=[{"step_id": "plan_intent", "status": "success"},
+                         {"step_id": "exec_answer", "status": "success"}])
+    evs2 = transpose_agent_task(ok_task)
+    assert "complete" in [e.event_type for e in evs2]
+    snap2 = ResonanceService().run_session("task_t_x2", evs2)
+    assert snap2["emotion"]["pleasure_score"] > 0
+
+
+def test_t19_resonance_routes(_skill_dirs, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from routes.agent75_routes import register_agent75_routes
+
+    app = FastAPI()
+    register_agent75_routes(app)
+    client = TestClient(app)
+    admin = {"X-Role": "admin"}
+
+    # 通道 B: 行为事件批量上报
+    r = client.post("/api/v1/resonance/events", headers=admin, json={
+        "session_id": "s_web_001", "user_id": "u_1",
+        "events": [{"event_type": "click", "page_id": "home",
+                    "payload": {"interval_ms": 150}},
+                   {"event_type": "click", "payload": {"interval_ms": 180}},
+                   {"event_type": "scroll"}]})
+    assert r.status_code == 200
+    assert r.json()["data"]["emotion"] == "anxious"
+
+    # 通道 A: 任务回放(先用真实链造一个任务)
+    monkeypatch.setattr(
+        "routes.agent75_routes._orchestrator",
+        WebsiteAgentOrchestrator(ProposeMockGateway(answer="")))
+    rt = client.post("/api/v1/agent/tasks", headers=admin,
+                     json={"query": "总结"})
+    tid = rt.json()["data"]["task_id"]
+    r = client.post("/api/v1/resonance/session", headers=admin,
+                    json={"task_id": tid})
+    assert r.status_code == 200
+    assert r.json()["data"]["emotion"]["emotion"] == "frustrated"
+
+    # 清单 + 404 + kill 409
+    r = client.get("/api/v1/resonance/sessions", headers=admin)
+    assert r.status_code == 200 and len(r.json()["data"]) >= 2
+    r = client.post("/api/v1/resonance/session", headers=admin,
+                    json={"task_id": "t_nope"})
+    assert r.status_code == 404
+    monkeypatch.setenv("AGENT75_RESONANCE_KILL", "on")
+    r = client.get("/api/v1/resonance/sessions", headers=admin)
+    assert r.status_code == 409
+    monkeypatch.delenv("AGENT75_RESONANCE_KILL")
