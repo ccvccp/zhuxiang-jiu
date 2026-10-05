@@ -404,6 +404,11 @@ register_member73_routes(app)
 from routes.sv73_routes import register_sv73_routes
 register_sv73_routes(app)
 
+# 网站自研Agent中枢(75号 P0 编排闭环——用户方案《开发阶段的
+# 技术方案》: Orchestrator+模型网关+执行日志, 长在 llm_client 上)
+from routes.agent75_routes import register_agent75_routes
+register_agent75_routes(app)
+
 # NexusFlow智枢·流 AI智能全域发布大模型(74号 P1 规则中枢)
 from routes.nexus74_routes import register_nexus74_routes
 register_nexus74_routes(app)
