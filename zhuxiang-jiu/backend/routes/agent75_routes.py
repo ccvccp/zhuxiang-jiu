@@ -193,8 +193,78 @@ async def deprecate_skill(skill_id: str,
         raise HTTPException(status_code=404, detail="skill not found")
 
 
+# ---------- P3b: code_tool 注册(强制 dry-run)+沙箱健康 ----------
+
+from pydantic import BaseModel as _BM, Field as _F  # noqa: E402
+
+
+class CodeToolCreateRequest(_BM):
+    skill_id: str = _F(..., min_length=3, max_length=48,
+                       description="技能 id(字母数字下划线)")
+    name: str = _F(..., min_length=2, max_length=32)
+    intent: str = _F(..., description="chat/summary/draft")
+    code: str = _F(..., min_length=10, description="python 片段, 需定义 run(input)->dict, 结果含 answer 字段")
+    sample_input: dict = _F(default_factory=dict,
+                            description="dry-run 样例输入")
+    timeout_ms: int = _F(3000, ge=100, le=10_000)
+
+
+@skills_router.post("")
+async def create_code_tool(body: CodeToolCreateRequest,
+                           x_role: str | None = Header(default=None)):
+    """code_tool 注册: 静态预检 + 沙箱 dry-run 空跑双闸, 过则落
+    status=testing(灰度); 任一闸失败 409 不入库"""
+    _require_admin(x_role)
+    from services import agent75_sandbox_service as sb
+    from services.agent75_skill_service import (
+        SkillDefinition, SkillKind, SkillRuntime, SkillStatus)
+    import re as _re
+    if not _re.fullmatch(r"[A-Za-z0-9_]+", body.skill_id):
+        raise HTTPException(status_code=409, detail="skill_id 非法字符")
+    if sb.sandbox_kill():
+        raise HTTPException(status_code=409, detail="sandbox killed")
+    ok, err = sb.validate_code(body.code)
+    if not ok:
+        raise HTTPException(status_code=409,
+                            detail=f"静态预检未过: {err}")
+    rt = SkillRuntime()
+    if rt.get(body.skill_id) is not None:
+        raise HTTPException(status_code=409, detail="skill_id 已存在")
+    # dry-run 闸门(方案: approve 前必须沙箱空跑通过)
+    r = sb.exec_code(body.code, body.sample_input, body.timeout_ms)
+    if not (r.get("ok") and isinstance(r.get("result"), dict)
+            and str((r.get("result") or {}).get("answer") or "").strip()):
+        raise HTTPException(
+            status_code=409,
+            detail=f"dry-run 未过: {r.get('error') or 'answer 缺失'}")
+    sb.audit_run(body.skill_id, True, r.get("latency_ms", 0), body.code)
+    skill = rt.upsert(SkillDefinition(
+        skill_id=body.skill_id, name=body.name,
+        status=SkillStatus.TESTING, kind=SkillKind.CODE_TOOL,
+        slot="generate", intent=body.intent,
+        spec={"code": body.code, "timeout_ms": body.timeout_ms},
+        source="admin"))
+    return {"code": 0, "data": skill.model_dump()}
+
+
+sbx_router = APIRouter(
+    prefix="/api/v1/sandbox",
+    tags=["网站Agent中枢(75号)·沙箱面"],
+)
+
+
+@sbx_router.get("/healthz")
+async def sandbox_health(x_role: str | None = Header(default=None)):
+    _require_admin(x_role)
+    from services import agent75_sandbox_service as sb
+    return {"code": 0, "data": {
+        "healthy": sb.healthy(), "url": sb.SANDBOX_URL,
+        "kill": sb.sandbox_kill()}}
+
+
 def register_agent75_routes(app):
-    """注册75号·网站Agent中枢路由(任务+进化+技能三面)"""
+    """注册75号·网站Agent中枢路由(任务+进化+技能+沙箱四面)"""
     app.include_router(router)
     app.include_router(evo_router)
     app.include_router(skills_router)
+    app.include_router(sbx_router)

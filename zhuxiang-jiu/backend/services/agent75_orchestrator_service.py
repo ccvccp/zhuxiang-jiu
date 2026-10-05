@@ -285,7 +285,11 @@ class WebsiteAgentOrchestrator:
     def _execute_via_skill(self, rt, query: str, intent: str
                            ) -> tuple[str, dict[str, Any]]:
         s = rt.resolve("generate", intent)
-        if s is None or s.kind.value != "prompt_tool":
+        if s is None:
+            return self._execute(query, intent)
+        if s.kind.value == "code_tool":
+            return self._execute_code_tool(rt, s, query, intent)
+        if s.kind.value != "prompt_tool":
             return self._execute(query, intent)
         model_id = s.spec.get("model_id", "glm-reason")
         # prompt 优先级: P2 意图覆盖(仅当命中内置技能时) > 技能自身
@@ -305,6 +309,74 @@ class WebsiteAgentOrchestrator:
         rt.record_invocation(s.skill_id, ok, ms)
         return content, {"step_id": "exec_answer", "skill_id": s.skill_id,
                          "model_id": model_id, "retries": retries,
+                         "status": "success" if ok else "failed",
+                         "latency_ms": ms}
+
+    # -- P3b: code_tool 沙箱执行路径(失败语义: 预检/超限/不可达
+    #    → 同槽 prompt_tool 兜底 → 仍败回落直连——审计全程留痕) --
+
+    def _execute_code_tool(self, rt, s, query: str, intent: str
+                           ) -> tuple[str, dict[str, Any]]:
+        from services import agent75_sandbox_service as sb
+        code = str(s.spec.get("code") or "")
+        trace = {"step_id": "exec_answer", "skill_id": s.skill_id,
+                 "model_id": "sandbox", "retries": 0,
+                 "status": "failed", "latency_ms": 0}
+        ok, answer = False, ""
+        if not sb.sandbox_kill():
+            valid, err = sb.validate_code(code)
+            if valid:
+                r = sb.exec_code(code, {"query": query, "intent": intent},
+                                 int(s.spec.get("timeout_ms", 3000)))
+                ok = bool(r.get("ok"))
+                trace["latency_ms"] = r.get("latency_ms", 0)
+                if ok:
+                    answer = str(
+                        (r.get("result") or {}).get("answer") or "")[:2000]
+                    if not answer.strip():
+                        ok = False
+                        trace["status"] = "empty_result"
+                else:
+                    trace["status"] = f"sandbox_{r.get('error', 'fail')}"
+            else:
+                trace["status"] = f"precheck_{err}"
+            sb.audit_run(s.skill_id, ok, trace["latency_ms"], code)
+            rt.record_invocation(s.skill_id, ok, trace["latency_ms"])
+        else:
+            trace["status"] = "sandbox_killed"
+        if ok:
+            trace["status"] = "success"
+            return answer, trace
+        # 兜底: 同槽同意图 prompt_tool(排除 code_tool 自身)
+        fallback = next(
+            (x for x in rt.skills.values()
+             if x.slot == "generate" and x.kind.value == "prompt_tool"
+             and x.status.value == "active"
+             and (x.intent in (None, intent))), None)
+        if fallback is not None:
+            content, t2 = self._execute_via_skill_prompt(fallback, query)
+            t2["fallback_from"] = s.skill_id
+            return content, t2
+        content, t2 = self._execute(query, intent)
+        t2["fallback_from"] = s.skill_id
+        return content, t2
+
+    def _execute_via_skill_prompt(self, s, query: str
+                                  ) -> tuple[str, dict[str, Any]]:
+        """指定 prompt_tool 技能直调(兜底路径复用)"""
+        model_id = s.spec.get("model_id", "glm-reason")
+        prompt = (s.spec.get("prompt_template")
+                  or _PROMPTS.get(s.intent or "chat", _PROMPTS["chat"]))
+        content, ok, ms = self.gateway.call(model_id, prompt, query)
+        retries = 0
+        if not ok:
+            retries = 1
+            content, ok, ms2 = self.gateway.call(model_id, prompt, query)
+            ms += ms2
+        self.router.record(model_id, "generation", ok, ms)
+        return content, {"step_id": "exec_answer",
+                         "skill_id": s.skill_id, "model_id": model_id,
+                         "retries": retries,
                          "status": "success" if ok else "failed",
                          "latency_ms": ms}
 

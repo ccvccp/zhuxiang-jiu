@@ -383,3 +383,145 @@ def test_t11_evolution_skill_loop(_skill_dirs):
     out = evo.rollback_candidate(cand_ids[0])
     assert out["type"] == "skill" and out["skill_id"] == sid
     assert SkillRuntime().get(sid).status is SkillStatus.DEPRECATED
+
+
+# ------------------------------------------------------------
+# P3b(2026-10-05): 沙箱容器 + code_tool
+# ------------------------------------------------------------
+
+import importlib.util  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+_spec = importlib.util.spec_from_file_location(
+    "sandbox_app",
+    Path(__file__).resolve().parent.parent / "sandbox" / "sandbox_app.py")
+sandbox_app = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(sandbox_app)
+
+
+def test_t12_sandbox_gates():
+    """静态闸: 白名单 import/危险名目/run 入口"""
+    ok, _ = sandbox_app.check_code(
+        "import json\n\ndef run(x):\n    return {'answer': 'a'}")
+    assert ok
+    for bad in ("import os\n\ndef run(x):\n    return {}",
+                "def run(x):\n    return __import__('os')",
+                "def run(x):\n    return eval('1')",
+                "def run(x):\n    f = open('/etc/passwd')\n    return {}",
+                "def notrun(x):\n    return {}"):
+        ok, err = sandbox_app.check_code(bad)
+        assert not ok, bad
+        assert err
+
+
+def test_t12b_sandbox_exec_real():
+    """执行闸(本地真实子进程): happy/超时硬杀/递归炸弹"""
+    good = ("import json\n\n"
+            "def run(x):\n"
+            "    return {'answer': '程序回答: ' + str(x.get('query'))}")
+    r = sandbox_app.do_exec(good, {"query": "hi"}, 3000)
+    assert r["ok"] is True and r["result"]["answer"].startswith("程序回答")
+
+    bomb = "def run(x):\n    while True:\n        pass"
+    r = sandbox_app.do_exec(bomb, {}, 800)
+    assert r["ok"] is False and r["error"] == "timeout"
+
+    rec = ("def run(x):\n    def f():\n        return f()\n    return f()")
+    r = sandbox_app.do_exec(rec, {}, 3000)
+    assert r["ok"] is False and r["error"].startswith("exit_")
+
+
+def _mk_code_tool(rt, sid="codex_summary", intent="summary"):
+    rt.upsert(SkillDefinition(
+        skill_id=sid, name="代码技能", status=SkillStatus.ACTIVE,
+        kind=SkillKind.CODE_TOOL, slot="generate", intent=intent,
+        spec={"code": "def run(x):\n    return {'answer': 'x'}",
+              "timeout_ms": 1000},
+        source="admin"))
+    rt.set_status("answer_summary", SkillStatus.DEPRECATED)
+
+
+def test_t13_code_tool_paths(_skill_dirs, monkeypatch):
+    from services import agent75_sandbox_service as sb
+
+    _mk_code_tool(SkillRuntime())   # code_tool 上岗 + 内置 summary 让位
+
+    # ① 沙箱成功: 轨迹 model_id=sandbox, 任务 completed
+    monkeypatch.setattr(sb, "exec_code",
+                        lambda *a, **k: {"ok": True, "result": {
+                            "answer": "代码生成的摘要回答。"},
+                            "latency_ms": 42})
+    t = WebsiteAgentOrchestrator(MockGateway()).run("总结一下")
+    assert t.status == "completed"
+    gen = t.execution_trace[1]
+    assert gen["model_id"] == "sandbox" and gen["skill_id"] == "codex_summary"
+
+    # ② 沙箱失败 → 同槽 prompt_tool 兜底(fallback_from 留痕)
+    monkeypatch.setattr(sb, "exec_code",
+                        lambda *a, **k: {"ok": False,
+                                         "error": "timeout",
+                                         "latency_ms": 800})
+    t2 = WebsiteAgentOrchestrator(MockGateway()).run("再总结")
+    assert t2.status == "completed"
+    assert t2.execution_trace[1]["fallback_from"] == "codex_summary"
+
+    # ③ SANDBOX_KILL → 拒跑直落兜底 + 审计行落盘
+    monkeypatch.setenv("AGENT75_SANDBOX_KILL", "on")
+    t3 = WebsiteAgentOrchestrator(MockGateway()).run("三次总结")
+    assert t3.status == "completed"
+    assert t3.execution_trace[1]["fallback_from"] == "codex_summary"
+    lines = (_skill_dirs / "sandbox_runs.jsonl").read_text(
+        encoding="utf-8").strip().splitlines()
+    assert len(lines) >= 2      # ①② 各一条审计
+    monkeypatch.delenv("AGENT75_SANDBOX_KILL")
+
+
+def test_t14_code_tool_register_gate(_skill_dirs, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from routes.agent75_routes import register_agent75_routes
+    from services import agent75_sandbox_service as sb
+
+    app = FastAPI()
+    register_agent75_routes(app)
+    client = TestClient(app)
+    admin = {"X-Role": "admin"}
+    good_code = ("import json\n\n"
+                 "def run(x):\n    return {'answer': '格式化回答'}")
+    body = {"skill_id": "fmt_tool", "name": "格式化",
+            "intent": "summary", "code": good_code,
+            "sample_input": {"query": "t"}}
+
+    # 静态预检失败(import os) → 409 不入库
+    r = client.post("/api/v1/skills", headers=admin,
+                    json={**body, "skill_id": "os_tool",
+                          "code": "import os\n\ndef run(x):\n"
+                                  "    return {'answer': 'a'}"})
+    assert r.status_code == 409 and "预检" in r.json()["detail"]
+
+    # dry-run 失败 → 409
+    monkeypatch.setattr(sb, "exec_code",
+                        lambda *a, **k: {"ok": False,
+                                         "error": "timeout",
+                                         "latency_ms": 1})
+    r = client.post("/api/v1/skills", headers=admin, json=body)
+    assert r.status_code == 409 and "dry-run" in r.json()["detail"]
+
+    # dry-run 通过 → 200 落 testing
+    monkeypatch.setattr(sb, "exec_code",
+                        lambda *a, **k: {"ok": True, "result": {
+                            "answer": "格式化回答"}, "latency_ms": 5})
+    r = client.post("/api/v1/skills", headers=admin, json=body)
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["status"] == "testing" and d["kind"] == "code_tool"
+    assert SkillRuntime().get("fmt_tool").kind is SkillKind.CODE_TOOL
+
+    # 重复 id → 409; kill → 409
+    r = client.post("/api/v1/skills", headers=admin, json=body)
+    assert r.status_code == 409
+    monkeypatch.setenv("AGENT75_SANDBOX_KILL", "on")
+    r = client.post("/api/v1/skills", headers=admin,
+                    json={**body, "skill_id": "fmt_tool2"})
+    assert r.status_code == 409
+    monkeypatch.delenv("AGENT75_SANDBOX_KILL")
