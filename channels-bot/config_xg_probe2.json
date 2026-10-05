@@ -1,0 +1,5 @@
+{
+  "action": "probe",
+  "probeUrl": "https://creator.douyin.com/creator-micro/content/upload/video",
+  "waitLoginMinutes": 3
+}
