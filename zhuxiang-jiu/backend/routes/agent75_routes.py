@@ -341,3 +341,85 @@ async def list_res_sessions(limit: int = 20,
                             x_role: str | None = Header(default=None)):
     _res_guard(x_role)
     return {"code": 0, "data": ResonanceService().list_sessions(limit)}
+
+
+# ---------- RA-P1 通道B: 公开采集端点(beacon 无 admin 头) ----------
+# 安全闸: 事件白名单 + session 正则 + 批量/体积上限 + 内存滑动窗限流
+#         + COLLECT 独立停 + RESONANCE_KILL 总闸; 无 PII
+
+import re as _re2  # noqa: E402
+import time as _time  # noqa: E402
+
+from fastapi import Request as _Request  # noqa: E402
+
+_COLLECT_EVENTS = {"click", "scroll", "hover", "error", "back", "like",
+                   "share", "complete", "long_stay", "search",
+                   "view_detail", "pagehide"}
+_SESSION_RE = _re2.compile(r"^s_[A-Za-z0-9_]{4,64}$")
+_RATE_WINDOW_S = 60
+_RATE_MAX_BATCH = 30
+_rate_hits: dict[str, list[float]] = {}
+
+
+def _collect_kill() -> bool:
+    import os
+    return os.environ.get("AGENT75_RESONANCE_COLLECT", "on"
+                          ).strip().lower() in ("off", "0", "false")
+
+
+def _rate_ok(ip: str) -> bool:
+    now = _time.time()
+    hits = [t for t in _rate_hits.get(ip, [])
+            if now - t < _RATE_WINDOW_S]
+    if len(hits) >= _RATE_MAX_BATCH:
+        _rate_hits[ip] = hits
+        return False
+    hits.append(now)
+    _rate_hits[ip] = hits
+    if len(_rate_hits) > 10000:      # 防 IP 键膨胀
+        _rate_hits.clear()
+    return True
+
+
+@res_router.post("/collect")
+async def collect_events(request: _Request):
+    """公开采集: beacon 上报专用(结构白名单+限流, 无鉴权无 PII)"""
+    if resonance_kill():
+        raise HTTPException(status_code=409, detail="resonance killed")
+    if _collect_kill():
+        raise HTTPException(status_code=429, detail="collect disabled")
+    ip = (request.client.host if request.client else "") or "?"
+    if not _rate_ok(ip):
+        raise HTTPException(status_code=429, detail="rate limited")
+    try:
+        body = await request.json()
+    except Exception:   # noqa: BLE001
+        raise HTTPException(status_code=400, detail="bad json")
+    session_id = str((body or {}).get("session_id") or "")
+    if not _SESSION_RE.match(session_id):
+        raise HTTPException(status_code=422, detail="bad session_id")
+    items = (body or {}).get("events") or []
+    if not items:
+        raise HTTPException(status_code=422, detail="events empty")
+    if len(items) > MAX_EVENTS_PER_BATCH:
+        raise HTTPException(status_code=413, detail="batch too large")
+    events = []
+    for e in items:
+        etype = str((e or {}).get("event_type") or "")
+        payload = (e or {}).get("payload") or {}
+        if etype not in _COLLECT_EVENTS:
+            raise HTTPException(status_code=422,
+                                detail=f"event not allowed: {etype}")
+        if len(str(payload)) > 2048:
+            raise HTTPException(status_code=422, detail="payload too large")
+        events.append(PerceptionRecord(
+            session_id=session_id,
+            page_id=str((e or {}).get("page_id") or "")[:64],
+            event_type=etype, payload=payload))
+    snap = ResonanceService().run_session(
+        session_id, events, user_id=None)
+    return {"code": 0, "data": {
+        "session_id": snap["session_id"],
+        "emotion": snap["emotion"]["emotion"],
+        "mode": snap["intent"]["mode"],
+        "stickiness_score": snap["intent"]["stickiness_score"]}}

@@ -715,3 +715,103 @@ def test_t19_resonance_routes(_skill_dirs, monkeypatch):
     r = client.get("/api/v1/resonance/sessions", headers=admin)
     assert r.status_code == 409
     monkeypatch.delenv("AGENT75_RESONANCE_KILL")
+
+
+# ------------------------------------------------------------
+# RA-P1(2026-10-05): 通道A自动挂接 + 通道B公开采集端点
+# ------------------------------------------------------------
+
+def test_t20_resonance_auto_hook(_skill_dirs, monkeypatch):
+    import time as _t
+
+    task = WebsiteAgentOrchestrator(MockGateway()).run("自动共鸣测试")
+    sid = f"task_{task.task_id}"
+    for _ in range(50):    # 轮询通道A快照自动落盘
+        if any(r.get("session_id") == sid
+               for r in ResonanceService().list_sessions(50)):
+            break
+        _t.sleep(0.1)
+    assert any(r["session_id"] == sid
+               for r in ResonanceService().list_sessions(50))
+
+    # AUTO=off → 独立停通道A
+    monkeypatch.setenv("AGENT75_RESONANCE_AUTO", "off")
+    t2 = WebsiteAgentOrchestrator(MockGateway()).run("再来一条")
+    _t.sleep(0.5)
+    sids = [r["session_id"] for r in ResonanceService().list_sessions(50)]
+    assert f"task_{t2.task_id}" not in sids
+    monkeypatch.delenv("AGENT75_RESONANCE_AUTO")
+
+    # RESONANCE_KILL 总闸优先
+    monkeypatch.setenv("AGENT75_RESONANCE_KILL", "on")
+    t3 = WebsiteAgentOrchestrator(MockGateway()).run("总闸测试")
+    _t.sleep(0.5)
+    sids = [r["session_id"] for r in ResonanceService().list_sessions(50)]
+    assert f"task_{t3.task_id}" not in sids
+    monkeypatch.delenv("AGENT75_RESONANCE_KILL")
+
+
+def test_t21_collect_endpoint(_skill_dirs, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from routes import agent75_routes as R
+    from routes.agent75_routes import register_agent75_routes
+
+    app = FastAPI()
+    register_agent75_routes(app)
+    client = TestClient(app)
+    body = {"session_id": "s_web_t21",
+            "events": [{"event_type": "click",
+                        "payload": {"interval_ms": 150}},
+                       {"event_type": "scroll",
+                        "payload": {"scroll_depth": 0.4}}]}
+
+    def fresh():
+        R._rate_hits.clear()
+        return client.post("/api/v1/resonance/collect", json=body)
+
+    # 合法 → 200 快照落盘
+    r = fresh()
+    assert r.status_code == 200
+    assert r.json()["data"]["emotion"] == "anxious"
+    # 白名单外事件 / 坏 session / 空事件 / 超批量
+    R._rate_hits.clear()
+    r = client.post("/api/v1/resonance/collect", json={
+        **body, "events": [{"event_type": "steal_cookie",
+                            "payload": {}}]})
+    assert r.status_code == 422
+    R._rate_hits.clear()
+    r = client.post("/api/v1/resonance/collect",
+                    json={**body, "session_id": "bad!!"})
+    assert r.status_code == 422
+    R._rate_hits.clear()
+    r = client.post("/api/v1/resonance/collect",
+                    json={**body, "events": []})
+    assert r.status_code == 422
+    R._rate_hits.clear()
+    r = client.post("/api/v1/resonance/collect", json={
+        **body, "events": [{"event_type": "scroll", "payload": {}}] * 201})
+    assert r.status_code == 413
+    # 限流: 60s 窗 30 批
+    R._rate_hits.clear()
+    ok = 0
+    for _ in range(31):
+        rr = client.post("/api/v1/resonance/collect", json={
+            **body, "session_id": "s_web_t21"})
+        if rr.status_code == 200:
+            ok += 1
+        else:
+            assert rr.status_code == 429
+            break
+    assert ok == 30
+    R._rate_hits.clear()
+    # COLLECT=off → 429; RESONANCE_KILL 总闸 → 409
+    monkeypatch.setenv("AGENT75_RESONANCE_COLLECT", "off")
+    r = client.post("/api/v1/resonance/collect", json=body)
+    assert r.status_code == 429
+    monkeypatch.delenv("AGENT75_RESONANCE_COLLECT")
+    R._rate_hits.clear()
+    monkeypatch.setenv("AGENT75_RESONANCE_KILL", "on")
+    r = client.post("/api/v1/resonance/collect", json=body)
+    assert r.status_code == 409
+    monkeypatch.delenv("AGENT75_RESONANCE_KILL")

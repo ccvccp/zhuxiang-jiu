@@ -438,6 +438,31 @@ class WebsiteAgentOrchestrator:
                 logger.warning("agent75_shadow_failed id=%s: %s",
                                sid, exc)
 
+    # -- RA-P1 通道A: 任务尾自动共鸣回放(daemon 线程, 主链零延迟;
+    #    RESONANCE_AUTO=off 独立停, RESONANCE_KILL 总闸优先) --
+
+    def _spawn_resonance(self, task_id: str) -> None:
+        try:
+            import os
+            if os.environ.get("AGENT75_RESONANCE_AUTO", "on"
+                              ).strip().lower() in ("off", "0", "false"):
+                return
+            threading.Thread(target=self._run_resonance,
+                             args=(task_id,), daemon=True).start()
+        except Exception:   # noqa: BLE001 共鸣面异常不碰主链
+            pass
+
+    @staticmethod
+    def _run_resonance(task_id: str) -> None:
+        try:
+            from services.agent75_resonance_service import (
+                ResonanceService, resonance_kill)
+            if resonance_kill():
+                return
+            ResonanceService().replay_task(task_id)
+        except Exception as exc:   # noqa: BLE001
+            logger.warning("agent75_resonance_replay_skip: %s", exc)
+
     # -- Planner(意图识别走分类路由; 失败回落 chat) --
 
     def _plan(self, query: str) -> tuple[str, dict[str, Any]]:
@@ -573,6 +598,7 @@ class WebsiteAgentOrchestrator:
                     logger.warning("agent75_evolution_propose_skip: %s",
                                    exc)
             self._save(task)
+            self._spawn_resonance(task.task_id)   # RA-P1 通道A 自动回放
             logger.info("agent75_task_done id=%s intent=%s status=%s",
                         task.task_id, intent, task.status)
         except Exception as exc:   # noqa: BLE001

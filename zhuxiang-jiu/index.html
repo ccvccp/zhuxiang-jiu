@@ -165,20 +165,20 @@
             }, 4000);
         })();
 
-        // 金刚区 8 宫格（逛/购/玩/服务 四类动线，各自直达）
+        // 金刚区 8 宫格（逛/购/玩/服务 四类动线，各自直达；图片图标统一竹绿扁平风）
         const KINGKONG = [
-            { icon: '🍶', title: '全部产品', desc: '竹奕全系', url: 'products.html' },
-            { icon: '🏛', title: '同盟臻选', desc: '源头好物', url: 'alliance-mall.html' },
-            { icon: '🎁', title: '活动中心', desc: '福利进行中', url: 'activity.html' },
-            { icon: '🔍', title: '溯源查询', desc: '批次验真', url: 'zjian.html' },
-            { icon: '👤', title: '会员中心', desc: '专享权益', url: 'login.html' },
-            { icon: '🛒', title: '购物车', desc: '已选好物', url: 'cart.html' },
-            { icon: '💬', title: '客户服务', desc: '在线支持', url: 'service.html' },
-            { icon: '📰', title: '品牌资讯', desc: '新闻动态', url: 'news.html' },
+            { img: 'kk-products.jpg', title: '全部产品', desc: '竹奕全系', url: 'products.html' },
+            { img: 'kk-alliance.jpg', title: '同盟臻选', desc: '源头好物', url: 'alliance-mall.html' },
+            { img: 'kk-activity.jpg', title: '活动中心', desc: '福利进行中', url: 'activity.html' },
+            { img: 'kk-trace.jpg', title: '溯源查询', desc: '批次验真', url: 'zjian.html' },
+            { img: 'kk-member.jpg', title: '会员中心', desc: '专享权益', url: 'login.html' },
+            { img: 'kk-cart.jpg', title: '购物车', desc: '已选好物', url: 'cart.html' },
+            { img: 'kk-service.jpg', title: '客户服务', desc: '在线支持', url: 'service.html' },
+            { img: 'kk-news.jpg', title: '品牌资讯', desc: '新闻动态', url: 'news.html' },
         ];
         document.getElementById('serviceEntries').innerHTML = KINGKONG.map(k => `
             <div class="service-entry" onclick="location.href='${k.url}'">
-                <div class="icon">${k.icon}</div>
+                <div class="icon"><img src="images/icons/${k.img}" alt="${k.title}" width="46" height="46" loading="lazy"></div>
                 <h3>${k.title}</h3>
                 <p>${k.desc}</p>
             </div>`).join('');
@@ -284,5 +284,6 @@
             } catch (e) { /* 静默隐藏 */ }
         })();
     </script>
+  <script src="js/resonance-beacon.js" defer></script>
 </body>
 </html>
