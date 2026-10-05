@@ -198,6 +198,8 @@ _SCENE_TYPE_FIT = {
     "agent_purchase": {"bank": 1.0, "aggregate": 0.8, "third_party": 0.6},
     # SVIP 会员费(¥99/年小额标准品): 第三方扫码最优
     "member_svip":    {"third_party": 1.0, "aggregate": 0.8, "bank": 0.4},
+    # 76号 DP2b 短剧超级会员(¥29.9/月·¥199 永久小额虚拟权益): 同 SVIP 口径
+    "drama_super":    {"third_party": 1.0, "aggregate": 0.8, "bank": 0.4},
 }
 
 

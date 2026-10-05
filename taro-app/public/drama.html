@@ -57,6 +57,10 @@
   .invite p { color:var(--muted); font-size:12px; margin-bottom:10px; }
   .invite .code { font-family:monospace; color:var(--brand);
                   font-weight:600; user-select:all; }
+  .plans { display:flex; gap:10px; }
+  .plans .btn { flex:1; padding:10px 8px; font-size:13px; }
+  .plans .btn small { display:block; font-size:11px;
+                      font-weight:400; opacity:.85; }
   footer { text-align:center; color:var(--muted); font-size:12px;
            padding:18px 0 30px; }
   footer a { color:var(--brand); text-decoration:none; }
@@ -83,7 +87,7 @@
       <div class="sub" id="lockSub">注册即可免费解锁本剧后段，超级会员全站短剧永久免费看。</div>
       <a class="btn" id="lockBtn" href="/login.html">注册免费解锁</a>
       <a class="btn ghost" id="lockInviteBtn" href="javascript:void(0)">邀 1 位好友解锁</a>
-      <a class="btn ghost" href="/index.html">了解超级会员</a>
+      <a class="btn ghost" id="lockMemberBtn" href="javascript:void(0)">开通超级会员</a>
     </div>
   </div>
 
@@ -96,6 +100,17 @@
     <h4>邀请好友 · 一起追剧</h4>
     <p id="inviteStat">我的邀请码 <span class="code" id="inviteCode">—</span></p>
     <button class="btn" id="inviteCopy" type="button">复制邀请链接</button>
+  </div>
+
+  <div class="invite" id="superBox">
+    <h4>超级会员 · 全站短剧免费看</h4>
+    <p id="superStat">一次开通，全站短剧永久免费 · 新剧抢先看</p>
+    <div class="plans">
+      <button class="btn" id="planForever" type="button">
+        永久卡 ¥199<small>全站永久免费</small></button>
+      <button class="btn ghost" id="planMonth" type="button">
+        月卡 ¥29.9<small>30 天全站免费</small></button>
+    </div>
   </div>
 
   <footer>理性饮酒 · 未满18岁请勿饮酒<br>
@@ -316,6 +331,88 @@
     });
   };
 
+  /* ---------- DP2b: 超级会员购买(pay60) ---------- */
+  var superBox = document.getElementById("superBox");
+  var superStatEl = document.getElementById("superStat");
+
+  function renderSuperPanel(isSuper) {
+    var t = token();
+    if (!t || !curDrama) { superBox.style.display = "none"; return; }
+    superBox.style.display = "block";
+    if (isSuper) {
+      superStatEl.textContent = "已是超级会员 · 全站短剧免费观看中";
+    }
+  }
+
+  function pollPay(payNo, tries) {
+    var t = token();
+    if (!t) { return; }
+    setTimeout(function () {
+      fetch("/api/payment/" + payNo, {
+        headers: { "Authorization": "Bearer " + t }
+      }).then(function (r) { return r.json(); })
+        .then(function (b) {
+          if (b.status === "paid") {
+            toast("支付成功 · 超级会员已开通");
+            boot(curDrama);
+          } else if ((tries || 0) < 30) {
+            pollPay(payNo, (tries || 0) + 1);
+          }
+        }).catch(function () { });
+    }, 2000);
+  }
+
+  function doPurchase(planId) {
+    var t = token();
+    if (!t) {
+      location.href = "/login.html?redirect=" +
+        encodeURIComponent(location.pathname + location.search);
+      return;
+    }
+    track("member_page_view", { drama_id: dramaId, plan_id: planId });
+    fetch("/api/v1/memberships/purchase", {
+      method: "POST",
+      headers: { "Content-Type": "application/json",
+                 "Authorization": "Bearer " + t },
+      body: JSON.stringify({ plan_id: planId })
+    }).then(function (r) { return r.json(); })
+      .then(function (b) {
+        var rec = b.data || {};
+        if (b.code !== 0 || !rec.payNo) {
+          toast("下单失败，请稍后再试"); return;
+        }
+        return fetch("/api/payment/" + rec.payNo + "/start", {
+          method: "POST",
+          headers: { "Authorization": "Bearer " + t }
+        }).then(function (r2) { return r2.json(); })
+          .then(function (s) {
+            if (s.status === "paid") {
+              toast("超级会员已开通 · 全站免费观看");
+              boot(curDrama);
+            } else if (s.status === "paying") {
+              toast("支付单已创建，完成支付后自动开通");
+              pollPay(rec.payNo);
+            } else {
+              toast("支付发起失败，请稍后再试");
+            }
+          });
+      }).catch(function () { toast("网络异常"); });
+  }
+
+  document.getElementById("planForever").onclick = function () {
+    doPurchase("super_forever"); };
+  document.getElementById("planMonth").onclick = function () {
+    doPurchase("super_month"); };
+  document.getElementById("lockMemberBtn").onclick = function () {
+    if (!token()) {
+      location.href = "/login.html?redirect=" +
+        encodeURIComponent(location.pathname + location.search);
+      return;
+    }
+    superBox.style.display = "block";
+    superBox.scrollIntoView({ behavior: "smooth" });
+  };
+
   function playEp(ep, title) {
     curEp = ep;
     document.getElementById("epTitle").textContent =
@@ -390,6 +487,7 @@
         if (t && (b.data || {}).is_super) {
           toast("超级会员 · 全站免费观看");
         }
+        renderSuperPanel(t ? (b.data || {}).is_super : false);
         var lockedCp = eps.filter(function (e) {
           return e.is_checkpoint && !e.is_unlocked; })[0];
         if (lockedCp && t) {

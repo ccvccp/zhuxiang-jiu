@@ -113,7 +113,7 @@ def default_pay_method(pay_channel: str) -> str:
 
 # 场景类型(与已有模块联动; guest_order_pay 为游客扫码付免登录场景)
 SUPPORTED_SCENES = {"order_pay", "wallet_deposit", "agent_purchase",
-                    "guest_order_pay", "member_svip"}
+                    "guest_order_pay", "member_svip", "drama_super"}
 
 # 游客扫码付规则(设计文档 2.7.3/2.7.8: P0 一期核心)
 GUEST_SCENE = "guest_order_pay"
@@ -391,9 +391,9 @@ class PaymentService:
                     "expireTime": order.get("expireTime", ""),
                 },
             }
-            # 业务接线场景(钱包充值/SVIP): 前端 UX 需同步完成支付闭环
+            # 业务接线场景(钱包充值/SVIP/短剧超级会员): 前端 UX 需同步完成支付闭环
             auto_complete = order.get("orderType") in (
-                "wallet_deposit", "member_svip")
+                "wallet_deposit", "member_svip", "drama_super")
 
         # 注意: 必须在锁外调用 pay_callback/网关执行器(其内部获取同一
         # payment:order:pay:{payNo} 锁, 锁内重入会死锁)。
@@ -660,6 +660,12 @@ class PaymentService:
                 from services.member_service import MemberService
                 r = await MemberService().renew_svip(
                     int(user_id), pay_no=order["payNo"])
+                return {"granted": True, "business": r}
+            if order_type == "drama_super":
+                # 76号 DP2b: 短剧超级会员(orderId 携带 plan_id)
+                from services.drama76_series_service import (
+                    DramaSeriesService)
+                r = await DramaSeriesService().grant_super_by_order(order)
                 return {"granted": True, "business": r}
             return {"granted": False, "business": None,
                     "msg": f"订单类型 {order_type} 无业务分发(仅记账)"}

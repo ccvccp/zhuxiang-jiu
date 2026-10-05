@@ -236,6 +236,29 @@ async def revoke_super(body: GrantRequest,
     return {"code": 0, "data": {"user_id": body.user_id, "revoked": True}}
 
 
+class PurchaseRequest(BaseModel):
+    plan_id: str
+    pay_channel: str = "wechat"   # wechat/alipay
+
+
+@unlock_router.post("/memberships/purchase")
+async def purchase_super(body: PurchaseRequest,
+                         x_member_id: str | None = Header(default=None)):
+    """购买超级会员·创建支付单(DP2b; 登录态)。
+
+    铁律: 本端点只创建支付单不直接开通——开通由支付回调分发
+    (payment_service._dispatch_business → grant_super_by_order)完成。
+    返回 payNo 后由前端发起渠道支付(POST /api/payment/{pay_no}/start)。
+    """
+    user = _member_id(x_member_id)
+    try:
+        rec = await _svc.create_super_purchase_pay(
+            user, body.plan_id, body.pay_channel)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="plan not found")
+    return {"code": 0, "data": rec}
+
+
 # ---------- DP3: 邀请裂变 ----------
 
 growth_router = APIRouter(

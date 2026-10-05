@@ -1425,3 +1425,93 @@ def test_t34_ladder_edge():
                 (await g.progress("u_all"))["rewards"]} == {1, 3}
 
     asyncio.run(run())
+
+
+# ------------------------------------------------------------
+# 76号 DP2b(2026-10-06): pay60 支付下单 + 回调自动发放
+# ------------------------------------------------------------
+
+def test_t35_super_purchase_service():
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from services.drama76_series_service import DramaSeriesService
+    from services.payment_service import PaymentService
+
+    async def run():
+        svc = DramaSeriesService(repo=_DP1_REPO)
+        ps = PaymentService()
+        # 月卡下单: orderId 编码 plan_id, scene=drama_super, ¥29.9
+        r = await svc.create_super_purchase_pay("u_buy", "super_month")
+        assert r["success"] and r["status"] == "pending"
+        assert r["actualAmount"] == 29.9
+        assert r["sceneType"] == "drama_super"
+        assert r["orderId"].startswith("DSUPER-super_month-")
+        # 铁律: 未支付不开通
+        assert await svc.is_super("u_buy") is False
+        # mock 渠道 start 即回调+分发 → 开通(source=purchase, +30 天)
+        s = await ps.start_pay(r["payNo"])
+        assert s["status"] == "paid"
+        d = (s.get("dispatch") or {})
+        assert d.get("granted") is True
+        biz = d.get("business") or {}
+        assert biz.get("plan_id") == "super_month"
+        assert await svc.is_super("u_buy") is True
+        store = getattr(_DP1_REPO, "store", None)
+        rec = store["drama76_super"]["u_buy"]
+        assert rec["source"] == "purchase"
+        exp1 = datetime.fromisoformat(rec["expire_at"])
+        now = datetime.now(timezone.utc)
+        assert timedelta(days=29) < exp1 - now < timedelta(days=31)
+        # 再买一月卡: 有效期内累加(≈ +60 天)
+        r2 = await svc.create_super_purchase_pay("u_buy", "super_month")
+        s2 = await ps.start_pay(r2["payNo"])
+        assert s2["status"] == "paid"
+        exp2 = datetime.fromisoformat(
+            store["drama76_super"]["u_buy"]["expire_at"])
+        assert exp2 - now > timedelta(days=58)
+        # 永久卡: 覆盖为永久(expire 空)
+        r3 = await svc.create_super_purchase_pay("u_buy", "super_forever")
+        s3 = await ps.start_pay(r3["payNo"])
+        assert s3["status"] == "paid"
+        assert store["drama76_super"]["u_buy"]["expire_at"] == ""
+        # 回调幂等: 不重复改写
+        cb = await ps.pay_callback(f"MOCK{r['payNo']}", {"dup": True},
+                                   pay_no=r["payNo"])
+        assert cb.get("idempotent") is True
+        assert store["drama76_super"]["u_buy"]["expire_at"] == ""
+
+    asyncio.run(run())
+
+
+def test_t36_purchase_route(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from routes.drama76_routes import register_drama76_routes
+    from services.drama76_series_service import DramaSeriesService
+
+    monkeypatch.setattr(
+        "routes.drama76_routes._svc",
+        DramaSeriesService(repo=_DP1_REPO))
+    app = FastAPI()
+    register_drama76_routes(app)
+    client = TestClient(app)
+    auth = {"X-Member-Id": "u_buy_r"}
+
+    # 未登录 401; 未知套餐 404
+    assert client.post(
+        "/api/v1/memberships/purchase",
+        json={"plan_id": "super_forever"}).status_code == 401
+    r = client.post("/api/v1/memberships/purchase", headers=auth,
+                    json={"plan_id": "super_nothing"})
+    assert r.status_code == 404
+    # 正常下单: 返回支付单(铁律: 非直接开通)
+    r = client.post("/api/v1/memberships/purchase", headers=auth,
+                    json={"plan_id": "super_forever",
+                          "pay_channel": "alipay"})
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["payNo"] and d["status"] == "pending"
+    assert d["actualAmount"] == 199.0
+    assert d["sceneType"] == "drama_super"
+    assert d["orderId"].startswith("DSUPER-super_forever-")
+    assert d["payMethod"] == "wap"   # alipay → wap 渠道映射

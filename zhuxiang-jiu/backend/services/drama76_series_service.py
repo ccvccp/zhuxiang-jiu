@@ -301,3 +301,80 @@ class DramaSeriesService:
         unlocked = await self.unlocked_dramas_of(user_id)
         return self.episode_states(drama, is_member=member,
                                    unlocked_dramas=unlocked)
+
+    # ---------- DP2b: pay60 支付下单 + 回调发放 ----------
+
+    SUPER_PURCHASE_PREFIX = "DSUPER-"   # orderId: DSUPER-{plan_id}-{单号}
+
+    @staticmethod
+    def _plan_of(plan_id: str) -> Optional[dict]:
+        return next((p for p in SUPER_PLANS
+                     if p["plan_id"] == plan_id), None)
+
+    async def create_super_purchase_pay(
+            self, user_id: str, plan_id: str,
+            pay_channel: str = "wechat",
+            pay_method: Optional[str] = None) -> dict:
+        """超级会员购买支付单(铁律: 只创建支付单不直接开通——
+        开通由支付回调分发 payment_service._dispatch_business 完成)
+        Raises: KeyError=套餐不存在"""
+        plan = self._plan_of(plan_id)
+        if not plan:
+            raise KeyError(plan_id)
+        from services.payment_service import (
+            PaymentService, default_pay_method)
+        from services.tx_utils import gen_no
+        if pay_method is None:
+            pay_method = default_pay_method(pay_channel)
+        return await PaymentService().create_pay(
+            user_id=user_id,
+            # plan_id 编进 orderId, 回调分发时解析(支付单无业务扩展字段)
+            order_id=f"{self.SUPER_PURCHASE_PREFIX}{plan_id}-"
+                     f"{gen_no(str(user_id) + '-')}",
+            order_type="drama_super",
+            total_amount=float(plan["price"]),
+            pay_channel=pay_channel,
+            pay_method=pay_method,
+            scene_type="drama_super")
+
+    async def grant_super_by_order(self, order: dict) -> dict:
+        """支付回调发放(_dispatch_business 调用): 解析 orderId 中
+        plan_id → 开通/续期。月卡在既有有效到期日上累加(重复购买
+        不吃亏); 永久卡覆盖。"""
+        order_id = str(order.get("orderId") or "")
+        plan_id = order_id.split("-", 2)[1] \
+            if order_id.startswith(self.SUPER_PURCHASE_PREFIX) else ""
+        plan = self._plan_of(plan_id)
+        if not plan:
+            raise ValueError(f"支付单业务信息缺失: {order_id}")
+        days = int(plan.get("duration_days") or 0)
+        if days <= 0:   # 永久卡: 覆盖
+            rec = await self.grant_super(order.get("userId"),
+                                         days=0, source="purchase")
+            return {"action": "purchased", "plan_id": plan_id,
+                    "days": 0, "expire_at": rec["expire_at"]}
+        # 月卡: 有效期内累加
+        from datetime import timedelta
+        user_id = str(order.get("userId"))
+        store = getattr(self.repo, "store", None)
+        if isinstance(store, dict):
+            store.setdefault(self.SUPER_TABLE, {})
+        existing = await self.repo._get(self.SUPER_TABLE, user_id) or {}
+        base = datetime.now(timezone.utc)
+        exp = existing.get("expire_at") or ""
+        if exp:
+            try:
+                old = datetime.fromisoformat(exp)
+                if old > base:
+                    base = old
+            except ValueError:
+                pass
+        expire = (base + timedelta(days=days)).isoformat()
+        rec = SuperMember(user_id=user_id, source="purchase",
+                          expire_at=expire, created_at=_now()).model_dump()
+        await self.repo._save(self.SUPER_TABLE, user_id, rec)
+        logger.info("drama76_super_purchased user=%s plan=%s days=%d "
+                    "expire=%s payNo=%s", user_id, plan_id, days, expire,
+                    order.get("payNo"))
+        return {"action": "purchased", "plan_id": plan_id,
+                "days": days, "expire_at": expire}
