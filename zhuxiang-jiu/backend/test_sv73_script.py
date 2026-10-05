@@ -428,26 +428,35 @@ def test_t11_drama_registry_and_rule_track(monkeypatch):
     assert sv73mod.lint_drama(sb["scenes"]) == []
 
 
-def test_t14_drama_product_gate():
-    """产品钩子门(cid76 漏网堵漏): 无竹/酒的独白必打回"""
-    # cid76 实录形态: 结构全过但独白无任何产品提及
+def test_t14_drama_entertainment_caliber():
+    """短剧娱乐片口径(2026-10-06 用户定案): 短剧=合规娱乐片非酒
+    广告——产品钩子断言撤销, 无竹/酒的纯剧情独白可过审;
+    广告法专属要求(产品必现)仅适用于广告位内容, 不套用 drama 轨"""
+    # cid76 形态(结构全过但无产品提及): 娱乐片口径下合格
     dud = [{"role": "drama_oral",
             "voiceover": "三年来非遗馆门可罗雀，可今天，终于火了！"}]
-    flaws = sv73mod.lint_drama(dud)
-    assert any("产品钩子" in f for f in flaws)
-    # 补上产品钩子 → 产品维度通过(其余维度由 T13 覆盖)
+    assert sv73mod.lint_drama(dud) == []
+    # 带产品的独白同样合格(可选元素)
     ok = [{"role": "drama_oral",
            "voiceover": ("三年来非遗馆门可罗雀，可今天，终于火了！"
                          "这热潮，竟是从一杯竹香酒开始的。")}]
-    assert not any("产品钩子" in f for f in sv73mod.lint_drama(ok))
-    # rule 回落模板自带竹香酒 → 不受新门影响
-    assert not any("产品钩子" in f for f in sv73mod.lint_drama(
-        [{"role": "drama_oral", "voiceover": (
-            "三年来谁都笑我不自量力。可这天, 终于轮到我说话, "
-            "这杯竹香酒, 敬每一个不服输的自己!")}]))
-    # 反例: 无转折词/无爆发/句段<3 → 三项全打回(含酒字不触产品门)
-    bad = [{"role": "drama_oral", "voiceover": "今天聊酒"}]
-    assert len(sv73mod.lint_drama(bad)) == 3
+    assert sv73mod.lint_drama(ok) == []
+    # 产品钩子断言已撤销(常量退场)
+    assert not hasattr(sv73mod, "DRAMA_PRODUCT_WORDS")
+    # 结构断言保留(娱乐片质量门): 无转折词仍打回
+    bad = [{"role": "drama_oral",
+            "voiceover": "今天天气很好。我们出门散步。心情不错。"}]
+    flaws = sv73mod.lint_drama(bad)
+    assert any("转折词" in f for f in flaws)
+    # prompt 口径: 可选产品 + 娱乐定位, 不再含硬条件
+    prompt = Sv73ScriptService()._system_prompt(
+        sv73mod.IP_PERSONAS["zhuxiaomei"], "drama_monologue")
+    assert "产品元素(竹香酒)为可选" in prompt
+    assert "不是产品广告" in prompt
+    assert "必须出现「竹香酒」" not in prompt
+    # 极端反例: 三项结构断言全打回(无转折/无爆发/句段<3)
+    worst = [{"role": "drama_oral", "voiceover": "今天聊酒"}]
+    assert len(sv73mod.lint_drama(worst)) == 3
 
 
 def test_t11b_drama_mix_plan_reuse():
