@@ -48,6 +48,10 @@ PUBLIC_EXACT = {
     # 用户认证模块(JWT)
     "/api/auth/register",
     "/api/auth/login",
+    # 网站Agent中枢(75号 RA-P1): 共鸣行为采集——beacon 无登录态,
+    # 端点自身带白名单/正则/限流/COLLECT kill 五层闸(auth_middleware
+    # 仅免登录, 不豁免路由层校验)
+    "/api/v1/resonance/collect",
     "/api/auth/login/sms",       # P1-1 验证码登录
     "/api/auth/refresh",
     "/api/auth/logout",
