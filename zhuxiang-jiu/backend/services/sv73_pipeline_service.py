@@ -44,9 +44,11 @@ logger = logging.getLogger(__name__)
 # 发布平台(36号 RPA_PLATFORMS 成员; 2026-09-30 P2 平台扩展四平台
 # 全开——36号 rpa_pending 清单/回执闭环平台无关;
 # 2026-10-05 快手入列: kuaishou-bot E2E 首发实证, video 直传,
-# AIGC 软声明由 bot 在 desc 尾部自动追加)
+# AIGC 软声明由 bot 在 desc 尾部自动追加;
+# 2026-10-05 头条入列: toutiao-bot assist 模式 E2E 首发实证
+# (上传/标题/AI生成声明 bot 全自动, 发布按钮人工收口)
 SV73_PLATFORMS = ("wechat_channels", "douyin",
-                  "xiaohongshu", "weibo", "kuaishou")
+                  "xiaohongshu", "weibo", "kuaishou", "toutiao")
 DEFAULT_PLATFORM = "wechat_channels"
 
 # 平台内容形态注册表(发布执行层口径)
@@ -61,6 +63,7 @@ SV73_PLATFORM_FORMS = {
     "xiaohongshu": "video",
     "weibo": "card",
     "kuaishou": "video",
+    "toutiao": "video",  # xigua/upload-video 直传(标题独立框 30 字)
 }
 
 # 品类自动档(P1: category="auto" 经匹配引擎推荐)
@@ -298,8 +301,15 @@ class Sv73PipelineService:
                 "(xhs-bot.js 视频笔记——21 轮全自动闭环: 转码绿标"
                 "等待+CDP pierce 穿透 shadow 定位发布钮+published=true"
                 "特征收口)")
+        if platform == "toutiao":
+            return base + (
+                "(channels/toutiao-bot assist 模式 RPA video 直传: "
+                "上传/标题(≤30字)/作品声明「AI生成」bot 全自动, "
+                "发布按钮人工点击收口——字节系对合成/CDP 点击免疫 "
+                "2026-10-05 实证; 成功特征=URL 离开发布页)")
         bot_map = {"douyin": "douyin-bot",
                    "kuaishou": "kuaishou-bot",
+                   "toutiao": "toutiao-bot",
                    "wechat_channels": "bot.js"}
         bot = bot_map.get(platform, "douyin-bot")
         return base + f"(channels/{bot} RPA {form} 直传)"

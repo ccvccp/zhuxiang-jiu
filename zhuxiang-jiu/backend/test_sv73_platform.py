@@ -69,12 +69,14 @@ def _isolated(monkeypatch, tmp_path):
 
 def test_p1_platform_registry():
     assert SV73_PLATFORMS == ("wechat_channels", "douyin",
-                              "xiaohongshu", "weibo", "kuaishou")
+                              "xiaohongshu", "weibo", "kuaishou",
+                              "toutiao")
     assert SV73_PLATFORM_FORMS["wechat_channels"] == "video"
     assert SV73_PLATFORM_FORMS["douyin"] == "video"
     assert SV73_PLATFORM_FORMS["xiaohongshu"] == "video"
     assert SV73_PLATFORM_FORMS["weibo"] == "card"   # CLI 无视频命令
     assert SV73_PLATFORM_FORMS["kuaishou"] == "video"  # 2026-10-05 入列
+    assert SV73_PLATFORM_FORMS["toutiao"] == "video"  # 2026-10-05 入列
 
 
 # ------------------------------------------------------------
@@ -167,4 +169,34 @@ def test_p5_kuaishou_full_chain():
     )
     rows = _run(PromoRpaChannelService().list_pending(
         platform="kuaishou"))
+    assert any(r["contentId"] == cid for r in rows)
+
+
+# ------------------------------------------------------------
+# P6 toutiao 全链(2026-10-05 入列: assist 模式 video 直传)
+# ------------------------------------------------------------
+
+
+def test_p6_toutiao_full_chain():
+    result = _run(Sv73PipelineService().run(
+        {**HOTSPOT, "fingerprint": "fp-sv73-plat-tt"},
+        platform="toutiao"))
+    assert result["platformForm"] == "video"
+    assert "toutiao-bot" in result["nextSteps"]
+    assert "AI生成" in result["nextSteps"]  # 作品声明指引注入
+    cid = result["content"]["contentId"]
+
+    promo = PromoService()
+    _run(promo.review_content(cid, approved=True))
+    _run(promo.publish_content(
+        cid, publish_at="2020-01-01T00:00:00+00:00"))
+    published = _run(promo.process_publish_queue())
+    hit = next(c for c in published if c["contentId"] == cid)
+    assert hit["receipt"]["mode"] == "rpa_pending"
+    assert hit["platform"] == "toutiao"
+    from services.promo_rpa_channel_service import (
+        PromoRpaChannelService,
+    )
+    rows = _run(PromoRpaChannelService().list_pending(
+        platform="toutiao"))
     assert any(r["contentId"] == cid for r in rows)
