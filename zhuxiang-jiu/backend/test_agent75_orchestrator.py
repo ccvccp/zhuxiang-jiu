@@ -1157,3 +1157,99 @@ def test_t29_unlock_route_and_events(monkeypatch):
         "session_id": "s_dp1_evt",
         "events": [{"event_type": "drama_steal", "payload": {}}]})
     assert r.status_code == 422
+
+
+# ------------------------------------------------------------
+# 76号 DP2(2026-10-05): 超级会员
+# ------------------------------------------------------------
+
+def test_t30_super_member_service():
+    import asyncio
+    from services.drama76_series_service import (
+        SUPER_PLANS, DramaSeriesService)
+
+    async def run():
+        svc = DramaSeriesService(repo=_DP1_REPO)
+        # 套餐表在位
+        assert {p["plan_id"] for p in SUPER_PLANS} >= {
+            "super_forever", "super_month"}
+        # 未开通 → False; 永久开通 → True; 撤销 → False
+        assert await svc.is_super("u_sup") is False
+        await svc.grant_super("u_sup", days=0, source="admin")
+        assert await svc.is_super("u_sup") is True
+        assert await svc.revoke_super("u_sup") is True
+        assert await svc.is_super("u_sup") is False
+        # 月卡(30 天) → True; 过期(倒签 1 天) → False
+        await svc.grant_super("u_sup2", days=30)
+        assert await svc.is_super("u_sup2") is True
+        from datetime import datetime, timedelta, timezone
+        store = getattr(_DP1_REPO, "store", None)
+        store["drama76_super"]["u_sup3"] = {
+            "user_id": "u_sup3", "source": "admin",
+            "expire_at": (datetime.now(timezone.utc)
+                          - timedelta(days=1)).isoformat(),
+            "created_at": ""}
+        assert await svc.is_super("u_sup3") is False
+        # user_view: 会员全解锁(member_only 态) + 解锁用户全集(unlocked)
+        d = await svc.get("drama_dp1")
+        await svc.grant_super("u_sup", 0)
+        eps = await svc.user_view("u_sup", d)
+        assert all(e["is_unlocked"] for e in eps)
+        eps2 = await svc.user_view("u_9", d)     # 已解锁用户(T27)
+        assert all(e["is_unlocked"] for e in eps2)
+
+    asyncio.run(run())
+
+
+def test_t31_super_routes(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from routes.drama76_routes import register_drama76_routes
+    from services.drama76_series_service import DramaSeriesService
+
+    monkeypatch.setattr(
+        "routes.drama76_routes._svc",
+        DramaSeriesService(repo=_DP1_REPO))
+    app = FastAPI()
+    register_drama76_routes(app)
+    client = TestClient(app)
+    admin = {"X-Role": "admin"}
+    auth = {"X-Member-Id": "u_sup_r"}
+
+    # plans 公开(无头)
+    r = client.get("/api/v1/memberships/plans")
+    assert r.status_code == 200 and len(r.json()["data"]) == 2
+    # grant: 非 admin 403 / admin 200
+    r = client.post("/api/v1/memberships/grant",
+                    json={"user_id": "u_sup_r", "days": 0})
+    assert r.status_code == 403
+    r = client.post("/api/v1/memberships/grant", headers=admin,
+                    json={"user_id": "u_sup_r", "days": 0})
+    assert r.status_code == 200
+    # episodes/me: 会员全集可看 + is_super
+    r = client.get("/api/v1/dramas/drama_dp1/episodes/me", headers=auth)
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["is_super"] is True
+    assert all(e["is_unlocked"] for e in d["episodes"])
+    # memberships/check: can_watch + reason=super_member_active
+    r = client.get("/api/v1/memberships/check", headers=auth,
+                   params={"drama_id": "drama_dp1",
+                           "episode_id": "303"})
+    assert r.status_code == 200
+    c = r.json()["data"]
+    assert c["can_watch"] is True
+    assert c["reason"] == "super_member_active"
+    # 普通用户(已解锁 u_9): reason 走 unlocked
+    r = client.get("/api/v1/memberships/check",
+                   headers={"X-Member-Id": "u_9"},
+                   params={"drama_id": "drama_dp1", "episode_id": "303"})
+    assert r.json()["data"]["can_watch"] is True
+    # 未登录 401; revoke 后再看 → locked
+    r = client.get("/api/v1/dramas/drama_dp1/episodes/me")
+    assert r.status_code == 401
+    client.post("/api/v1/memberships/revoke", headers=admin,
+                json={"user_id": "u_sup_r"})
+    r = client.get("/api/v1/memberships/check", headers=auth,
+                   params={"drama_id": "drama_dp1", "episode_id": "303"})
+    assert r.json()["data"]["can_watch"] is False

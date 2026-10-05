@@ -134,6 +134,8 @@ PUBLIC_GET_PREFIXES = (
     "/api/v1/dramas",               # 76号短剧引流: 剧集/分集/解锁态
                                     # (游客浏览面, 组剧 POST 走路由层
                                     # _require_admin——同 site-theme 口径)
+    "/api/v1/memberships/plans",    # 76号: 超级会员套餐表(GET 公开;
+                                    # grant/revoke POST 走登录+admin)
     "/api/activity/list",           # 活动列表
     "/api/activity/stats/",         # 活动统计
     "/api/activity/leaderboard/",   # 擂台榜单

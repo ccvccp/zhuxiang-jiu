@@ -90,6 +90,13 @@ unlock_router = APIRouter(
 )
 
 
+def _member_id(x_member_id: str | None) -> str:
+    v = (x_member_id or "").strip()
+    if not v:
+        raise HTTPException(status_code=401, detail="login required")
+    return v
+
+
 @unlock_router.post("/unlocks")
 async def unlock_episode(body: UnlockRequest,
                          x_member_id: str | None = Header(default=None)):
@@ -138,9 +145,84 @@ async def episode_checkpoint(drama_id: str, episode_id: str,
              "action_url": f"/login.html?redirect=/drama.html?d={drama_id}"},
             {"type": "invite", "title": "邀请 1 位好友解锁(DP3)",
              "action_url": "#"},
-            {"type": "member", "title": "开通超级会员全站免费看(DP2)",
+            {"type": "member", "title": "开通超级会员全站免费看",
              "action_url": "/index.html"},
         ]}}
+
+
+# ---------- DP2: 超级会员(判定/开通面/个人视图/权益校验) ----------
+
+@router.get("/{drama_id}/episodes/me")
+async def episodes_for_me(drama_id: str,
+                          x_member_id: str | None = Header(default=None)):
+    """登录态全集视图: 会员/已解锁合并计算(前端带 token 调此端点)"""
+    user = _member_id(x_member_id)
+    d = await _svc.get(drama_id)
+    if not d:
+        raise HTTPException(status_code=404, detail="drama not found")
+    eps = await _svc.user_view(user, d)
+    return {"code": 0, "data": {
+        "drama_id": drama_id, "user_id": user,
+        "is_super": await _svc.is_super(user),
+        "episodes": eps}}
+
+
+@unlock_router.get("/memberships/check")
+async def membership_check(x_member_id: str | None = Header(default=None),
+                           drama_id: str = "", episode_id: str = ""):
+    """权益校验: can_watch + reason(super_member_active/locked/free)"""
+    user = _member_id(x_member_id)
+    if not drama_id:
+        raise HTTPException(status_code=409, detail="drama_id required")
+    d = await _svc.get(drama_id)
+    if not d:
+        raise HTTPException(status_code=404, detail="drama not found")
+    eps = await _svc.user_view(user, d)
+    if episode_id:
+        ep = next((e for e in eps
+                   if e["episode_id"] == episode_id), None)
+        if not ep:
+            raise HTTPException(status_code=404, detail="episode not found")
+        return {"code": 0, "data": {
+            "user_id": user, "episode_id": episode_id,
+            "can_watch": ep["is_unlocked"],
+            "reason": ("super_member_active"
+                       if await _svc.is_super(user)
+                       else ep["status"])}}
+    return {"code": 0, "data": {
+        "user_id": user, "is_super": await _svc.is_super(user),
+        "episodes": eps}}
+
+
+@unlock_router.get("/memberships/plans")
+async def membership_plans():
+    """套餐表(公开; 支付下单 DP2b 接 pay60)"""
+    from services.drama76_series_service import SUPER_PLANS
+    return {"code": 0, "data": SUPER_PLANS}
+
+
+class GrantRequest(BaseModel):
+    user_id: str
+    days: int = 0            # 0=永久
+    source: str = "admin"
+
+
+@unlock_router.post("/memberships/grant")
+async def grant_super(body: GrantRequest,
+                      x_role: str | None = Header(default=None)):
+    _require_admin(x_role)
+    rec = await _svc.grant_super(body.user_id, body.days, body.source)
+    return {"code": 0, "data": rec}
+
+
+@unlock_router.post("/memberships/revoke")
+async def revoke_super(body: GrantRequest,
+                       x_role: str | None = Header(default=None)):
+    _require_admin(x_role)
+    ok = await _svc.revoke_super(body.user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="not a super member")
+    return {"code": 0, "data": {"user_id": body.user_id, "revoked": True}}
 
 
 def register_drama76_routes(app):

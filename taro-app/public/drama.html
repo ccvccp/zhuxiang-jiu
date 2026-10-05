@@ -232,11 +232,20 @@
   }
 
   function boot(d) {
-    fetch("/api/v1/dramas/" + d.drama_id + "/episodes")
+    var t = token();
+    var url = "/api/v1/dramas/" + d.drama_id + "/episodes";
+    var headers = {};
+    if (t) {
+      url += "/me";                       /* DP2: 登录态会员/解锁合并视图 */
+      headers = { "Authorization": "Bearer " + t };
+    }
+    fetch(url, { headers: headers })
       .then(function (r) { return r.json(); })
       .then(function (b) {
         var eps = (b.data || {}).episodes || [];
-        var t = token();
+        if (t && (b.data || {}).is_super) {
+          toast("超级会员 · 全站免费观看");
+        }
         var lockedCp = eps.filter(function (e) {
           return e.is_checkpoint && !e.is_unlocked; })[0];
         if (lockedCp && t) {

@@ -67,6 +67,25 @@ class UserUnlock(BaseModel):
     created_at: str = ""
 
 
+class SuperMember(BaseModel):
+    """超级会员(DP2): 全站短剧永久免费; source=admin 手动开通/
+    purchase 支付(DP2b 接 pay60)/invite(DP3); expire_at 空=永久"""
+    user_id: str
+    source: str = "admin"
+    expire_at: str = ""       # ISO; 空=永久
+    created_at: str = ""
+
+
+SUPER_PLANS = [
+    {"plan_id": "super_forever", "name": "超级会员·永久卡",
+     "duration_days": 0, "price": 199.0, "currency": "CNY",
+     "benefits": ["全站短剧永久免费", "新剧抢先看"]},
+    {"plan_id": "super_month", "name": "超级会员·月卡",
+     "duration_days": 30, "price": 29.9, "currency": "CNY",
+     "benefits": ["全站短剧免费 30 天"]},
+]
+
+
 class DramaSeriesService:
     """剧集注册表(Redis 通用表) + 分集解锁状态计算"""
 
@@ -223,3 +242,62 @@ class DramaSeriesService:
         rows = await self.repo._list(self.UNLOCK_TABLE, 500)
         return {r["drama_id"] for r in rows
                 if r.get("user_id") == user_id}
+
+    # ---------- DP2: 超级会员 ----------
+
+    SUPER_TABLE = "drama76_super"
+
+    async def grant_super(self, user_id: str, days: int = 0,
+                          source: str = "admin") -> dict:
+        """开通超级会员(days=0 永久); 幂等覆盖"""
+        from datetime import timedelta
+        expire = ""
+        if days and days > 0:
+            expire = (datetime.now(timezone.utc)
+                      + timedelta(days=days)).isoformat()
+        rec = SuperMember(user_id=str(user_id), source=source,
+                          expire_at=expire, created_at=_now()).model_dump()
+        store = getattr(self.repo, "store", None)
+        if isinstance(store, dict):
+            store.setdefault(self.SUPER_TABLE, {})
+        await self.repo._save(self.SUPER_TABLE, str(user_id), rec)
+        logger.info("drama76_super_granted user=%s days=%s source=%s",
+                    user_id, days or "forever", source)
+        return rec
+
+    async def revoke_super(self, user_id: str) -> bool:
+        store = getattr(self.repo, "store", None)
+        if isinstance(store, dict):
+            store.setdefault(self.SUPER_TABLE, {})
+        rec = await self.repo._get(self.SUPER_TABLE, str(user_id))
+        if not rec:
+            return False
+        if isinstance(store, dict):
+            store.get(self.SUPER_TABLE, {}).pop(str(user_id), None)
+        return True
+
+    async def is_super(self, user_id: str) -> bool:
+        """过期判定: expire_at 非空且已过 → False"""
+        if not user_id:
+            return False
+        store = getattr(self.repo, "store", None)
+        if isinstance(store, dict):
+            store.setdefault(self.SUPER_TABLE, {})
+        rec = await self.repo._get(self.SUPER_TABLE, str(user_id))
+        if not rec:
+            return False
+        exp = rec.get("expire_at") or ""
+        if not exp:
+            return True
+        try:
+            return datetime.fromisoformat(exp) > datetime.now(timezone.utc)
+        except ValueError:
+            return False
+
+    async def user_view(self, user_id: str, drama: dict
+                        ) -> list[dict[str, Any]]:
+        """登录态全集视图: 会员/已解锁合并计算"""
+        member = await self.is_super(user_id)
+        unlocked = await self.unlocked_dramas_of(user_id)
+        return self.episode_states(drama, is_member=member,
+                                   unlocked_dramas=unlocked)
