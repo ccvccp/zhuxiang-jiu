@@ -88,6 +88,20 @@ def tts_mode() -> bool:
     ).strip().lower() in ("on", "1", "true")
 
 
+# 品牌素材系列(2026-10-05 入库: 竹林美女解说竹奕酒动画解说帧 ×7,
+# D:\网站素材图\竹小妹\竹小妹动画解说图 同步)——selling 镜底图池;
+# 缺失静默回落纯色卡(零依赖)
+_SERIES_DIR = (Path(__file__).resolve().parent.parent
+               / "assets" / "ip" / "zhuxiaomei_series")
+
+
+def _series_pages() -> list:
+    try:
+        return sorted(_SERIES_DIR.glob("p*.jpg"))
+    except OSError:
+        return []
+
+
 class Sv73RenderService:
     """storyboard → 大字卡 PNG → ffmpeg 运镜合成(+TTS 可选轨)
 
@@ -110,6 +124,20 @@ class Sv73RenderService:
         from PIL import Image, ImageDraw
         w, h = tpl["pageW"], tpl["pageH"]
         img = Image.new("RGB", (w, h), C_BG)
+        # selling 镜品牌素材底图(竹林美女解说系列): cover 铺底+米白
+        # 60% 遮罩保大字可读; 素材缺失静默回落纯色卡(确定性选图:
+        # 镜序取模——同 storyboard 渲染幂等)
+        if sc["role"] == "selling" and _series_pages():
+            series = _series_pages()
+            bg = Image.open(
+                series[sc["index"] % len(series)]).convert("RGB")
+            sr = max(w / bg.width, h / bg.height)
+            nw, nh = int(bg.width * sr) + 1, int(bg.height * sr) + 1
+            bg = bg.resize((nw, nh), Image.LANCZOS)
+            l, t = (nw - w) // 2, (nh - h) // 2
+            img.paste(bg.crop((l, t, l + w, t + h)), (0, 0))
+            img = Image.blend(
+                img, Image.new("RGB", (w, h), (250, 246, 238)), 0.60)
         draw = ImageDraw.Draw(img)
         # 品牌头(36号 _new_page 同款: 竹绿带+金线+品牌字+底金条)
         draw.rectangle([0, 0, w, 240], fill=C_GREEN_DARK)

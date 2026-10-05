@@ -282,6 +282,25 @@ def test_r8_pages_distinct():
 
 
 # ------------------------------------------------------------
+# R10 selling 镜品牌素材底图(2026-10-05 竹林美女解说系列入库)
+# ------------------------------------------------------------
+
+
+def test_r10_selling_series_bg():
+    """selling 镜吃素材底图池: 素材在位≥7 张; 同 storyboard
+    两次渲染幂等(确定性选图: 镜序取模)"""
+    from services.sv73_render_service import _series_pages
+    assert len(_series_pages()) >= 7
+    sb = _make_storyboard()
+    p1 = Sv73RenderService().render_pages(sb)
+    p2 = Sv73RenderService().render_pages(sb)
+    assert Path(p1[1]).read_bytes() == Path(p2[1]).read_bytes()
+    # 四页仍互异(素材底不破坏防同图回归)
+    blobs = [Path(p).read_bytes() for p in p2]
+    assert len(set(blobs)) == len(blobs)
+
+
+# ------------------------------------------------------------
 # R9 分级路由 + 归因短链指引(2026-10-04)
 # ------------------------------------------------------------
 
