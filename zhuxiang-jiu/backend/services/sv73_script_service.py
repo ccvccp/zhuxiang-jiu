@@ -202,6 +202,10 @@ DRAMA_VOICEOVER_MAX = 48
 DRAMA_TURN_WORDS = ("可是", "但", "直到", "谁知", "没想到",
                     "偏偏", "轮到", "终于", "熬到")
 DRAMA_BURST_MARKS = ("!", "！", "偏要", "凭什么", "敬你", "敬每一个")
+# 产品钩子门(2026-10-05 第四轮外部方案甄别采纳): cid76 实证 flash
+# 可产出"过结构 lint 但独白无任何产品提及"的漏网稿——广告独白
+# 不落产品即失效, 缺钩子 → lint 打回落 rule(rule 模板自带竹香酒)
+DRAMA_PRODUCT_WORDS = ("竹", "酒")
 
 
 def lint_drama(scenes: list[dict]) -> list[str]:
@@ -209,6 +213,7 @@ def lint_drama(scenes: list[dict]) -> list[str]:
 
     规则: ①voiceover 必含转折词(第二段钩子) ②必含爆发标志
           (感叹收束/情绪词) ③句读分段≥3(三段结构存在性)
+          ④必含产品钩子(竹/酒——广告独白不落产品即失效)
     """
     flaws: list[str] = []
     vo = ""
@@ -224,6 +229,8 @@ def lint_drama(scenes: list[dict]) -> list[str]:
     if len([s for s in re.split(r"[。！？!?，,；;]", vo)
             if s.strip()]) < 3:
         flaws.append("句段<3(三段结构缺失)")
+    if not any(w in vo for w in DRAMA_PRODUCT_WORDS):
+        flaws.append("缺产品钩子(竹/酒)")
     return flaws
 # dh_mix 口播镜(dh_hook)文案上限(9s 镜独立口径; 全局
 # VOICEOVER_MAX_CHARS 40 为 dh_oral 15s 单镜口径)
@@ -499,6 +506,8 @@ class Sv73ScriptService:
                 "你的输出必须同样包含转折词与感叹爆发两类要素"
                 "(2026-10-05 两批实证: 无范例时 flash 不遵循结构, "
                 "LLM 轨 1/4 过审率)。\n"
+                "硬条件: 独白全文必须出现「竹香酒」——不落产品的"
+                "独白直接打回(2026-10-05 cid76 实证漏网堵漏)。\n"
                 "红线: 不得劝酒或描述饮酒动作; 不得功效宣称(养生/"
                 "保健/治疗类表述); 不得权威背书或引用研究数据; "
                 "不编造热点中没有的信息; 口吻必须符合人设。"

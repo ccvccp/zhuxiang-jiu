@@ -426,7 +426,26 @@ def test_t11_drama_registry_and_rule_track(monkeypatch):
     assert len(vo) <= sv73mod.DRAMA_VOICEOVER_MAX
     # rule 轨注册表文案 lint_drama 自证清洁
     assert sv73mod.lint_drama(sb["scenes"]) == []
-    # 反例: 无转折词/无爆发/句段<3 → 三项全打回
+
+
+def test_t14_drama_product_gate():
+    """产品钩子门(cid76 漏网堵漏): 无竹/酒的独白必打回"""
+    # cid76 实录形态: 结构全过但独白无任何产品提及
+    dud = [{"role": "drama_oral",
+            "voiceover": "三年来非遗馆门可罗雀，可今天，终于火了！"}]
+    flaws = sv73mod.lint_drama(dud)
+    assert any("产品钩子" in f for f in flaws)
+    # 补上产品钩子 → 产品维度通过(其余维度由 T13 覆盖)
+    ok = [{"role": "drama_oral",
+           "voiceover": ("三年来非遗馆门可罗雀，可今天，终于火了！"
+                         "这热潮，竟是从一杯竹香酒开始的。")}]
+    assert not any("产品钩子" in f for f in sv73mod.lint_drama(ok))
+    # rule 回落模板自带竹香酒 → 不受新门影响
+    assert not any("产品钩子" in f for f in sv73mod.lint_drama(
+        [{"role": "drama_oral", "voiceover": (
+            "三年来谁都笑我不自量力。可这天, 终于轮到我说话, "
+            "这杯竹香酒, 敬每一个不服输的自己!")}]))
+    # 反例: 无转折词/无爆发/句段<3 → 三项全打回(含酒字不触产品门)
     bad = [{"role": "drama_oral", "voiceover": "今天聊酒"}]
     assert len(sv73mod.lint_drama(bad)) == 3
 
