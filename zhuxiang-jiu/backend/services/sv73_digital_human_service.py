@@ -74,10 +74,12 @@ DEFAULT_DH_CMD = (
 DH_TIMEOUT_SECONDS = 900
 
 # 数字人模板族(2026-10-04 A1): dh_oral 单镜 15s / dh_mix 多镜混合
-# (口播 9s+卡片镜——本服务只出口播镜, 卡片由本地 compose_mix 合成)
-DH_TEMPLATES = ("dh_oral", "dh_mix")
-# 口播镜角色(dh_mix 的 dh_hook 与 dh_oral 同语义不同时长档)
-DH_ORAL_ROLES = ("dh_oral", "dh_hook")
+# (口播 9s+卡片镜——本服务只出口播镜, 卡片由本地 compose_mix 合成);
+# drama_monologue 独白短剧(2026-10-05 短剧轨 P0+P1): 独白镜 18s 同族
+DH_TEMPLATES = ("dh_oral", "dh_mix", "drama_monologue")
+# 口播镜角色(dh_mix 的 dh_hook 与 dh_oral 同语义不同时长档;
+# drama_oral 独白镜同位——18s 档)
+DH_ORAL_ROLES = ("dh_oral", "dh_hook", "drama_oral")
 
 
 def _oral_scene(storyboard: dict) -> dict:
