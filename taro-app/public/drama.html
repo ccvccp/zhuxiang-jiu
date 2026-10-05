@@ -54,6 +54,11 @@
            padding:18px 0 30px; }
   footer a { color:var(--brand); text-decoration:none; }
   .empty { text-align:center; color:var(--muted); padding:60px 0; }
+  .toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
+           background:var(--card); border:1px solid var(--line);
+           color:var(--text); border-radius:999px; padding:8px 18px;
+           font-size:13px; opacity:0; transition:opacity .2s; z-index:9; }
+  .toast.show { opacity:1; }
 </style>
 </head>
 <body>
@@ -82,15 +87,90 @@
   <footer>理性饮酒 · 未满18岁请勿饮酒<br>
     <a href="/index.html">回首页</a></footer>
 </div>
+<div class="toast" id="toast"></div>
 
+<script src="js/resonance-beacon.js" defer></script>
 <script>
 (function () {
   var qs = new URLSearchParams(location.search);
   var dramaId = qs.get("d") || "";
-  var curEp = null;
+  var SRC = qs.get("src") || "";
+  var curDrama = null, curEp = null;
   var listEl = document.getElementById("epList");
   var video = document.getElementById("video");
   var lock = document.getElementById("lockLayer");
+  var toastEl = document.getElementById("toast");
+
+  /* ---------- 会话与漏斗埋点(collect 白名单事件) ---------- */
+  function sid() {
+    try {
+      var o = JSON.parse(localStorage.getItem("zx_rs") || "null");
+      if (!o) { o = { id: "s_" + Date.now().toString(36) + "_" +
+        Math.random().toString(36).slice(2, 10) }; }
+      localStorage.setItem("zx_rs", JSON.stringify(o));
+      return o.id;
+    } catch (e) { return "s_mem_drama"; }
+  }
+  var SESSION = sid();
+  function track(etype, payload) {
+    try {
+      fetch("/api/v1/resonance/collect", {
+        method: "POST", keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: SESSION,
+          events: [{ event_type: etype, page_id: "/drama.html",
+                     payload: payload || {} }] })
+      }).catch(function () { });
+    } catch (e) { }
+  }
+  video.addEventListener("play", function () {
+    if (curEp) { track("drama_play_start", {
+      drama_id: dramaId, episode_id: curEp.episode_id }); }
+  });
+  video.addEventListener("ended", function () {
+    if (curEp) { track("drama_play_complete", {
+      drama_id: dramaId, episode_id: curEp.episode_id }); }
+  });
+
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add("show");
+    setTimeout(function () { toastEl.classList.remove("show"); }, 2200);
+  }
+
+  /* ---------- 登录态与解锁 ---------- */
+  function token() {
+    try { return (JSON.parse(
+      localStorage.getItem("auth_session") || "null") || {}).token || "";
+    } catch (e) { return ""; }
+  }
+
+  function doUnlock(ep) {
+    var t = token();
+    if (!t) {
+      track("register_click", { drama_id: dramaId,
+                                episode_id: ep.episode_id });
+      location.href = "/login.html?redirect=" +
+        encodeURIComponent(location.pathname + location.search);
+      return;
+    }
+    fetch("/api/v1/unlocks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json",
+                 "Authorization": "Bearer " + t },
+      body: JSON.stringify({ episode_id: ep.episode_id,
+                             method: "register", src: SRC })
+    }).then(function (r) { return r.json(); })
+      .then(function (b) {
+        var d = b.data || {};
+        if (!d.episodes) { toast("解锁失败，请稍后再试"); return; }
+        track("unlock_success", { drama_id: dramaId,
+                                  episode_id: ep.episode_id });
+        toast("已解锁本剧后段，免费继续观看");
+        renderEpisodes(curDrama, d.episodes, ep.episode_id);
+      }).catch(function () { toast("网络异常"); });
+  }
 
   function fmtDur(s) {
     s = s || 0; var m = Math.floor(s / 60), r = s % 60;
@@ -110,6 +190,9 @@
       document.getElementById("lockTitle").textContent =
         "第" + ep.episode_number + "集 · 后段内容";
       lock.style.display = "flex";
+      var btn = document.getElementById("lockBtn");
+      btn.onclick = function (ev) {
+        ev.preventDefault(); doUnlock(ep); };
       return;
     }
     lock.style.display = "none";
@@ -117,31 +200,55 @@
     video.play().catch(function () { });
   }
 
-  function render(d) {
+  function renderEpisodes(d, eps, autoplayEp) {
+    curDrama = d;
     document.title = d.title + " · 竹香短剧";
+    listEl.innerHTML = "";
+    eps.forEach(function (ep) {
+      var el = document.createElement("div");
+      el.className = "ep" + (ep.is_unlocked ? "" : " locked");
+      el.setAttribute("data-ep", ep.episode_id);
+      var tag = ep.is_checkpoint
+        ? '<span class="tag cp">卡点集</span>'
+        : (ep.is_unlocked ? '<span class="tag free">免费</span>'
+                          : '<span class="tag lock">🔒 解锁</span>');
+      el.innerHTML =
+        '<div class="num">' + ep.episode_number + "</div>" +
+        '<div class="meta"><b>' + (ep.title || "") + "</b>" +
+        "<span>" + fmtDur(ep.duration_seconds) + "</span></div>" + tag;
+      el.onclick = function () {
+        if (!ep.is_unlocked) {
+          track("checkpoint_shown", { drama_id: dramaId,
+                                      episode_id: ep.episode_id });
+        }
+        playEp(ep, d.title);
+      };
+      listEl.appendChild(el);
+    });
+    var pick = eps.filter(function (e) {
+      return e.episode_id === autoplayEp && e.is_unlocked; })[0]
+      || eps.filter(function (e) { return e.is_unlocked; })[0];
+    if (pick) { playEp(pick, d.title); }
+  }
+
+  function boot(d) {
     fetch("/api/v1/dramas/" + d.drama_id + "/episodes")
       .then(function (r) { return r.json(); })
       .then(function (b) {
         var eps = (b.data || {}).episodes || [];
-        listEl.innerHTML = "";
-        eps.forEach(function (ep) {
-          var el = document.createElement("div");
-          el.className = "ep" + (ep.is_unlocked ? "" : " locked");
-          el.setAttribute("data-ep", ep.episode_id);
-          var tag = ep.is_checkpoint
-            ? '<span class="tag cp">卡点集</span>'
-            : (ep.is_unlocked ? '<span class="tag free">免费</span>'
-                              : '<span class="tag lock">🔒 解锁</span>');
-          el.innerHTML =
-            '<div class="num">' + ep.episode_number + "</div>" +
-            '<div class="meta"><b>' + (ep.title || "") + "</b>" +
-            "<span>" + fmtDur(ep.duration_seconds) +
-            (ep.cliff_hint || "") + "</span></div>" + tag;
-          el.onclick = function () { playEp(ep, d.title); };
-          listEl.appendChild(el);
-        });
-        var first = eps.filter(function (e) { return e.is_unlocked; })[0];
-        if (first) { playEp(first, d.title); }
+        var t = token();
+        var lockedCp = eps.filter(function (e) {
+          return e.is_checkpoint && !e.is_unlocked; })[0];
+        if (lockedCp && t) {
+          /* 已登录回跳: 自动幂等解锁(老用户免手动) */
+          doUnlock(lockedCp);
+          return;
+        }
+        if (lockedCp && !t) {
+          track("checkpoint_shown", { drama_id: dramaId,
+                                      episode_id: lockedCp.episode_id });
+        }
+        renderEpisodes(d, eps);
       });
   }
 
@@ -152,7 +259,7 @@
         var d = b.data;
         if (!d) { listEl.innerHTML =
           '<div class="empty">剧集不存在</div>'; return; }
-        render(d);
+        boot(d);
       });
   } else {
     fetch("/api/v1/dramas").then(function (r) { return r.json(); })
@@ -160,7 +267,7 @@
         var rows = b.data || [];
         if (!rows.length) { listEl.innerHTML =
           '<div class="empty">暂无上线短剧</div>'; return; }
-        render(rows[0]);
+        boot(rows[0]);
       });
   }
 })();

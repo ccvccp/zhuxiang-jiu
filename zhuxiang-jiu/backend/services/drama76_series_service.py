@@ -56,10 +56,22 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class UserUnlock(BaseModel):
+    """注册解锁(DP1): 剧级——一次解锁本剧全部后段(「注册领后段」口径)"""
+    unlock_id: str
+    user_id: str
+    drama_id: str
+    episode_id: str           # 触发解锁的卡点集
+    method: str = "register"  # register | invite
+    src: str = ""             # rLink 短码归因(增长漏斗)
+    created_at: str = ""
+
+
 class DramaSeriesService:
     """剧集注册表(Redis 通用表) + 分集解锁状态计算"""
 
     TABLE = "drama76_series"
+    UNLOCK_TABLE = "drama76_unlocks"
 
     def __init__(self, repo=None) -> None:
         if repo is None:
@@ -121,19 +133,23 @@ class DramaSeriesService:
         self._ensure_table()
         return await self.repo._get(self.TABLE, drama_id)
 
-    def episode_states(self, drama: dict, is_member: bool = False
+    def episode_states(self, drama: dict, is_member: bool = False,
+                       unlocked_dramas: set | None = None
                        ) -> list[dict[str, Any]]:
-        """分集+解锁状态(DP0 静态计算):
-        编号<=free → free/unlocked; 会员 → member_only(超级会员可看,
-        DP2 接权益); 其余 → locked(checkpoint, DP1 接解锁)"""
+        """分集+解锁状态:
+        编号<=free → free; 会员 → member_only; 用户已解锁本剧
+        (unlocked_dramas 含 drama_id) → 全集 unlocked; 其余 locked"""
         free_n = int(drama.get("free_episodes") or 0)
+        drama_unlocked = bool(unlocked_dramas
+                              and drama.get("drama_id") in unlocked_dramas)
         out = []
         for e in drama.get("episodes") or []:
             n = int(e.get("episode_number") or 0)
             if n <= free_n:
                 status, unlocked = "free", True
-            elif is_member:
-                status, unlocked = "member_only", True
+            elif drama_unlocked or is_member:
+                status, unlocked = ("member_only" if is_member and
+                                    not drama_unlocked else "unlocked"), True
             else:
                 status, unlocked = "locked", False
             out.append({
@@ -149,3 +165,61 @@ class DramaSeriesService:
                                    if not unlocked else []),
             })
         return out
+
+    # ---------- DP1: 注册解锁 ----------
+
+    async def unlock(self, user_id: str, episode_id: str,
+                     method: str = "register", src: str = ""
+                     ) -> tuple[dict, dict]:
+        """解锁本剧后段(剧级): 幂等(同用户同剧返回既有记录);
+        Returns: (drama, unlock_record); KeyError=集不存在"""
+        self._ensure_table()
+        dramas = await self._list_all()
+        drama = next((d for d in dramas
+                      if any(e.get("episode_id") == episode_id
+                             for e in d.get("episodes") or [])), None)
+        if not drama:
+            raise KeyError(episode_id)
+        free_n = int(drama.get("free_episodes") or 0)
+        ep = next(e for e in drama["episodes"]
+                  if e.get("episode_id") == episode_id)
+        if int(ep.get("episode_number") or 0) <= free_n:
+            raise ValueError("该集免费无需解锁")
+        # 幂等: 同用户同剧已解锁 → 返回既有
+        existing = await self._find_unlock(user_id, drama["drama_id"])
+        if existing:
+            return drama, existing
+        rec = UserUnlock(
+            unlock_id=f"ul_{user_id}_{drama['drama_id']}",
+            user_id=user_id, drama_id=drama["drama_id"],
+            episode_id=episode_id,
+            method=method if method in ("register", "invite")
+            else "register",
+            src=src[:32], created_at=_now()).model_dump()
+        store = getattr(self.repo, "store", None)
+        if isinstance(store, dict):
+            store.setdefault(self.UNLOCK_TABLE, {})
+        await self.repo._save(self.UNLOCK_TABLE, rec["unlock_id"], rec)
+        logger.info("drama76_unlocked user=%s drama=%s method=%s src=%s",
+                    user_id, drama["drama_id"], method, src)
+        return drama, rec
+
+    async def _find_unlock(self, user_id: str,
+                           drama_id: str) -> Optional[dict]:
+        store = getattr(self.repo, "store", None)
+        if isinstance(store, dict):
+            store.setdefault(self.UNLOCK_TABLE, {})
+        rows = await self.repo._list(self.UNLOCK_TABLE, 500)
+        for r in rows:
+            if (r.get("user_id") == user_id
+                    and r.get("drama_id") == drama_id):
+                return r
+        return None
+
+    async def unlocked_dramas_of(self, user_id: str) -> set:
+        store = getattr(self.repo, "store", None)
+        if isinstance(store, dict):
+            store.setdefault(self.UNLOCK_TABLE, {})
+        rows = await self.repo._list(self.UNLOCK_TABLE, 500)
+        return {r["drama_id"] for r in rows
+                if r.get("user_id") == user_id}

@@ -1002,3 +1002,158 @@ def test_t26_drama_routes(monkeypatch):
     r = client.post("/api/v1/dramas", headers=admin,
                     json={"title": "空", "episodes": []})
     assert r.status_code == 409
+
+
+# ------------------------------------------------------------
+# 76号 DP1(2026-10-05): 注册解锁 + 卡点配置 + 事件扩容
+# ------------------------------------------------------------
+
+from repositories.promo_repository import (  # noqa: E402
+    PromoRepository as _PR)
+
+_DP1_REPO = _PR()
+
+
+def _SHARED_REPO_DP1():
+    return _DP1_REPO
+
+def test_t27_unlock_service():
+    import asyncio
+    from repositories.promo_repository import PromoRepository
+    from services.drama76_series_service import DramaSeriesService
+
+    async def run():
+        shared = PromoRepository()
+        svc = DramaSeriesService(repo=shared)
+        await svc.create({
+            "drama_id": "drama_dp1", "title": "解锁测试剧",
+            "free_episodes": 2, "status": "online",
+            "episodes": [
+                {"episode_id": "301", "video_url": "/v/1.mp4"},
+                {"episode_id": "302", "video_url": "/v/2.mp4"},
+                {"episode_id": "303", "video_url": "/v/3.mp4"}]})
+        # 解锁卡点集(剧级) + src 归因
+        drama, rec = await svc.unlock("u_9", "303", "register", "A-TEST1")
+        assert rec["drama_id"] == "drama_dp1" and rec["src"] == "A-TEST1"
+        assert rec["unlock_id"] == f"ul_u_9_drama_dp1"
+        # 幂等: 重复解锁返回同一记录
+        _, rec2 = await svc.unlock("u_9", "303", "register")
+        assert rec2["unlock_id"] == rec["unlock_id"]
+        assert await svc.unlocked_dramas_of("u_9") == {"drama_dp1"}
+        # 状态: 解锁后全集可看, 锁集 url 暴露
+        eps = svc.episode_states(drama, unlocked_dramas={"drama_dp1"})
+        assert all(e["is_unlocked"] for e in eps)
+        assert eps[2]["video_url"].endswith("3.mp4")
+        # 免费集不可解锁
+        try:
+            await svc.unlock("u_9", "301")
+            raise AssertionError("应拒绝")
+        except ValueError:
+            pass
+        # 未知集
+        try:
+            await svc.unlock("u_9", "999")
+            raise AssertionError("应 404")
+        except KeyError:
+            pass
+
+    asyncio.run(run())
+
+
+def test_t28_checkpoint_route(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from repositories.promo_repository import PromoRepository
+    from routes.drama76_routes import register_drama76_routes
+    from services.drama76_series_service import DramaSeriesService
+
+    async def seed():
+        await DramaSeriesService(repo=_SHARED_REPO_DP1()).create({
+            "drama_id": "drama_cp", "title": "卡点测试剧",
+            "free_episodes": 1, "status": "online",
+            "episodes": [
+                {"episode_id": "401", "video_url": "/v/1.mp4"},
+                {"episode_id": "402", "video_url": "/v/2.mp4"}]})
+
+    import asyncio
+    asyncio.run(seed())
+    monkeypatch.setattr(
+        "routes.drama76_routes._svc",
+        DramaSeriesService(repo=_DP1_REPO))
+    app = FastAPI()
+    register_drama76_routes(app)
+    client = TestClient(app)
+
+    # 锁集 → 卡点配置(register 优先 + 登录回跳)
+    r = client.get("/api/v1/dramas/drama_cp/episodes/402/checkpoint"
+                   "?src=A-CP")
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["checkpoint_type"] == "register_to_unlock"
+    assert d["free_preview_seconds"] == 10
+    assert d["unlock_methods"][0]["type"] == "register"
+    assert "redirect=/drama.html?d=drama_cp" in \
+        d["unlock_methods"][0]["action_url"]
+    assert d["src"] == "A-CP"
+    # 免费集 → 409; 不存在 → 404
+    r = client.get("/api/v1/dramas/drama_cp/episodes/401/checkpoint")
+    assert r.status_code == 409
+    r = client.get("/api/v1/dramas/drama_cp/episodes/999/checkpoint")
+    assert r.status_code == 404
+
+
+def test_t29_unlock_route_and_events(monkeypatch):
+    import asyncio
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from routes.drama76_routes import register_drama76_routes
+    from routes.agent75_routes import register_agent75_routes
+    from services.drama76_series_service import DramaSeriesService
+    from routes import agent75_routes as R
+
+    monkeypatch.setattr(
+        "routes.drama76_routes._svc",
+        DramaSeriesService(repo=_DP1_REPO))
+    app = FastAPI()
+    register_drama76_routes(app)
+    register_agent75_routes(app)
+    client = TestClient(app)
+    auth = {"X-Member-Id": "777"}
+
+    # 未登录(无身份头) → 401
+    r = client.post("/api/v1/unlocks", json={"episode_id": "303"})
+    assert r.status_code == 401
+    # 登录解锁 → 200 全集可看 + 幂等
+    r = client.post("/api/v1/unlocks", headers=auth, json={
+        "episode_id": "303", "method": "register", "src": "A-U1"})
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["drama_id"] == "drama_dp1"
+    assert all(e["is_unlocked"] for e in d["episodes"])
+    uid = d["unlock"]["unlock_id"]
+    r2 = client.post("/api/v1/unlocks", headers=auth,
+                     json={"episode_id": "303"})
+    assert r2.json()["data"]["unlock"]["unlock_id"] == uid
+    # 免费集 → 409; 未知 → 404
+    r = client.post("/api/v1/unlocks", headers=auth,
+                    json={"episode_id": "301"})
+    assert r.status_code == 409
+    r = client.post("/api/v1/unlocks", headers=auth,
+                    json={"episode_id": "999"})
+    assert r.status_code == 404
+
+    # collect 白名单扩容: drama 事件 200 / 非法仍 422
+    R._rate_hits.clear()
+    r = client.post("/api/v1/resonance/collect", json={
+        "session_id": "s_dp1_evt",
+        "events": [{"event_type": "drama_play_start",
+                    "payload": {"drama_id": "drama_dp1",
+                                "episode_id": "301"}},
+                   {"event_type": "unlock_success",
+                    "payload": {"drama_id": "drama_dp1"}}]})
+    assert r.status_code == 200
+    R._rate_hits.clear()
+    r = client.post("/api/v1/resonance/collect", json={
+        "session_id": "s_dp1_evt",
+        "events": [{"event_type": "drama_steal", "payload": {}}]})
+    assert r.status_code == 422

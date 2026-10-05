@@ -362,7 +362,11 @@ from fastapi import Request as _Request  # noqa: E402
 
 _COLLECT_EVENTS = {"click", "scroll", "hover", "error", "back", "like",
                    "share", "complete", "long_stay", "search",
-                   "view_detail", "pagehide"}
+                   "view_detail", "pagehide",
+                   # 76号短剧引流(DP1): 播放/卡点/注册/解锁漏斗埋点
+                   "drama_play_start", "drama_play_complete",
+                   "checkpoint_shown", "register_click", "register_success",
+                   "unlock_success", "member_page_view", "invite_share"}
 _SESSION_RE = _re2.compile(r"^s_[A-Za-z0-9_]{4,64}$")
 _RATE_WINDOW_S = 60
 _RATE_MAX_BATCH = 30
