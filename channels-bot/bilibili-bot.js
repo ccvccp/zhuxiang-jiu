@@ -104,6 +104,53 @@ const BILI_UPLOAD_URL = process.env.BILI_UPLOAD_URL
     return;
   }
 
+  // ---- 公共预填(2026-10-05 dumpForm 校准) ----
+  // B站表单实证: 标题= input[placeholder*=「稿件标题」], 上传后自动
+  // 以文件名预填(「仅空时」守护失效→文件名标题上线教训); 简介是
+  // contenteditable(data-placeholder 含「相关信息」) 非 textarea。
+  const fillTitleDesc = async (titleText, descText) => {
+    const r1 = await page.evaluate((t) => {
+      const box = Array.from(document.querySelectorAll('input'))
+        .find(x => (x.placeholder || '').includes('稿件标题')
+                   && x.getBoundingClientRect().width > 0);
+      if (!box) return { err: 'no-title-input' };
+      const cur = box.value || '';
+      const filenameLike = /sv73_|\.mp4|^\s*$/.test(cur);
+      if (cur && !filenameLike && cur !== t) return { skipped: cur };
+      box.scrollIntoView({ block: 'center' });
+      box.focus();
+      Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype, 'value').set.call(box, t);
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      box.dispatchEvent(new Event('change', { bubbles: true }));
+      return { typed: box.value };
+    }, String(titleText || ''));
+    if (r1.typed === (titleText || '')) LOG('title 填写: [' + r1.typed + ']');
+    else if (r1.skipped) LOG('标题已有内容(草稿恢复): [' + r1.skipped + '] — 跳过');
+    else LOG('WARN 标题框未定位: ' + JSON.stringify(r1));
+    const DECL = '（本视频由AI辅助制作）';
+    let d = String(descText || '');
+    if (d && !/AI|人工智能/.test(d)) d += DECL;
+    if (!d) return;
+    const dState = await page.evaluate(() => {
+      const ce = Array.from(document.querySelectorAll('[contenteditable=true]'))
+        .filter(x => x.getBoundingClientRect().width > 0)
+        .find(x => /相关信息/.test(x.getAttribute('data-placeholder') || ''));
+      return ce ? { has: !!(ce.innerText || '').trim() } : null;
+    });
+    if (dState && !dState.has) {
+      await page.evaluate(() => {
+        const ce = Array.from(document.querySelectorAll('[contenteditable=true]'))
+          .filter(x => x.getBoundingClientRect().width > 0)
+          .find(x => /相关信息/.test(x.getAttribute('data-placeholder') || ''));
+        if (ce) { ce.focus(); ce.click(); }
+      });
+      await page.keyboard.type(d, { delay: 20 });
+      LOG('desc 填写(含AIGC软声明): [' + d.slice(0, 30) + '...]');
+    } else if (dState) LOG('简介非空(草稿) — 跳过');
+    else LOG('WARN 简介框(contenteditable)未定位');
+  };
+
   // ---- assist: 半自动模式(2026-10-05 首发实证) ----
   // bot: 上传+标题/简介预填(含AIGC软声明)+10min 快照监听;
   // 人工: 分区/创作声明/立即投稿 三步(B站必填项弹层结构未完全
@@ -126,38 +173,49 @@ const BILI_UPLOAD_URL = process.env.BILI_UPLOAD_URL
       if (await page.evaluate(() => /请选择分区/.test(document.body.innerText || ''))) break;
       await sleep(5000);
     }
-    // 预填(仅空时——草稿恢复防重复)
-    const tEmpty = await page.evaluate(() => {
-      const f = Array.from(document.querySelectorAll('input'))
-        .find(x => /标题/.test(x.placeholder || ''));
-      return f && !f.value;
-    });
-    if (tEmpty) {
-      await page.evaluate(() => {
-        const f = Array.from(document.querySelectorAll('input'))
-          .find(x => /标题/.test(x.placeholder || ''));
-        if (f) f.focus();
+    // dumpForm: 表单取证模式(标题校准 2026-10-05——首条落文件名标题,
+    // 旧逻辑回退抓错框实证): 只 dump 不填写, 草稿自然留存
+    if (CFG.dumpForm) {
+      const dump = await page.evaluate(() => {
+        const inputs = Array.from(document.querySelectorAll('input, textarea'))
+          .filter(x => x.getBoundingClientRect().width > 0)
+          .map(x => ({ tag: x.tagName.toLowerCase(), type: x.type || '',
+                       ph: (x.placeholder || '').slice(0, 50),
+                       val: (x.value || '').slice(0, 40),
+                       cls: (x.className || '').toString().slice(0, 50) }));
+        const ces = Array.from(document.querySelectorAll('[contenteditable=true]'))
+          .filter(x => x.getBoundingClientRect().width > 0)
+          .map(x => ({ tag: 'ce', ph: (x.getAttribute('data-placeholder') || '').slice(0, 50),
+                       val: (x.innerText || '').slice(0, 40) }));
+        return { url: location.href, inputs, ces };
       });
-      await page.keyboard.type(String(CFG.title || ''), { delay: 30 });
-      LOG('title 预填');
-    } else LOG('标题非空(草稿) — 跳过');
-    const dEmpty = await page.evaluate(() => {
-      const els = Array.from(document.querySelectorAll('textarea'))
-        .filter(x => x.getBoundingClientRect().width > 0);
-      return els.length && !els[els.length - 1].value;
-    });
-    if (dEmpty) {
-      const DECL = '（本视频由AI辅助制作）';
-      let d = String(CFG.desc || '');
-      if (!/AI|人工智能/.test(d)) d += DECL;
-      await page.evaluate(() => {
-        const els = Array.from(document.querySelectorAll('textarea, [contenteditable=true]'))
-          .filter(x => x.getBoundingClientRect().width > 0);
-        if (els.length) els[els.length - 1].focus();
+      LOG('FORM_DUMP url=' + dump.url);
+      dump.inputs.forEach((x, i) => LOG('  input[' + i + '] ' + JSON.stringify(x)));
+      dump.ces.forEach((x, i) => LOG('  ce[' + i + '] ' + JSON.stringify(x)));
+      fs.writeFileSync('bili_form_dump.json', JSON.stringify(dump, null, 2));
+      await page.screenshot({ path: 'bili_form_dump.png' });
+      LOG('FORM_DUMP_DONE (bili_form_dump.json + bili_form_dump.png) — 草稿留存');
+      await browser.close();
+      return;
+    }
+    // 预填(fillTitleDesc: 文件名标题覆盖 + contenteditable 简介)
+    await fillTitleDesc(CFG.title, CFG.desc);
+    // fillOnly: 校准验证模式(填完核验不发布——同视频已在架防重复)
+    if (CFG.fillOnly) {
+      const st = await page.evaluate(() => {
+        const t = Array.from(document.querySelectorAll('input'))
+          .find(x => (x.placeholder || '').includes('稿件标题'));
+        const ce = Array.from(document.querySelectorAll('[contenteditable=true]'))
+          .find(x => /相关信息/.test(x.getAttribute('data-placeholder') || ''));
+        return { title: t ? t.value : null,
+                 desc: ce ? (ce.innerText || '').trim().slice(0, 50) : null };
       });
-      await page.keyboard.type(d, { delay: 20 });
-      LOG('desc 预填(含AIGC软声明)');
-    } else LOG('简介非空(草稿) — 跳过');
+      LOG('FILL_VERIFY: title=[' + st.title + '] desc=[' + st.desc + ']');
+      await page.screenshot({ path: 'bili_fill_verify.png' });
+      LOG('FILL_ONLY_DONE (bili_fill_verify.png) — 未发布, 草稿留存');
+      await browser.close();
+      return;
+    }
     LOG('>>> 请人工: ①选分区 ②创作声明(AI相关) ③立即投稿 (10 分钟) <<<');
     let done = false;
     for (let i = 0; i < 300 && !done; i++) {
@@ -265,37 +323,8 @@ const BILI_UPLOAD_URL = process.env.BILI_UPLOAD_URL
     }
   } catch (e) { LOG('category err: ' + e.message); }
 
-  // 4. 标题(input, placeholder 含「标题」优先)
-  try {
-    const ok = await page.evaluate(() => {
-      const fields = Array.from(document.querySelectorAll('input, textarea'))
-        .filter(x => x.getBoundingClientRect().width > 0);
-      const el = fields.find(x => /标题/.test(x.placeholder || ''))
-        || fields.find(x => x.tagName === 'INPUT');
-      if (!el) return false;
-      el.focus();
-      return true;
-    });
-    if (ok) { await page.keyboard.type(String(CFG.title || ''), { delay: 30 }); LOG('title typed'); }
-    else LOG('WARN 标题框未定位');
-  } catch (e) { LOG('title err: ' + e.message); }
-
-  // 4. 简介(textarea; 尾部带 AIGC 软声明兜底)
-  try {
-    const DECL = '（本视频由AI辅助制作）';
-    let descText = String(CFG.desc || '');
-    if (!/AI|人工智能/.test(descText)) descText += DECL;
-    const ok = await page.evaluate(() => {
-      const els = Array.from(document.querySelectorAll(
-        'textarea, [contenteditable=true]'))
-        .filter(x => x.getBoundingClientRect().width > 0);
-      if (!els.length) return false;
-      els[els.length - 1].focus();
-      return true;
-    });
-    if (ok) { await page.keyboard.type(descText, { delay: 30 }); LOG('desc typed(含AIGC软声明兜底)'); }
-    else LOG('WARN 简介框未定位(desc 跳过)');
-  } catch (e) { LOG('desc err: ' + e.message); }
+  // 4. 标题+简介(fillTitleDesc 公共函数: dumpForm 校准版)
+  await fillTitleDesc(CFG.title, CFG.desc);
 
   // 6. AI 创作声明勾选(B站正面支持; 首发实证教训: 「试试更多AI
   //    创作工具吧」推广 banner 误命中——匹配收紧: 声明类文案+控件

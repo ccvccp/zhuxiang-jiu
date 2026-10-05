@@ -1,0 +1,61 @@
+{
+  "url": "https://member.bilibili.com/platform/upload/video/frame/",
+  "inputs": [
+    {
+      "tag": "input",
+      "type": "text",
+      "ph": "请输入稿件标题",
+      "val": "sv73_492a9c447c99",
+      "cls": "input-val"
+    },
+    {
+      "tag": "input",
+      "type": "text",
+      "ph": "请选择符合您视频内容的创作声明",
+      "val": "",
+      "cls": "bcc-select-input-inner"
+    },
+    {
+      "tag": "input",
+      "type": "text",
+      "ph": "按回车键Enter创建标签",
+      "val": "",
+      "cls": "input-val"
+    },
+    {
+      "tag": "input",
+      "type": "text",
+      "ph": "",
+      "val": "aaaaaaaa",
+      "cls": "mention-hidden-input"
+    },
+    {
+      "tag": "input",
+      "type": "checkbox",
+      "ph": "",
+      "val": "false",
+      "cls": ""
+    },
+    {
+      "tag": "input",
+      "type": "file",
+      "ph": "",
+      "val": "",
+      "cls": ""
+    },
+    {
+      "tag": "input",
+      "type": "file",
+      "ph": "",
+      "val": "",
+      "cls": ""
+    }
+  ],
+  "ces": [
+    {
+      "tag": "ce",
+      "ph": "填写更全面的相关信息，让更多的人能找到你的视频吧",
+      "val": "\n"
+    }
+  ]
+}
