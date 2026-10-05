@@ -275,11 +275,15 @@ def _h264ize(mp4: Path) -> int:
        1.071x)——本参数 2026-10-02 已切换, 下批出片生效
     同名覆盖, 返回转码后字节数"""
     import subprocess as sp
+    from services.sv73_render_service import LOUDNORM_AF
     tmp = mp4.with_suffix(".h264.mp4")
     r = sp.run([_ffmpeg_bin(), "-y", "-i", str(mp4),
                 "-vf", ("scale=1080:1920:"
                         "force_original_aspect_ratio=increase,"
                         "crop=1080:1920"),  # cover: 等比铺满+居中裁
+                # 响度标准化(-14 LUFS, 2026-10-05 采纳): dh_oral 单镜
+                # 轨发布件在此转码, 与 mix 轨同口径
+                "-af", LOUDNORM_AF,
                 "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                 "-pix_fmt", "yuv420p", "-c:a", "aac",
                 "-movflags", "+faststart", str(tmp)],

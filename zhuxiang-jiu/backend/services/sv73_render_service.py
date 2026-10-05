@@ -88,6 +88,14 @@ def tts_mode() -> bool:
     ).strip().lower() in ("on", "1", "true")
 
 
+# 响度标准化(2026-10-05 外部方案甄别采纳): 短视频平台按感知响度
+# (LUFS)定推荐权重, TTS 原声直通未管控是发布质量实缺口——
+# I=-14 LUFS(抖音/YouTube 安全标准) TP=-1.5(防 AAC 转码过冲)
+# LRA=11(对话类动态范围); 单遍动态模式(流水线够用, 两遍线性
+# 需预扫描不划算)
+LOUDNORM_AF = "loudnorm=I=-14:TP=-1.5:LRA=11"
+
+
 # 品牌素材系列(2026-10-05 入库)——selling 镜底图池, 人设分池:
 #   zhuxiaomei      竹林美女解说竹奕酒动画解说帧 ×7
 #   xiaozhushuaige  竹林帅哥解说竹奕酒动画解说帧 ×8
@@ -413,7 +421,7 @@ class Sv73RenderService:
         parts.append(
             f"{prev}format=yuv420p[v];"
             f"[0:a]apad=whole_dur={plan['total']:.2f},"
-            f"atrim=0:{plan['total']:.2f}[a]")
+            f"atrim=0:{plan['total']:.2f},{LOUDNORM_AF}[a]")
         fc = ";".join(parts)
         args += ["-filter_complex", fc,
                  "-map", "[v]", "-map", "[a]",
