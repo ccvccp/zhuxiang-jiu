@@ -95,6 +95,10 @@ def active_conns() -> int:
     return _ACTIVE
 
 
+_FLUSH_CHUNK = 3200          # flush 分块(100ms @16k16bit)
+_FLUSH_GAP = 0.05            # flush 块间隔(≈2x 实时回放限速)
+
+
 class AsrStreamSession:
     """单次流式识别会话(H5 一轮语音 ↔ 百炼一个 task ↔ 一条连接)
 
@@ -276,18 +280,31 @@ class AsrStreamSession:
                 self._done.set()
 
     async def _flush_pending(self) -> None:
-        """task-started 后补投 ready 前缓冲的音频(唤醒词前部)"""
+        """task-started 后补投 ready 前缓冲的音频(唤醒词前部)
+
+        v63 历史教训对齐(2026-10-07 实证回归): 客户端攒帧曾因
+        「ready 后一次性涌入, 百炼收帧速率 N 倍实时, 时间轴崩识
+        别全空」被回退(11:46 时间戳级实证)——本类 pending 一次性
+        send 与其同型: 面板重开窗期(getUserMedia 1~3s)积压 1~3s
+        音频, flush 突发 → 百炼崩 → final=None(07:35 实测 10/14
+        段空)。改为分块限速回放: 100ms 块 + 50ms 间隔 ≈2x 实时
+        (网络抖动天然量级, 远低于崩溃阈值), 积压 2s 约 1s 追平。
+        """
         if not self._pending:
             return
         buf = b"".join(self._pending)
         self._pending = []
-        try:
-            await self._ws.send(buf)
-        except Exception as exc:
-            logger.warning("stream_flush_failed: %s", exc)
-            if not self._done.is_set():
-                self._failed = str(exc)
-                self._done.set()
+        for i in range(0, len(buf), _FLUSH_CHUNK):
+            try:
+                await self._ws.send(buf[i:i + _FLUSH_CHUNK])
+            except Exception as exc:
+                logger.warning("stream_flush_failed: %s", exc)
+                if not self._done.is_set():
+                    self._failed = str(exc)
+                    self._done.set()
+                return
+            if i + _FLUSH_CHUNK < len(buf):
+                await asyncio.sleep(_FLUSH_GAP)
 
     async def finish(self, timeout: float = 8) -> str | None:
         """finish-task → 等终态, 返回最终文本(失败/空返回 None)"""
