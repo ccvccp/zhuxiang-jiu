@@ -134,8 +134,15 @@ def do_exec(code: str, input_data: dict,
             with open(res_p, encoding="utf-8") as f:
                 result = json.load(f)
             if isinstance(result, dict):
-                out["result"] = result
-                out["ok"] = True
+                # 结果体同样受 64KB 限额(走文件后 stdout 限额不再覆盖
+                # ——生产攻防实证 big_output 漏网补丁)
+                if len(json.dumps(result, ensure_ascii=False,
+                                  default=str).encode("utf-8")) \
+                        > MAX_OUTPUT_BYTES:
+                    out["error"] = "output_too_large"
+                else:
+                    out["result"] = result
+                    out["ok"] = True
             else:
                 out["error"] = "result_not_dict"
         except (json.JSONDecodeError, OSError):
