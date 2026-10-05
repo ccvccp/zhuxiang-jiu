@@ -285,19 +285,18 @@ def build_one(ssh, sid: str, token: str, key: str) -> bool:
         return False
     sb = b["data"]
     tpl = (sb.get("template") or {}).get("name")
-    if tpl not in ("dh_oral", "dh_mix"):
+    if tpl not in ("dh_oral", "dh_mix", "drama_monologue"):
         print("    非数字人模板:", tpl)
         return False
 
-    # ② 本地 TTS(竹语)——dh_mix 仅口播镜(dh_hook): 全量拼接会把
+    # ② 本地 TTS(竹语)——混合模板仅口播镜(首镜): 全量拼接会把
     #    卡片镜配音也送 GPU, 口播出片时长超计划致 xfade 编排漂移
     import os
     os.environ["LLM_API_KEY"] = key
     os.environ["SV73_TTS_MODE"] = "on"
     tts_sb = sb
-    if tpl == "dh_mix":
-        tts_sb = {**sb, "scenes": [
-            sc for sc in sb["scenes"] if sc["role"] == "dh_hook"]}
+    if tpl in ("dh_mix", "drama_monologue"):
+        tts_sb = {**sb, "scenes": [sb["scenes"][0]]}
     from services.sv73_render_service import Sv73RenderService
     wav = Sv73RenderService()._tts_audio(tts_sb)
     if wav is None or not Path(wav).is_file():
@@ -357,11 +356,11 @@ print('E2E PASS')
     run(ssh, f"find {REMOTE_ROOT} -mindepth 1 -maxdepth 1 -type d"
              f" -empty -delete")
 
-    # ③b dh_mix 多镜合成(本地): 口播镜(刚转码)+卡片镜 Ken Burns
+    # ③b 混合模板多镜合成(本地): 口播镜(刚转码)+卡片镜 Ken Burns
     #    → {sid}_mix.mp4 为 attach 成片(口播单镜留档不 attach)
     rs = Sv73RenderService()
     pages = rs.render_pages(sb)
-    if tpl == "dh_mix":
+    if tpl in ("dh_mix", "drama_monologue"):
         final = Path(f"sv73_videos/{sid}_mix.mp4")
         rs.compose_mix(local_mp4, pages[1:], sb, final)
         size = final.stat().st_size

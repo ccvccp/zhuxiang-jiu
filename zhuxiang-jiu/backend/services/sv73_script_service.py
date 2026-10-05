@@ -121,6 +121,17 @@ TEMPLATES = {
         "sceneDuration": 6.3,
         "sceneDurations": (9.0, 5.4, 4.5),
     },
+    # drama_monologue(2026-10-05 短剧轨 P0+P1): 独白微短剧——
+    # 单镜数字人三段式独白(压抑→转折→爆发, GPU SadTalker 18s)+
+    # 合规尾卡(零 GPU Ken Burns); 短剧引流实验形态(外部方案甄别
+    # 采纳「算法钩子/三段结构」, 单角色独白规避多角色 LoRA 一致
+    # 性成本); 合成复用 compose_mix 通用 xfade 链
+    "drama_monologue": {
+        "pageW": 1080, "pageH": 1920,
+        "scenePlan": ("drama_oral", "compliance"),
+        "sceneDuration": 11.25,
+        "sceneDurations": (18.0, 4.5),
+    },
 }
 DEFAULT_TEMPLATE = "vertical"
 
@@ -180,6 +191,39 @@ def lint_texts(scenes: list[dict]) -> list[str]:
                     f"@{role}")
         if re.search(r"(.)\1{2,}", vo):
             flaws.append(f"叠字异常@{role}")
+    return flaws
+
+
+# drama_monologue 独白镜(drama_oral)文案口径: 18s @24字/9s 语速
+# ≈ 48 字(全局 40 为 dh_oral 15s 单镜口径)
+DRAMA_VOICEOVER_MAX = 48
+# 短剧三段结构检查(P0 算法钩子落点): 转折词+爆发标志,
+# 缺任一 → lint 打回(LLM 重生成→rule 回落, 与 A2 同款降级语义)
+DRAMA_TURN_WORDS = ("可是", "但", "直到", "谁知", "没想到",
+                    "偏偏", "轮到", "终于", "熬到")
+DRAMA_BURST_MARKS = ("!", "！", "偏要", "凭什么", "敬你", "敬每一个")
+
+
+def lint_drama(scenes: list[dict]) -> list[str]:
+    """独白短剧三段结构质检(P0)——压抑→转折→爆发
+
+    规则: ①voiceover 必含转折词(第二段钩子) ②必含爆发标志
+          (感叹收束/情绪词) ③句读分段≥3(三段结构存在性)
+    """
+    flaws: list[str] = []
+    vo = ""
+    for sc in scenes:
+        if sc.get("role") == "drama_oral":
+            vo = str(sc.get("voiceover") or "")
+    if not vo:
+        return ["drama_oral 镜缺失"]
+    if not any(w in vo for w in DRAMA_TURN_WORDS):
+        flaws.append("缺转折词(可是/直到/谁知...)")
+    if not any(m in vo for m in DRAMA_BURST_MARKS):
+        flaws.append("缺爆发标志(!/偏要/敬...)")
+    if len([s for s in re.split(r"[。！？!?，,；;]", vo)
+            if s.strip()]) < 3:
+        flaws.append("句段<3(三段结构缺失)")
     return flaws
 # dh_mix 口播镜(dh_hook)文案上限(9s 镜独立口径; 全局
 # VOICEOVER_MAX_CHARS 40 为 dh_oral 15s 单镜口径)
@@ -247,6 +291,9 @@ MOCK_SCENE_TEXTS = {
     "dh_oral": "竹小妹说{hotword}",
     # dh_mix 口播钩子(9s 镜): 口语短钩——警示由合规尾镜结构承担
     "dh_hook": "竹小妹说{hotword}",
+    # drama_monologue 独白镜(18s): 三段式压抑→转折→爆发(rule 轨
+    # 注册表文案自身须 lint_drama-clean)
+    "drama_oral": "敬不服输的人",
 }
 MOCK_SCENE_VOICEOVERS = {
     # ("这么火"——2026-10-04 A2 同源清理: "好火"为 lint 瑕疵词,
@@ -260,6 +307,11 @@ MOCK_SCENE_VOICEOVERS = {
         "家人们, {hotword}这么火, 竹香酒好喝不上头。"
         "理性饮酒, 未满18岁请勿饮酒。"),
     "dh_hook": "家人们, {hotword}这么火, 看这瓶竹香酒。",
+    # 三段式独白: 铺垫困境(压抑)→「可/终于」转折→感叹收束爆发;
+    # 自带转折词+爆发标志+≥3 句段(lint_drama 注册表清洁)
+    "drama_oral": (
+        "三年来谁都笑我不自量力。可{hotword}这天, 终于轮到我说话, "
+        "这杯竹香酒, 敬每一个不服输的自己!"),
 }
 MOCK_HIGHLIGHTS = {
     "cover": ["{hotword}"],
@@ -269,6 +321,7 @@ MOCK_HIGHLIGHTS = {
     "compliance": [],
     "dh_oral": ["{hotword}", "竹香工艺"],
     "dh_hook": ["{hotword}"],
+    "drama_oral": ["{hotword}", "不服输"],
 }
 
 # 落盘目录(仿 36号生产线 VIDEO_DIR 惯例)
@@ -328,7 +381,12 @@ def assert_schema(sb: dict) -> None:
             f"镜头{i}角色序列必须模板注册表决定: {sc['role']}")
         assert sc["duration"] == durs[i]
         assert 0 < len(sc["text"]) <= TEXT_MAX_CHARS
-        assert 0 < len(sc["voiceover"]) <= VOICEOVER_MAX_CHARS
+        # 口播镜独立口径: drama_oral 18s 独白 48 字(全局 40 为
+        # dh_oral 15s 口径——上限按角色, 非全局)
+        vo_cap = (DRAMA_VOICEOVER_MAX
+                  if sc["role"] == "drama_oral"
+                  else VOICEOVER_MAX_CHARS)
+        assert 0 < len(sc["voiceover"]) <= vo_cap
         assert len(sc["highlightWords"]) <= HIGHLIGHT_MAX_WORDS
         for w in sc["highlightWords"]:
             assert 0 < len(w) <= HIGHLIGHT_MAX_CHARS
@@ -404,7 +462,27 @@ class Sv73ScriptService:
 
     # ---------- prompt(人设注入 + 红线约束) ----------
 
-    def _system_prompt(self, persona: dict) -> str:
+    def _system_prompt(self, persona: dict,
+                       template: str = DEFAULT_TEMPLATE) -> str:
+        if template == "drama_monologue":
+            # 独白微短剧(P0 短剧轨): 三段结构+算法钩子落进提示词,
+            # lint_drama 为机器复核(转折词/爆发标志/句段数)
+            return (
+                f"{persona['personaPrompt']}。\n"
+                "为竹香酒品牌写一条 18 秒竖版独白微短剧口播"
+                "(单镜数字人)。只输出 JSON, 格式: "
+                '{"scenes": [{"role": "cover", '
+                '"text": "主题卡文案(不超过12字)", '
+                '"voiceover": "独白全文(40-48字)", '
+                '"highlightWords": ["高亮词(最多2个, 每个6字内)"]}]}。\n'
+                "独白必须三段结构: 第一段铺垫困境(被谁看轻/失去什么), "
+                "第二段用「可是/直到/谁知/终于」类转折词引出变局, "
+                "第三段感叹句爆发收束并自然带出竹香酒"
+                "(敬一杯/赢回来); 每段留一个情绪钩子。\n"
+                "红线: 不得劝酒或描述饮酒动作; 不得功效宣称(养生/"
+                "保健/治疗类表述); 不得权威背书或引用研究数据; "
+                "不编造热点中没有的信息; 口吻必须符合人设。"
+            )
         return (
             f"{persona['personaPrompt']}。\n"
             "为竹香酒品牌竖版短视频(4 个镜头, 总长约 16 秒)写分镜文案。"
@@ -430,12 +508,17 @@ class Sv73ScriptService:
     # ---------- LLM 场景文案提取(判定链禁入落点) ----------
 
     def _llm_scene_texts(self, hotspot: dict, category: str,
-                         persona: dict) -> tuple[dict | None, str]:
+                         persona: dict,
+                         template: str = DEFAULT_TEMPLATE,
+                         ) -> tuple[dict | None, str]:
         """LLM 轨: 仅取文案三件套(text/voiceover/highlightWords)
         按 role 对位; 结构/数字/合规镜一律不采(LLM 禁入判定链)
         """
+        vo_limit = (DRAMA_VOICEOVER_MAX
+                    if template == "drama_monologue"
+                    else VOICEOVER_MAX_CHARS)
         data, track = self._chat_json(
-            self._system_prompt(persona),
+            self._system_prompt(persona, template),
             self._user_prompt(hotspot, category, _hotword(hotspot)))
         if data is None:
             return None, TRACK_RULE
@@ -452,7 +535,7 @@ class Sv73ScriptService:
                 by_role.setdefault(role, {
                     "text": _clip(sc.get("text", ""), TEXT_MAX_CHARS),
                     "voiceover": _clip(sc.get("voiceover", ""),
-                                       VOICEOVER_MAX_CHARS),
+                                       vo_limit),
                     "highlightWords": (
                         [_clip(w, HIGHLIGHT_MAX_CHARS)
                          for w in words[:HIGHLIGHT_MAX_WORDS]]
@@ -469,6 +552,7 @@ class Sv73ScriptService:
         scenes = []
         for i, role in enumerate(plan):
             vo_limit = (DH_HOOK_VOICEOVER_MAX if role == "dh_hook"
+                        else DRAMA_VOICEOVER_MAX if role == "drama_oral"
                         else VOICEOVER_MAX_CHARS)
             mock = {
                 "text": _clip(
@@ -489,10 +573,10 @@ class Sv73ScriptService:
                 chosen = {"text": COMPLIANCE_TEXT,
                           "voiceover": COMPLIANCE_VOICEOVER,
                           "highlightWords": []}
-            elif (role == "dh_hook" and llm_texts
+            elif (role in ("dh_hook", "drama_oral") and llm_texts
                     and "cover" in llm_texts):
-                # dh_mix 口播钩子消费 LLM cover 文案(钩子语义同位);
-                # 口播镜 9s 档独立截断(全局 40 字为 15s 单镜口径)
+                # 口播镜消费 LLM cover 文案(钩子语义同位——dh_mix
+                # 9s 钩子/drama 独白全文, 各自口径截断)
                 cand = llm_texts["cover"]
                 chosen = {
                     "text": cand["text"] or mock["text"],
@@ -567,21 +651,25 @@ class Sv73ScriptService:
         durs = _scene_durations(TEMPLATES[template])
 
         llm_texts, track = self._llm_scene_texts(
-            hotspot, category, persona_def)
+            hotspot, category, persona_def, template)
         scenes = self._build_scenes(
             category, hotword, llm_texts, plan, durs)
 
         # 质量护栏(A2): LLM 轨 lint 失败 → 重生成一次 → 仍败回落
-        # rule(仅门控 LLM 轨——rule 文案为注册表确定性产物)
+        # rule(仅门控 LLM 轨——rule 文案为注册表确定性产物);
+        # drama_monologue 叠加三段结构检查(P0 短剧轨)
+        lint_all = (lambda scs: lint_texts(scs)
+                    + (lint_drama(scs)
+                       if template == "drama_monologue" else []))
         if track != TRACK_RULE:
-            flaws = lint_texts(scenes)
+            flaws = lint_all(scenes)
             if flaws:
                 logger.warning("sv73_llm_lint_retry: %s", flaws)
                 llm_texts, track = self._llm_scene_texts(
-                    hotspot, category, persona_def)
+                    hotspot, category, persona_def, template)
                 scenes = self._build_scenes(
                     category, hotword, llm_texts, plan, durs)
-                flaws = lint_texts(scenes)
+                flaws = lint_all(scenes)
                 if flaws:
                     logger.warning(
                         "sv73_llm_lint_rule_fallback: %s", flaws)

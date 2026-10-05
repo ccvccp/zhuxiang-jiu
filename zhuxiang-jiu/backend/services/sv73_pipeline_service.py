@@ -289,12 +289,14 @@ class Sv73PipelineService:
             base = (base + f"(引流短链 zxjiu.com/r/{short_code}: "
                     "发布描述/评论区置顶/主页链接载体——点击即入 "
                     "attract 归因漏斗)")
-        if sv73.get("template") in ("dh_oral", "dh_mix"):
+        if sv73.get("template") in ("dh_oral", "dh_mix",
+                                    "drama_monologue"):
             base = (base + f"(数字人 GPU 轨 {sv73.get('template')}: "
                     "口播 mp4 由算力机 "
                     "build_dh_dev.py 渲染——SV73_DH_MODE=real + "
                     "SV73_SADTALKER_DIR, 经 render/attach 回填; "
-                    "dh_mix 多镜由 dh_batch.py 本地 compose_mix 合成; "
+                    "dh_mix/drama 多镜由 dh_batch.py 本地 compose_mix "
+                    "合成(drama=独白短剧三段结构); "
                     "影子对照: 与零 GPU 轨同剧对比完播率)")
         if platform == "xiaohongshu":
             return base + (

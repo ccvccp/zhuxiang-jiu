@@ -400,7 +400,44 @@ def test_t10_rule_track_lint_clean(monkeypatch):
     """rule 轨注册表文案自身 lint-clean(mock '好火'同源清理回归)"""
     from services.sv73_script_service import lint_texts
     _patch_rule(monkeypatch)
-    for tpl in ("vertical", "dh_oral", "dh_mix", "fast"):
+    for tpl in ("vertical", "dh_oral", "dh_mix", "fast", "drama_monologue"):
         sb = _run(Sv73ScriptService().generate(
             dict(HOTSPOT), template=tpl))
         assert lint_texts(sb["scenes"]) == [], tpl
+
+
+# ------------------------------------------------------------
+# T11 drama_monologue 独白短剧轨(P0+P1 2026-10-05):
+#     三段结构(压抑→转折→爆发)+lint_drama 钩子复核+合成链复用
+# ------------------------------------------------------------
+
+
+def test_t11_drama_registry_and_rule_track(monkeypatch):
+    _patch_rule(monkeypatch)
+    reg = sv73mod.TEMPLATES["drama_monologue"]
+    assert reg["scenePlan"] == ("drama_oral", "compliance")
+    assert reg["sceneDurations"] == (18.0, 4.5)
+    sb = _run(Sv73ScriptService().generate(
+        {**HOTSPOT, "fingerprint": "fp-sv73-drama-01"},
+        template="drama_monologue"))
+    assert_schema(sb)
+    assert sb["totalDuration"] == 21.9   # 18+4.5-0.6(SCENE_FADE)
+    vo = sb["scenes"][0]["voiceover"]
+    assert len(vo) <= sv73mod.DRAMA_VOICEOVER_MAX
+    # rule 轨注册表文案 lint_drama 自证清洁
+    assert sv73mod.lint_drama(sb["scenes"]) == []
+    # 反例: 无转折词/无爆发/句段<3 → 三项全打回
+    bad = [{"role": "drama_oral", "voiceover": "今天聊酒"}]
+    assert len(sv73mod.lint_drama(bad)) == 3
+
+
+def test_t11b_drama_mix_plan_reuse():
+    """mix_plan 通用 xfade 编排——drama 复用 dh_mix 合成链"""
+    from services.sv73_render_service import Sv73RenderService
+    sb = {"scenes": [{"duration": 18.0}, {"duration": 4.5}],
+          "template": {"fade": sv73mod.SCENE_FADE}}
+    plan = Sv73RenderService.mix_plan(sb, oral_duration=19.2)
+    assert plan["durations"] == [19.2, 4.5]
+    assert plan["offsets"] == [round(19.2 - sv73mod.SCENE_FADE, 2)]
+    assert plan["total"] == round(
+        19.2 + 4.5 - sv73mod.SCENE_FADE, 2)

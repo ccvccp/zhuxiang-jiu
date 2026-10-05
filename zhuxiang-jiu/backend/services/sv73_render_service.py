@@ -58,6 +58,7 @@ ROLE_LABELS = {
     "compliance": "健康提示",
     "dh_oral": "竹小妹口播",   # 数字人轨 P1: PNG 主题卡标签
     "dh_hook": "竹小妹口播",   # dh_mix 多镜口播钩子(A1)
+    "drama_oral": "独白短剧",  # drama_monologue 独白镜(短剧轨 P0+P1)
 }
 
 # P1-2 BGM 情绪档 → TTS 语速(48号 joyvoice MOOD_SPEED 同值锚定:
@@ -326,9 +327,10 @@ class Sv73RenderService:
           口播偏移贴 ffprobe 实际时长
         """
         tpl = storyboard["template"]
-        if tpl["name"] != "dh_mix":
+        if tpl["name"] not in ("dh_mix", "drama_monologue"):
             raise ValueError(
-                f"compose_mix 仅服务 dh_mix 模板(当前 {tpl['name']})")
+                f"compose_mix 仅服务口播+卡片混合模板"
+                f"(当前 {tpl['name']})")
         if not card_pages:
             raise ValueError("dh_mix 缺卡片镜页面")
         if len(card_pages) != len(storyboard["scenes"]) - 1:
