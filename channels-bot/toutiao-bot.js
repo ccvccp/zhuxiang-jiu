@@ -21,9 +21,11 @@ const LOG = (m) => {
 };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// [CAL] 头条创作平台入口——首页确定性高, 发布页路径待 probe 现场修正
+// [CAL→实证 2026-10-05 probe2] 头条视频发布页(西爪上传页, 直达有效):
+// 「发布视频/点击上传」, input[type=file] 在主文档(无 iframe), 表单上传后渲染
 const TT_HOME = 'https://mp.toutiao.com/';
-const TT_PUBLISH_URL = process.env.TT_PUBLISH_URL || TT_HOME;
+const TT_PUBLISH_URL = process.env.TT_PUBLISH_URL
+  || 'https://mp.toutiao.com/profile_v4/xigua/upload-video';
 
 (async () => {
   const browser = await puppeteer.launch({
@@ -68,20 +70,67 @@ const TT_PUBLISH_URL = process.env.TT_PUBLISH_URL || TT_HOME;
   }
   LOG('LOGGED_IN url=' + page.url());
 
+  // ---- assist: 人工操作窗口(完善账号信息等), 自动点「去完善」入口,
+  //      用户完成后手动关窗=完成信号(横幅消失≠完善完成, 2026-10-05 实证) ----
+  if (CFG.action === 'assist') {
+    const waitMin = Number(CFG.waitMinutes || 20);
+    try {
+      const clicked = await page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button, a, span, div'))
+          .filter(el => /^(去完善|立即完善)$/.test((el.innerText || '').trim()) && el.children.length <= 2);
+        if (btns.length) { btns[btns.length - 1].click(); return true; }
+        return false;
+      });
+      LOG(clicked ? '已自动点击「去完善/立即完善」入口' : '未找到完善入口 — 请人工从 设置/账号信息 进入');
+    } catch (e) { LOG('auto click err: ' + e.message); }
+    let closed = false;
+    browser.on('disconnected', () => { closed = true; });
+    LOG('assist window open (' + waitMin + 'min) — 请完整填写并提交, 完成后直接关闭 Chrome 窗口');
+    const deadline = Date.now() + waitMin * 60000;
+    while (!closed && Date.now() < deadline) { await sleep(3000); }
+    if (closed) {
+      LOG('ASSIST_WINDOW_CLOSED — 用户已关窗, 完善操作视为完成, 可跑试发验证');
+      process.exit(0);
+    }
+    LOG('ASSIST_TIMEOUT — 窗口到期(未关窗), 完成状态未知, 以试发为准');
+    await browser.close();
+    process.exit(7);
+  }
+
   // ---- probe: 现场校准(登录态/发布入口/AI声明控件/内容管理) ----
   if (CFG.action === 'probe') {
+    if (CFG.probeUrl) {
+      await page.goto(CFG.probeUrl, { waitUntil: 'domcontentloaded' });
+      LOG('probe goto ' + CFG.probeUrl);
+      await sleep(9000);
+    }
     const dump = await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll('a, button'))
         .map(el => (el.innerText || '').trim() + '|' + (el.href || ''))
         .filter(t => /发布|视频|内容管理|作品/.test(t))
         .slice(0, 40);
-      return { url: location.href, links, body: (document.body.innerText || '').slice(0, 1200) };
+      const inputs = Array.from(document.querySelectorAll('input, textarea')).slice(0, 30)
+        .map(el => el.tagName.toLowerCase() + '|' + (el.type || '') + '|ph=' + (el.placeholder || '').slice(0, 40));
+      const buttons = Array.from(document.querySelectorAll('button, [role=button]')).slice(0, 50)
+        .map(el => 'btn|' + (el.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 24) + '|dis=' + !!el.disabled)
+        .filter(t => t.length > 8);
+      const aiEls = Array.from(document.querySelectorAll('label, span, div, [class*=checkbox], [class*=switch]'))
+        .map(el => (el.innerText || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 60))
+        .filter(t => /AI|人工智能|生成声明/.test(t)).slice(0, 12);
+      const frames = Array.from(document.querySelectorAll('iframe')).map(f => f.src || '(no src)').slice(0, 8);
+      return { url: location.href, links, inputs, buttons, aiEls, frames,
+               body: (document.body.innerText || '').slice(0, 1600) };
     });
     LOG('probe url=' + dump.url);
     LOG('publish-ish links:\n  ' + dump.links.join('\n  '));
-    LOG('body head:\n' + dump.body.replace(/\n/g, ' / ').slice(0, 600));
+    LOG('inputs:\n  ' + dump.inputs.join('\n  '));
+    LOG('buttons:\n  ' + dump.buttons.join('\n  '));
+    LOG('AI-ish els:\n  ' + dump.aiEls.join('\n  '));
+    LOG('iframes:\n  ' + dump.frames.join('\n  '));
+    LOG('body head:\n' + dump.body.replace(/\n/g, ' / ').slice(0, 800));
     fs.writeFileSync('tt_probe_dump.json', JSON.stringify(dump, null, 2));
-    LOG('PROBE_DONE (tt_probe_dump.json) — 校准 TT_PUBLISH_URL/登录词/控件选择器');
+    await page.screenshot({ path: 'tt_probe_page.png' });
+    LOG('PROBE_DONE (tt_probe_dump.json + tt_probe_page.png)');
     await browser.close();
     return;
   }
@@ -134,96 +183,145 @@ const TT_PUBLISH_URL = process.env.TT_PUBLISH_URL || TT_HOME;
   await uploadHandle.uploadFile(CFG.mp4);
   LOG('uploadFile: ' + CFG.mp4);
 
-  // 2. 描述并行填写(上传中键入, douyin 同款)
-  await sleep(4000);
-  try {
-    await page.keyboard.type(String(CFG.desc || ''), { delay: 30 });
-    LOG('desc typed via keyboard (上传中并行填写)');
-  } catch (e) { LOG('desc type err: ' + e.message); }
+  // 2. 等发布表单渲染 → 关引导弹窗(一次性全关, 页面同时多个) → 精确填标题
+  //    [实证 probe2] 头条视频发布页无简介框, 仅标题(30字上限, 计数 n/30);
+  //    [实证试发2] 「我知道了」弹窗同时多个, 逐个关耗尽重试轮次的教训
+  const title = String(CFG.title || CFG.desc || '').slice(0, 30);
+  for (let i = 0; i < 8; i++) {
+    const n = await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button, a, span, div'))
+        .filter(el => (el.innerText || '').trim() === '我知道了' && el.children.length <= 2);
+      btns.forEach(el => { try { el.click(); } catch (e) {} });
+      return btns.length;
+    });
+    if (!n) break;
+    LOG('dismiss 引导弹窗 x' + n);
+    await sleep(1200);
+  }
+  let titleOk = false;
+  for (let i = 0; i < 18 && !titleOk; i++) {
+    try {
+      const r = await page.evaluate((t) => {
+        const cands = Array.from(document.querySelectorAll('input, textarea'))
+          .filter(el => el.type !== 'file' && el.offsetParent !== null);
+        if (!cands.length) return {};
+        const box = cands.find(el =>
+          /标题/.test(el.placeholder || el.getAttribute('aria-label') || '')) || cands[0];
+        box.scrollIntoView({ block: 'center' });
+        const proto = box.tagName === 'TEXTAREA'
+          ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, 'value').set.call(box, t);
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        box.dispatchEvent(new Event('change', { bubbles: true }));
+        return { typed: box.value.length, want: t.length };
+      }, title);
+      if (r.typed === title.length) {
+        titleOk = true; LOG('title filled: [' + title + '] (' + r.typed + '字)');
+      } else { await sleep(2500); }
+    } catch (e) { LOG('title fill err: ' + e.message); await sleep(2500); }
+  }
+  if (!titleOk) {
+    LOG('TITLE_FILL_FAILED — [CAL] 标题框定位/受控组件写入需人审');
+    await page.screenshot({ path: 'tt_err_title.png' });
+    await browser.close();
+    process.exit(6);
+  }
 
-  // 3. AI 生成声明([CAL] 控件形态: 开关/复选; 字节系同规, 找不到仅告警不阻断)
+  // 3. AI 生成声明精确点击
+  //    [实证 probe2] 「作品声明」是选项组: 取自站外/引用站内/自行拍摄/AI生成/
+  //    虚构演绎/故事经历/投资观点——必须叶子精确匹配「AI生成」, 容器含全文误点实证
   try {
     const labeled = await page.evaluate(() => {
-      const els = Array.from(document.querySelectorAll(
-        'label, span, div[role=checkbox], [class*=checkbox], [class*=switch]'));
-      const t = els.find(el => /AI.{0,4}生成|人工智能生成/.test(
-        (el.innerText || el.getAttribute('aria-label') || '')));
-      if (t) { t.click(); return (t.innerText || '').slice(0, 30); }
-      return '';
+      const leaves = Array.from(document.querySelectorAll('span, label, div, li, a'))
+        .filter(el => (el.innerText || '').trim() === 'AI生成');
+      if (!leaves.length) return '';
+      // 取 DOM 最深(最内层)的一个, 避免点到外层容器
+      const leaf = leaves.reduce((a, b) =>
+        (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_CONTAINED_BY) ? b : a);
+      leaf.scrollIntoView({ block: 'center' });
+      leaf.click();
+      return 'AI生成';
     });
-    LOG(labeled ? 'AI 声明已点: [' + labeled + ']'
-                : 'WARN AI声明控件未找到 — [CAL] 待现场校准(不阻断)');
+    LOG(labeled ? 'AI 声明已点(叶子精确): [' + labeled + ']'
+                : 'WARN AI声明「AI生成」叶子未找到 — [CAL] 待人审(不阻断)');
   } catch (e) { LOG('AI label err: ' + e.message); }
 
-  // 4. 等上传完成(60s 下限铁律) → 发布按钮(滚入视口+防双发 guard)
+  // 4. 等上传完成(60s 下限铁律) → 发布按钮
+  //    [实证首试] 合成+CDP 双点击后 URL 未离开发布页且 manage 核对未发布
+  //    (疑似「完善账号信息」权限拦截) → 单轮点击+状态留档, 防双发不重试
   for (let i = 0; i < 12; i++) { await sleep(5000); }
   LOG('upload wait done (>=60s), enter publish-btn flow');
-  let clicked = false;
-  for (let i = 0; i < 60 && !clicked; i++) {
-    try {
-      const btnPt = await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll('button, [role=button]'));
-        const b = btns.find(x => /^(发布|发表)$/.test((x.innerText || '').trim()) && !x.disabled);
-        if (!b) return null;
-        b.scrollIntoView({ block: 'center' });               // 视口外打空修正
-        const r = b.getBoundingClientRect();
-        if (!(r.width > 0) || r.y < 0 || r.y > 890) return null;
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-      });
-      if (!btnPt) { if (i % 4 === 0) LOG('wait publish-btn poll ' + (i * 5) + 's'); await sleep(5000); continue; }
-      const ok = await page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll('button, [role=button]'));
-        const b = btns.find(x => /^(发布|发表)$/.test((x.innerText || '').trim()) && !x.disabled);
-        if (!b) return false;
-        b.click();
-        return true;
-      });
-      if (ok) {
-        clicked = true;
-        LOG('click 发布 (合成) at ' + Math.round(btnPt.x) + ',' + Math.round(btnPt.y));
-        await sleep(2500);
-        // 防双发 guard(douyin 2026-10-04 实证修正同款): 合成点击已生效
-        // (URL 离开发布页)则跳过 CDP 兜底
-        const left = !/publish|upload/.test(page.url());
-        if (left) {
-          LOG('合成点击已生效(URL 已离开发布页) — 跳过 CDP 兜底防双发');
-        } else {
-          const cdp = await page.createCDPSession();
-          await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: btnPt.x, y: btnPt.y, button: 'none', pointerType: 'mouse' });
-          await sleep(150);
-          await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: btnPt.x, y: btnPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
-          await sleep(90);
-          await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: btnPt.x, y: btnPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
-          LOG('CDP 真实点击兜底已发');
-        }
-      }
-    } catch (e) { LOG('publish click err: ' + e.message); await sleep(5000); }
+  const btnState = async () => page.evaluate(() => {
+    const btns = Array.from(document.querySelectorAll('button, [role=button]'));
+    const b = btns.find(x => /^(发布|发表)$/.test((x.innerText || '').trim()));
+    if (!b) return null;
+    b.scrollIntoView({ block: 'center' });
+    const r = b.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2,
+             disabled: !!b.disabled, cls: (b.className || '').slice(0, 60),
+             aria: b.getAttribute('aria-disabled') };
+  });
+  let btnPt = null;
+  for (let i = 0; i < 24 && !btnPt; i++) {
+    btnPt = await btnState();
+    if (!btnPt) { if (i % 4 === 0) LOG('wait publish-btn poll ' + (i * 5) + 's'); await sleep(5000); }
   }
-  if (!clicked) {
-    LOG('PUBLISH_BTN_TIMEOUT — [CAL] 按钮文案/就绪条件需校准');
+  if (!btnPt) {
+    LOG('PUBLISH_BTN_NOT_FOUND — [CAL] 按钮文案需校准');
     await page.screenshot({ path: 'tt_err_no_btn.png' });
     await browser.close();
     process.exit(4);
   }
+  LOG('publish btn state: disabled=' + btnPt.disabled + ' aria=' + btnPt.aria + ' cls=[' + btnPt.cls + ']');
+  await page.evaluate(() => {
+    const b = Array.from(document.querySelectorAll('button, [role=button]'))
+      .find(x => /^(发布|发表)$/.test((x.innerText || '').trim()));
+    if (b) b.click();
+  });
+  LOG('click 发布 (合成) at ' + Math.round(btnPt.x) + ',' + Math.round(btnPt.y));
+  await sleep(3000);
+  // [诊断] 点击后立即捕获可见弹窗/toast(拦截弹窗/校验提示稍纵即逝)
+  const capDialogs = () => page.evaluate(() => {
+    const sels = '[class*=modal], [class*=dialog], [class*=Modal], [class*=Dialog], [role=dialog], [class*=toast], [class*=Toast], [class*=popover], [class*=guide]';
+    return Array.from(document.querySelectorAll(sels))
+      .filter(el => el.offsetParent !== null && (el.innerText || '').trim())
+      .map(el => (el.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 160));
+  });
+  LOG('post-click dialogs(+3s): ' + JSON.stringify(await capDialogs().catch(() => [])));
+  let left = !/upload-video|publish/.test(page.url());
+  if (!left) {
+    const cdp = await page.createCDPSession();
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: btnPt.x, y: btnPt.y, button: 'none', pointerType: 'mouse' });
+    await sleep(150);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: btnPt.x, y: btnPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+    await sleep(90);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: btnPt.x, y: btnPt.y, button: 'left', clickCount: 1, force: 0.5, pointerType: 'mouse' });
+    LOG('CDP 真实点击兜底已发');
+    await sleep(3000);
+    left = !/upload-video|publish/.test(page.url());
+  }
 
-  // 5. 成功特征轮询([CAL]: URL 跳内容管理 / 文本"发布成功")
-  let published = false;
-  for (let i = 0; i < 30 && !published; i++) {
+  // 5. 成功判定([实证修正] 首试 PUBLISH_OK 假阳性: URL 未离开+表单仍在却被判成功
+  //    → 收紧为: URL 离开发布页 或 body 明确含「发布成功」toast)
+  let published = left;
+  for (let i = 0; i < 20 && !published; i++) {
     const url = page.url();
     let bodyText = '';
-    try { bodyText = await page.evaluate(() => (document.body.innerText || '').slice(0, 500)); } catch (e) {}
-    if ((/manage|content/.test(url) && !/publish|upload/.test(url))
-        || /发布成功|审核中/.test(bodyText)) {
+    try { bodyText = await page.evaluate(() => (document.body.innerText || '').slice(0, 600)); } catch (e) {}
+    if (!/upload-video|publish/.test(url) || /发布成功/.test(bodyText)) {
       published = true;
       LOG('PUBLISH_OK url=' + url);
       LOG('after body: ' + bodyText.replace(/\n/g, ' ').slice(0, 300));
     } else { await sleep(3000); }
   }
-  if (!published) {
-    LOG('PUBLISH_UNVERIFIED — 90s 未见成功特征, 截图留档人审(勿重发——先 manage 核对)');
-    await page.screenshot({ path: 'tt_unverified.png' });
-  }
   await page.screenshot({ path: 'tt_publish_end.png' });
+  if (!published) {
+    const st = await btnState();
+    LOG('PUBLISH_CLICK_INEFFECTIVE — 按钮状态=' + JSON.stringify(st)
+      + ' 疑似权限拦截(「请完善账号信息」), 草稿已保全, 请人工完善后重试');
+    await browser.close();
+    process.exit(5);
+  }
   LOG('PUBLISH_RUN_DONE');
   await browser.close();
 })();
