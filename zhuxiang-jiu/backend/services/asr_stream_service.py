@@ -215,8 +215,15 @@ class AsrStreamSession:
                 m = json.loads(msg)
                 ev = (m.get("header") or {}).get("event")
                 if ev == "task-started":
+                    # 先补投缓冲再开门(2026-10-06 矩阵实证回归修正):
+                    # started.set() 先于 flush 时, feed 一见置位即直通
+                    # send, 与 read_loop 内 flush 的 send 并发——
+                    # websockets 并发 send 打崩连接(await None 异常,
+                    # e2e_wake_matrix 三场景 3/3 复现)。while 网住
+                    # 补投期间新缓冲的帧, 循环排空后置位, 零并发。
+                    while self._pending:
+                        await self._flush_pending()
                     self._started.set()
-                    await self._flush_pending()
                 elif ev == "result-generated":
                     payload = m.get("payload") or {}
                     sentence = (payload.get("output") or {}
