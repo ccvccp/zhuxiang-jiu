@@ -69,21 +69,93 @@ const BILI_UPLOAD_URL = process.env.BILI_UPLOAD_URL
 
   // ---- probe ----
   if (CFG.action === 'probe') {
+    if (CFG.probeUrl) {
+      await page.goto(CFG.probeUrl, { waitUntil: 'domcontentloaded' });
+      LOG('probe goto ' + CFG.probeUrl);
+      await sleep(8000);
+    }
     const dump = await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll('a, button'))
         .map(el => (el.innerText || '').trim() + '|' + (el.href || ''))
-        .filter(t => /投稿|上传|视频|稿件|内容管理/.test(t))
+        .filter(t => /投稿|上传|视频|稿件|内容管理|草稿|删除/.test(t))
         .slice(0, 40);
-      return { url: location.href, links,
+      const clicks = Array.from(document.querySelectorAll('button, [role=button], span, div, a'))
+        .filter(el => el.children.length === 0)
+        .map(el => (el.innerText || '').trim())
+        .filter(t => /草稿|删除|确定|确认/.test(t) && t.length <= 10)
+        .slice(0, 30);
+      return { url: location.href, links, clicks,
                body: (document.body.innerText || '').slice(0, 1200) };
     });
     LOG('probe url=' + dump.url);
     LOG('links:\n  ' + dump.links.join('\n  '));
+    LOG('clickables(草稿/删除):\n  ' + dump.clicks.join(' | '));
     LOG('body head:\n' + dump.body.replace(/\n/g, ' / ').slice(0, 600));
     fs.writeFileSync('bili_probe_dump.json', JSON.stringify(dump, null, 2));
     LOG('PROBE_DONE (bili_probe_dump.json)');
     await browser.close();
     return;
+  }
+
+  // ---- cleandrafts: 草稿箱批量清理(2026-10-05 校准残留) ----
+  // 护栏: ①先切「草稿」tab ②已发布作品标题仍在页面则中止(防误删) ③封顶8条
+  if (CFG.action === 'cleandrafts') {
+    await page.goto('https://member.bilibili.com/platform/upload-manager/article',
+                    { waitUntil: 'domcontentloaded' });
+    await sleep(6000);
+    const tabOk = await page.evaluate(() => {
+      const t = Array.from(document.querySelectorAll('span, div, a, button'))
+        .filter(el => el.children.length === 0 && (el.innerText || '').trim() === '草稿');
+      if (t.length) { t[t.length - 1].click(); return true; }
+      return false;
+    });
+    LOG('草稿 tab click: ' + tabOk);
+    await sleep(4000);
+    const guard = await page.evaluate(() =>
+      !(document.body.innerText || '').includes('活动sv73_492a9c447c99'));
+    LOG('published-work-absent guard: ' + guard);
+    if (!tabOk || !guard) {
+      LOG('ABORT — 草稿 tab 未切换或已发布作品仍可见, 不执行删除');
+      await browser.close(); process.exit(9);
+    }
+    let deleted = 0;
+    const CAP = Number(CFG.maxDelete || 8);
+    for (let round = 0; round < CAP; round++) {
+      const item = await page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll(
+          'button, [role=button], span, a, div'))
+          .filter(el => el.children.length === 0
+                        && /^(删除|删除作品|删除视频|删除草稿)$/.test((el.innerText || '').trim())
+                        && el.offsetParent !== null);
+        if (!btns.length) return null;
+        const b = btns[0];
+        b.scrollIntoView({ block: 'center' });
+        const row = b.closest('[class*=item],[class*=card],[class*=row],li,tr');
+        const title = row ? (row.innerText || '').split('\n').filter(Boolean).slice(0, 3).join('/')
+                          : '(unknown)';
+        b.click();
+        return title;
+      });
+      if (!item) break;
+      LOG('delete draft: [' + String(item).slice(0, 60) + ']');
+      await sleep(1500);
+      const confirmed = await page.evaluate(() => {
+        const els = Array.from(document.querySelectorAll('button, [role=button], span'))
+          .filter(el => el.children.length === 0
+                        && /^(确定|删除|确认|确认删除)$/.test((el.innerText || '').trim())
+                        && el.offsetParent !== null);
+        if (els.length) { els[els.length - 1].click(); return (els[els.length - 1].innerText || '').trim(); }
+        return '';
+      });
+      LOG('confirm: [' + (confirmed || 'no-dialog(auto)') + ']');
+      await sleep(2500);
+      deleted++;
+    }
+    const body = await page.evaluate(() => (document.body.innerText || '').slice(0, 800));
+    LOG('CLEANDRAFTS_DONE deleted=' + deleted);
+    LOG('after-body: ' + body.replace(/\n/g, ' ').slice(0, 300));
+    await browser.close();
+    process.exit(0);
   }
 
   // ---- manage: 稿件管理转储 ----

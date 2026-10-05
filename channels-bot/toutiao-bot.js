@@ -135,6 +135,67 @@ const TT_PUBLISH_URL = process.env.TT_PUBLISH_URL
     return;
   }
 
+  // ---- cleandrafts: 草稿箱批量清理(2026-10-05 试发残留约5条) ----
+  // 护栏: ①先切「草稿箱」tab ②已发布作品标题仍在页面则中止 ③封顶8条
+  if (CFG.action === 'cleandrafts') {
+    await page.goto('https://mp.toutiao.com/profile_v4/manage/content/all',
+                    { waitUntil: 'domcontentloaded' });
+    await sleep(6000);
+    const tabOk = await page.evaluate(() => {
+      const t = Array.from(document.querySelectorAll('span, div, a, button'))
+        .filter(el => el.children.length === 0 && (el.innerText || '').trim() === '草稿箱');
+      if (t.length) { t[t.length - 1].click(); return true; }
+      return false;
+    });
+    LOG('草稿箱 tab click: ' + tabOk);
+    await sleep(4000);
+    const guard = await page.evaluate(() =>
+      !(document.body.innerText || '').includes('寒露至'));
+    LOG('published-work-absent guard: ' + guard);
+    if (!tabOk || !guard) {
+      LOG('ABORT — 草稿箱 tab 未切换或已发布作品仍可见, 不执行删除');
+      await browser.close(); process.exit(9);
+    }
+    let deleted = 0;
+    const CAP = Number(CFG.maxDelete || 8);
+    for (let round = 0; round < CAP; round++) {
+      const item = await page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll(
+          'button, [role=button], span, a, div'))
+          .filter(el => el.children.length === 0
+                        && /^(删除|删除作品|删除视频|删除草稿)$/.test((el.innerText || '').trim())
+                        && el.offsetParent !== null);
+        if (!btns.length) return null;
+        const b = btns[0];
+        b.scrollIntoView({ block: 'center' });
+        const row = b.closest('[class*=item],[class*=card],[class*=row],li,tr');
+        const title = row ? (row.innerText || '').split('\n').filter(Boolean).slice(0, 3).join('/')
+                          : '(unknown)';
+        b.click();
+        return title;
+      });
+      if (!item) break;
+      LOG('delete draft: [' + String(item).slice(0, 60) + ']');
+      await sleep(1500);
+      const confirmed = await page.evaluate(() => {
+        const els = Array.from(document.querySelectorAll('button, [role=button], span'))
+          .filter(el => el.children.length === 0
+                        && /^(确定|删除|确认|确认删除)$/.test((el.innerText || '').trim())
+                        && el.offsetParent !== null);
+        if (els.length) { els[els.length - 1].click(); return (els[els.length - 1].innerText || '').trim(); }
+        return '';
+      });
+      LOG('confirm: [' + (confirmed || 'no-dialog(auto)') + ']');
+      await sleep(2500);
+      deleted++;
+    }
+    const body = await page.evaluate(() => (document.body.innerText || '').slice(0, 800));
+    LOG('CLEANDRAFTS_DONE deleted=' + deleted);
+    LOG('after-body: ' + body.replace(/\n/g, ' ').slice(0, 300));
+    await browser.close();
+    process.exit(0);
+  }
+
   // ---- manage: 内容管理列表转储(核发/对账) ----
   if (CFG.action === 'manage') {
     // [CAL] 内容管理真实路径——先走首页链接发现
