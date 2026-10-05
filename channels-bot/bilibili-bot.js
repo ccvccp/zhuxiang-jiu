@@ -104,6 +104,79 @@ const BILI_UPLOAD_URL = process.env.BILI_UPLOAD_URL
     return;
   }
 
+  // ---- assist: 半自动模式(2026-10-05 首发实证) ----
+  // bot: 上传+标题/简介预填(含AIGC软声明)+10min 快照监听;
+  // 人工: 分区/创作声明/立即投稿 三步(B站必填项弹层结构未完全
+  // 校准前的事故安全形态; 成功特征=「恭喜你上传/成为UP主」)
+  if (CFG.action === 'assist') {
+    await page.goto('https://member.bilibili.com/platform/upload/video/frame/',
+                    { waitUntil: 'domcontentloaded' });
+    await sleep(6000);
+    let uh = null;
+    for (let i = 0; i < 12 && !uh; i++) {
+      for (const fr of page.frames()) {
+        try { const x = await fr.$('input[type=file]'); if (x) { uh = x; break; } } catch (e) {}
+      }
+      if (!uh) await sleep(5000);
+    }
+    if (!uh) { LOG('UPLOAD_INPUT_TIMEOUT'); await browser.close(); process.exit(3); }
+    await uh.uploadFile(CFG.mp4);
+    LOG('uploadFile: ' + CFG.mp4);
+    for (let i = 0; i < 36; i++) {
+      if (await page.evaluate(() => /请选择分区/.test(document.body.innerText || ''))) break;
+      await sleep(5000);
+    }
+    // 预填(仅空时——草稿恢复防重复)
+    const tEmpty = await page.evaluate(() => {
+      const f = Array.from(document.querySelectorAll('input'))
+        .find(x => /标题/.test(x.placeholder || ''));
+      return f && !f.value;
+    });
+    if (tEmpty) {
+      await page.evaluate(() => {
+        const f = Array.from(document.querySelectorAll('input'))
+          .find(x => /标题/.test(x.placeholder || ''));
+        if (f) f.focus();
+      });
+      await page.keyboard.type(String(CFG.title || ''), { delay: 30 });
+      LOG('title 预填');
+    } else LOG('标题非空(草稿) — 跳过');
+    const dEmpty = await page.evaluate(() => {
+      const els = Array.from(document.querySelectorAll('textarea'))
+        .filter(x => x.getBoundingClientRect().width > 0);
+      return els.length && !els[els.length - 1].value;
+    });
+    if (dEmpty) {
+      const DECL = '（本视频由AI辅助制作）';
+      let d = String(CFG.desc || '');
+      if (!/AI|人工智能/.test(d)) d += DECL;
+      await page.evaluate(() => {
+        const els = Array.from(document.querySelectorAll('textarea, [contenteditable=true]'))
+          .filter(x => x.getBoundingClientRect().width > 0);
+        if (els.length) els[els.length - 1].focus();
+      });
+      await page.keyboard.type(d, { delay: 20 });
+      LOG('desc 预填(含AIGC软声明)');
+    } else LOG('简介非空(草稿) — 跳过');
+    LOG('>>> 请人工: ①选分区 ②创作声明(AI相关) ③立即投稿 (10 分钟) <<<');
+    let done = false;
+    for (let i = 0; i < 300 && !done; i++) {
+      await sleep(2000);
+      done = await page.evaluate(() =>
+        /恭喜你上传|成为UP主|投递成功/.test(document.body.innerText || ''));
+    }
+    if (done) {
+      LOG('PUBLISH_OK(人工投稿确认) — 稿件进入转码/审核');
+      await page.screenshot({ path: 'bili_assist_ok.png' });
+    } else {
+      LOG('ASSIST_TIMEOUT — 10 分钟未见投稿成功, 窗口即将关闭(稿件已自动存草稿)');
+      await page.screenshot({ path: 'bili_assist_timeout.png' });
+    }
+    LOG('ASSIST_RUN_DONE');
+    await browser.close();
+    process.exit(done ? 0 : 5);
+  }
+
   if (CFG.action !== 'publish') {
     LOG('unknown action: ' + CFG.action);
     await browser.close();
@@ -134,19 +207,44 @@ const BILI_UPLOAD_URL = process.env.BILI_UPLOAD_URL
   }
   await uploadHandle.uploadFile(CFG.mp4);
   LOG('uploadFile: ' + CFG.mp4);
-  await sleep(5000);
 
-  // 2. 分区选择(B站特有硬门槛: 两级; [CAL] 弹层结构)
-  //    category 格式 "一级-二级", 如 "生活-美食"
+  // 2. 等投稿表单就绪(B站特有时序: 上传完成后表单才渲染——分区/
+  //    标题/简介区随之上屏; 首发实证: 上传后 5s 填写全部落空)
+  let formReady = false;
+  for (let i = 0; i < 36 && !formReady; i++) {
+    formReady = await page.evaluate(() => {
+      const t = (document.body.innerText || '');
+      const hasTitle = Array.from(document.querySelectorAll('input'))
+        .some(x => /标题/.test(x.placeholder || '')
+                   && x.getBoundingClientRect().width > 0);
+      return /选择分区|所属分区|添加分区/.test(t) || hasTitle;
+    });
+    if (!formReady) await sleep(5000);
+  }
+  LOG('form ready: ' + formReady + ' (轮询 ' + (formReady ? '命中' : '超时') + ')');
+  if (formReady) {
+    try {
+      const t = await page.evaluate(() =>
+        (document.body.innerText || '').slice(0, 900));
+      LOG('form body:\n' + t.replace(/\n/g, ' / ').slice(0, 700));
+    } catch (e) {}
+  }
+
+  // 3. 分区选择(B站特有硬门槛: 两级; [CAL] 弹层结构)
+  //    category 格式 "一级-二级", 如 "美食-美食圈"
   try {
     const parts = String(CFG.category || '生活-美食').split('-');
-    const opened = await page.evaluate(() => {
-      const els = Array.from(document.querySelectorAll('div, span, button'))
-        .filter(el => el.children.length === 0
-                      && /选择分区|点击选择分区/.test((el.innerText || '').trim()));
-      if (els.length) { els[0].scrollIntoView({ block: 'center' }); els[0].click(); return true; }
-      return false;
-    });
+    let opened = false;
+    for (let i = 0; i < 6 && !opened; i++) {
+      opened = await page.evaluate(() => {
+        const els = Array.from(document.querySelectorAll('div, span, button'))
+          .filter(el => el.children.length === 0
+                        && /选择分区|所属分区|添加分区/.test((el.innerText || '').trim()));
+        if (els.length) { els[0].scrollIntoView({ block: 'center' }); els[0].click(); return true; }
+        return false;
+      });
+      if (!opened) await sleep(3000);
+    }
     LOG('分区选择器点击: ' + opened);
     if (opened) {
       await sleep(2000);
@@ -167,7 +265,7 @@ const BILI_UPLOAD_URL = process.env.BILI_UPLOAD_URL
     }
   } catch (e) { LOG('category err: ' + e.message); }
 
-  // 3. 标题(input, placeholder 含「标题」优先)
+  // 4. 标题(input, placeholder 含「标题」优先)
   try {
     const ok = await page.evaluate(() => {
       const fields = Array.from(document.querySelectorAll('input, textarea'))
@@ -188,7 +286,8 @@ const BILI_UPLOAD_URL = process.env.BILI_UPLOAD_URL
     let descText = String(CFG.desc || '');
     if (!/AI|人工智能/.test(descText)) descText += DECL;
     const ok = await page.evaluate(() => {
-      const els = Array.from(document.querySelectorAll('textarea'))
+      const els = Array.from(document.querySelectorAll(
+        'textarea, [contenteditable=true]'))
         .filter(x => x.getBoundingClientRect().width > 0);
       if (!els.length) return false;
       els[els.length - 1].focus();
@@ -198,19 +297,25 @@ const BILI_UPLOAD_URL = process.env.BILI_UPLOAD_URL
     else LOG('WARN 简介框未定位(desc 跳过)');
   } catch (e) { LOG('desc err: ' + e.message); }
 
-  // 5. AI 创作声明勾选(B站正面支持; [CAL] 控件文案)
+  // 6. AI 创作声明勾选(B站正面支持; 首发实证教训: 「试试更多AI
+  //    创作工具吧」推广 banner 误命中——匹配收紧: 声明类文案+控件
+  //    形态+排除推广词; desc 软声明兜底不变)
   try {
     const labeled = await page.evaluate(() => {
       const els = Array.from(document.querySelectorAll(
-        'label, span, div[role=checkbox], [class*=checkbox], [class*=switch]'));
-      const t = els.find(el => el.children.length <= 1
-        && /AI.{0,6}(生成|创作|制作)|人工智能/.test(
-          (el.innerText || el.getAttribute('aria-label') || '')));
+        'label, div[role=checkbox], [class*=checkbox], [class*=switch], span'));
+      const t = els.find(el => {
+        const txt = (el.innerText
+                     || el.getAttribute('aria-label') || '').trim();
+        if (!txt || txt.length > 20 || el.children.length > 1) return false;
+        if (/工具|试试|更多|立即使用/.test(txt)) return false;   // 推广排除
+        return /(内容由)?AI(生成|创作|制作)|人工智能生成/.test(txt);
+      });
       if (t) { t.scrollIntoView({ block: 'center' }); t.click(); return (t.innerText || '').slice(0, 30); }
       return '';
     });
     LOG(labeled ? 'AI 创作声明已点: [' + labeled + ']'
-                : 'WARN AI声明控件未找到 — [CAL] 待校准(已有 desc 软声明兜底)');
+                : 'WARN AI声明控件未找到(收紧匹配后) — desc 软声明兜底');
   } catch (e) { LOG('AI label err: ' + e.message); }
 
   // 6. 等上传完成(60s 下限) → 立即投稿(滚入视口+防双发 guard)
