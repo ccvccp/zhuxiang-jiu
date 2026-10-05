@@ -38,6 +38,13 @@ def skill_kill() -> bool:
         "AGENT75_SKILL_KILL", "").strip().lower() in ("on", "1", "true")
 
 
+def shadow_enabled() -> bool:
+    """P3c 影子双跑开关(默认 on; off 则 testing 技能静默省调用费)"""
+    return os.environ.get(
+        "AGENT75_SKILL_SHADOW", "on").strip().lower() not in ("off", "0",
+                                                              "false")
+
+
 class SkillKind(str, Enum):
     PROMPT_TOOL = "prompt_tool"   # prompt 模板+模型档(P3a)
     BUILTIN_FN = "builtin_fn"    # 本地函数收编(critic 等零代码技能)
@@ -62,7 +69,9 @@ class SkillDefinition(BaseModel):
     spec: dict[str, Any] = {}        # prompt_tool: {model_id, prompt_template}
                                      # builtin_fn: {fn: "critic"}
     metrics: dict[str, Any] = {
-        "invocations": 0, "successes": 0, "recent": [], "avg_latency_ms": 0}
+        "invocations": 0, "successes": 0, "recent": [],
+        "avg_latency_ms": 0,
+        "shadow_runs": 0, "shadow_recent": []}
     source: str = "builtin"
     created_at: str = ""
     updated_at: str = ""
@@ -183,9 +192,14 @@ class SkillRuntime:
         return self.skills.get(skill_id)
 
     def list(self) -> list[dict[str, Any]]:
-        return [s.model_dump() for s in
-                sorted(self.skills.values(),
-                       key=lambda x: (x.slot, -self._score(x)))]
+        rows = []
+        for s in sorted(self.skills.values(),
+                        key=lambda x: (x.slot, -self._score(x))):
+            d = s.model_dump()
+            if s.status == SkillStatus.TESTING:
+                d["ready"] = self.ready_flag(s)   # P3c 转正提示
+            rows.append(d)
+        return rows
 
     # -- 调用回写 + 淘汰 --
 
@@ -218,6 +232,46 @@ class SkillRuntime:
                     skill_id, rate)
         self._flush()
         return demoted
+
+    # -- P3c 影子调用回写(结果不入主链, 只记 metrics) --
+
+    def record_shadow(self, skill_id: str, ok: bool,
+                      latency_ms: int) -> None:
+        s = self.skills.get(skill_id)
+        if not s:
+            return
+        m = s.metrics
+        m["shadow_runs"] = int(m.get("shadow_runs", 0)) + 1
+        recs = m.setdefault("shadow_recent", [])
+        recs.append({"ok": bool(ok), "latency_ms": latency_ms})
+        del recs[:-50]
+        self._flush()
+
+    # -- P3c 转正判据(仅提示不动作——人工 activate 闸门不动) --
+
+    def ready_flag(self, s: SkillDefinition) -> bool:
+        """shadow>=20 且 成功率>=现行-5pp 且 延迟<=现行x1.5;
+        现行无历史时成功率基线 0.8"""
+        if s.status != SkillStatus.TESTING:
+            return False
+        m = s.metrics
+        recs = m.get("shadow_recent") or []
+        if int(m.get("shadow_runs", 0)) < 20 or len(recs) < 20:
+            return False
+        rate = sum(1 for r in recs if r.get("ok")) / len(recs)
+        act = next((x for x in self.skills.values()
+                    if x.slot == s.slot and x.status == SkillStatus.ACTIVE
+                    and x.intent in (None, s.intent)), None)
+        a_recs = (act.metrics.get("recent") or []) if act else []
+        a_rate = (sum(1 for r in a_recs if r.get("ok")) / len(a_recs)
+                  if a_recs else 0.8)
+        if rate < a_rate - 0.05:
+            return False
+        s_avg = sum(r.get("latency_ms", 0) for r in recs) / len(recs)
+        a_avg = (act.metrics.get("avg_latency_ms") or 0) if act else 0
+        if a_avg and s_avg > a_avg * 1.5:
+            return False
+        return True
 
     # -- 生命周期操作(API 面) --
 

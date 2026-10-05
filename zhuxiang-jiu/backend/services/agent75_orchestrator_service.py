@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -380,6 +381,63 @@ class WebsiteAgentOrchestrator:
                          "status": "success" if ok else "failed",
                          "latency_ms": ms}
 
+    # -- P3c: 影子双跑(testing 技能后台同输入并发, 结果丢弃只记
+    #    metrics——主链零延迟零污染; SHADOW=off 静默省调用费) --
+
+    def _spawn_shadows(self, rt, query: str, intent: str) -> None:
+        try:
+            from services.agent75_skill_service import shadow_enabled
+            if not shadow_enabled():
+                return
+            ids = [x.skill_id for x in rt.skills.values()
+                   if x.slot == "generate"
+                   and x.status.value == "testing"
+                   and x.intent in (None, intent)]
+            if ids:
+                threading.Thread(
+                    target=self._run_shadows,
+                    args=(ids, query, intent), daemon=True).start()
+        except Exception:   # noqa: BLE001 影子面异常不碰主链
+            pass
+
+    def _run_shadows(self, skill_ids: list[str], query: str,
+                     intent: str) -> None:
+        from services.agent75_skill_service import SkillRuntime
+        for sid in skill_ids:
+            try:
+                rt = SkillRuntime()   # 每技能重读(低流量下文件权威)
+                s = rt.get(sid)
+                if s is None or s.status.value != "testing":
+                    continue
+                if s.kind.value == "code_tool":
+                    from services import agent75_sandbox_service as sb
+                    code = str(s.spec.get("code") or "")
+                    valid, err = sb.validate_code(code)
+                    if not valid:
+                        rt.record_shadow(sid, False, 0)
+                        continue
+                    r = sb.exec_code(
+                        code, {"query": query, "intent": intent},
+                        int(s.spec.get("timeout_ms", 3000)))
+                    answer = str((r.get("result") or {}).get("answer")
+                                 or "") if r.get("ok") else ""
+                    ok = bool(answer.strip())
+                    sb.audit_run(sid, ok, r.get("latency_ms", 0), code)
+                    rt.record_shadow(sid, ok, r.get("latency_ms", 0))
+                else:
+                    model_id = s.spec.get("model_id", "glm-reason")
+                    prompt = (s.spec.get("prompt_template")
+                              or _PROMPTS.get(intent, _PROMPTS["chat"]))
+                    answer, ok, ms = self.gateway.call(
+                        model_id, prompt, query)
+                    # 影子成败=Critic 基线(非空+无拒答句式)
+                    ok = bool(ok) and not self._evaluate(
+                        query, answer or "")["issues"]
+                    rt.record_shadow(sid, ok, ms)
+            except Exception as exc:   # noqa: BLE001
+                logger.warning("agent75_shadow_failed id=%s: %s",
+                               sid, exc)
+
     # -- Planner(意图识别走分类路由; 失败回落 chat) --
 
     def _plan(self, query: str) -> tuple[str, dict[str, Any]]:
@@ -484,6 +542,7 @@ class WebsiteAgentOrchestrator:
             task.status = TaskStatus.EXECUTING
             if rt is not None:
                 answer, trace = self._execute_via_skill(rt, query, intent)
+                self._spawn_shadows(rt, query, intent)   # P3c 影子
             else:
                 answer, trace = self._execute(query, intent)
             task.answer = answer

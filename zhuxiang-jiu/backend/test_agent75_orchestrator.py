@@ -525,3 +525,79 @@ def test_t14_code_tool_register_gate(_skill_dirs, monkeypatch):
                     json={**body, "skill_id": "fmt_tool2"})
     assert r.status_code == 409
     monkeypatch.delenv("AGENT75_SANDBOX_KILL")
+
+
+# ------------------------------------------------------------
+# P3c(2026-10-05): 影子双跑灰度 + ready 转正判据
+# ------------------------------------------------------------
+
+def test_t15_shadow_dual_run(_skill_dirs, monkeypatch):
+    import time
+
+    class ShadowGW(MockGateway):
+        def __init__(self):
+            super().__init__()
+            self.prompts = []
+
+        def call(self, model_id, system, user):
+            if model_id != "glm-flash":
+                self.prompts.append(system)
+            return super().call(model_id, system, user)
+
+    SkillRuntime().upsert(SkillDefinition(
+        skill_id="shadow_gen", name="影子技能",
+        status=SkillStatus.TESTING, kind=SkillKind.PROMPT_TOOL,
+        slot="generate", intent="summary",
+        spec={"model_id": "glm-reason", "prompt_template": "影子标记专用提示"},
+        source="admin"))
+    gw = ShadowGW()
+    task = WebsiteAgentOrchestrator(gw).run("总结这篇")
+    # 主链零污染: 结果仍来自内置 active 技能
+    assert task.status == "completed"
+    assert task.execution_trace[1]["skill_id"] == "answer_summary"
+    # 影子已跑(轮询等后台线程落盘)
+    for _ in range(50):
+        if SkillRuntime().get("shadow_gen").metrics.get(
+                "shadow_runs", 0) >= 1:
+            break
+        time.sleep(0.1)
+    s = SkillRuntime().get("shadow_gen")
+    assert s.metrics["shadow_runs"] == 1
+    assert any("影子标记" in p for p in gw.prompts)
+
+    # SHADOW=off → testing 静默(影子计数不增)
+    monkeypatch.setenv("AGENT75_SKILL_SHADOW", "off")
+    WebsiteAgentOrchestrator(ShadowGW()).run("再总结")
+    time.sleep(0.4)
+    assert SkillRuntime().get("shadow_gen").metrics["shadow_runs"] == 1
+    monkeypatch.delenv("AGENT75_SKILL_SHADOW")
+
+
+def test_t16_ready_gate(_skill_dirs):
+    rt = SkillRuntime()
+    act = rt.get("answer_summary")
+    act.metrics["recent"] = [{"ok": True, "latency_ms": 100}] * 10
+    act.metrics["avg_latency_ms"] = 100
+
+    def mk(runs, ok_n, lat):
+        s = SkillDefinition(
+            skill_id=f"t_{ok_n}_{lat}", name="影子", 
+            status=SkillStatus.TESTING, kind=SkillKind.PROMPT_TOOL,
+            slot="generate", intent="summary",
+            spec={"model_id": "glm-reason", "prompt_template": "p" * 12},
+            source="admin")
+        s.metrics["shadow_runs"] = runs
+        s.metrics["shadow_recent"] = [
+            {"ok": i < ok_n, "latency_ms": lat} for i in range(runs)]
+        return s
+
+    rt.upsert(mk(20, 20, 120))   # 量足/率达标/延迟 1.2x → ready
+    rt.upsert(mk(15, 15, 100))   # 量不足
+    rt.upsert(mk(20, 14, 100))   # 率 0.7 < 1.0-5pp
+    rt.upsert(mk(20, 20, 200))   # 延迟 2x > 1.5x
+    flags = {r["skill_id"]: r.get("ready")
+             for r in rt.list() if r["status"] == "testing"}
+    assert flags["t_20_120"] is True
+    assert flags["t_15_100"] is False
+    assert flags["t_14_100"] is False
+    assert flags["t_20_200"] is False
