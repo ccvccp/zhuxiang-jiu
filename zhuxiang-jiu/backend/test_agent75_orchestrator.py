@@ -911,3 +911,94 @@ def test_t24_frustrated_streak_evolution(_skill_dirs):
     evo = AgentEvolutionService()
     assert any(c.get("source_task_id") == out["source_task_id"]
                for c in evo.list())
+
+
+# ------------------------------------------------------------
+# 76号 DP0(2026-10-05): 短剧引流·剧集编排层
+# ------------------------------------------------------------
+
+def test_t25_drama_series_service():
+    import asyncio
+    from repositories.promo_repository import PromoRepository
+    from services.drama76_series_service import DramaSeriesService
+
+    async def run():
+        shared = PromoRepository()      # 内存态共享(生产为 Redis 权威)
+        svc = DramaSeriesService(repo=shared)
+        d = await svc.create({
+            "drama_id": "drama_t1", "title": "测试剧",
+            "free_episodes": 2, "status": "online",
+            "episodes": [
+                {"episode_id": "101", "title": "第1集",
+                 "video_url": "/videos/drama/a.mp4"},
+                {"episode_id": "102", "title": "第2集",
+                 "video_url": "/videos/drama/b.mp4"},
+                {"episode_id": "103", "title": "第3集",
+                 "video_url": "/videos/drama/c.mp4"}]})
+        assert len(d.episodes) == 3 and d.free_episodes == 2
+        # 跨实例可读(生产 Redis 同态)
+        rows = await DramaSeriesService(repo=shared).list_online()
+        assert any(r["drama_id"] == "drama_t1" for r in rows)
+        got = await DramaSeriesService(repo=shared).get("drama_t1")
+        eps = svc.episode_states(got)
+        assert [e["status"] for e in eps] == ["free", "free", "locked"]
+        assert eps[2]["is_checkpoint"] is True
+        assert eps[0]["is_checkpoint"] is False
+        assert eps[2]["unlock_methods"] == ["register", "invite", "member"]
+        assert eps[2]["video_url"] == ""       # 锁集不暴露地址
+        assert eps[0]["video_url"].endswith("a.mp4")
+        # 会员视角全解锁
+        assert all(e["is_unlocked"] for e in
+                   svc.episode_states(got, is_member=True))
+        # free >= 总集数 → 拒绝(必须至少一集卡点)
+        try:
+            await svc.create({"title": "x", "free_episodes": 3,
+                              "episodes": [{"episode_id": "1"}] * 2})
+            raise AssertionError("应拒绝")
+        except ValueError:
+            pass
+
+    asyncio.run(run())
+
+
+def test_t26_drama_routes(monkeypatch):
+    import asyncio
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from repositories.promo_repository import PromoRepository
+    from routes.drama76_routes import register_drama76_routes
+    from services.drama76_series_service import DramaSeriesService
+
+    shared = PromoRepository()
+    monkeypatch.setattr(
+        "routes.drama76_routes._svc", DramaSeriesService(repo=shared))
+    app = FastAPI()
+    register_drama76_routes(app)
+    client = TestClient(app)
+    admin = {"X-Role": "admin"}
+
+    # 组剧: 非 admin 403 / admin 200
+    body = {"drama_id": "drama_t2", "title": "路由测试剧",
+            "free_episodes": 1, "status": "online",
+            "episodes": [{"episode_id": "201", "video_url": "/v/a.mp4"},
+                         {"episode_id": "202", "video_url": "/v/b.mp4"}]}
+    r = client.post("/api/v1/dramas", json=body)
+    assert r.status_code == 403
+    r = client.post("/api/v1/dramas", headers=admin, json=body)
+    assert r.status_code == 200
+
+    # 公开 GET(游客浏览口径): 清单/详情/分集(store 类级共享, 容错筛)
+    r = client.get("/api/v1/dramas")
+    assert r.status_code == 200
+    assert any(x["drama_id"] == "drama_t2" for x in r.json()["data"])
+    r = client.get("/api/v1/dramas/drama_t2/episodes")
+    assert r.status_code == 200
+    eps = r.json()["data"]["episodes"]
+    assert [e["status"] for e in eps] == ["free", "locked"]
+    assert eps[1]["is_checkpoint"] is True
+    # 404 / 空集 409
+    r = client.get("/api/v1/dramas/nope/episodes")
+    assert r.status_code == 404
+    r = client.post("/api/v1/dramas", headers=admin,
+                    json={"title": "空", "episodes": []})
+    assert r.status_code == 409
