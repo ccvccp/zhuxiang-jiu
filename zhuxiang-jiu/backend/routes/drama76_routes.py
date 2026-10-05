@@ -9,8 +9,13 @@
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
+import logging
 
+from services.drama76_growth_service import (
+    DramaGrowthService, REWARD_LADDERS)
 from services.drama76_series_service import DramaSeriesService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1/dramas",
@@ -18,6 +23,7 @@ router = APIRouter(
 )
 
 _svc = DramaSeriesService()
+_growth = DramaGrowthService()
 
 
 def _require_admin(x_role: str | None) -> None:
@@ -143,8 +149,8 @@ async def episode_checkpoint(drama_id: str, episode_id: str,
         "unlock_methods": [
             {"type": "register", "title": "注册即可免费解锁本剧后段",
              "action_url": f"/login.html?redirect=/drama.html?d={drama_id}"},
-            {"type": "invite", "title": "邀请 1 位好友解锁(DP3)",
-             "action_url": "#"},
+            {"type": "invite", "title": REWARD_LADDERS[0]["title"],
+             "action_url": f"/drama.html?d={drama_id}"},
             {"type": "member", "title": "开通超级会员全站免费看",
              "action_url": "/index.html"},
         ]}}
@@ -161,6 +167,11 @@ async def episodes_for_me(drama_id: str,
     if not d:
         raise HTTPException(status_code=404, detail="drama not found")
     eps = await _svc.user_view(user, d)
+    # DP3: 有效转化埋点——被邀人登录态使用即视为转化(pending→confirmed)
+    try:
+        await _growth.auto_confirm(user)
+    except Exception:  # 发奖异常不阻断主视图
+        logger.exception("drama76_auto_confirm_failed user=%s", user)
     return {"code": 0, "data": {
         "drama_id": drama_id, "user_id": user,
         "is_super": await _svc.is_super(user),
@@ -225,7 +236,50 @@ async def revoke_super(body: GrantRequest,
     return {"code": 0, "data": {"user_id": body.user_id, "revoked": True}}
 
 
+# ---------- DP3: 邀请裂变 ----------
+
+growth_router = APIRouter(
+    prefix="/api/v1/growth",
+    tags=["短剧引流智能模型(76号)"],
+)
+
+
+class BindRequest(BaseModel):
+    invite_code: str
+
+
+@growth_router.post("/invite-code")
+async def my_invite_code(
+        x_member_id: str | None = Header(default=None)):
+    """取本人邀请码(幂等: 同用户恒同码); 登录态"""
+    user = _member_id(x_member_id)
+    rec = await _growth.invite_code(user)
+    return {"code": 0, "data": rec}
+
+
+@growth_router.post("/referrals/bind")
+async def bind_referral(body: BindRequest,
+                        x_member_id: str | None = Header(default=None)):
+    """绑定邀请关系(被邀人登录态调): 自邀拒/码无效 404/唯一绑定幂等"""
+    user = _member_id(x_member_id)
+    try:
+        rec = await _growth.bind(body.invite_code, user)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="invite code not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"code": 0, "data": rec}
+
+
+@growth_router.get("/invites/me")
+async def my_invites(x_member_id: str | None = Header(default=None)):
+    """我的邀请进度: 码/明细/有效数/下一阶梯/已发奖励; 登录态"""
+    user = _member_id(x_member_id)
+    return {"code": 0, "data": await _growth.progress(user)}
+
+
 def register_drama76_routes(app):
     """注册76号·短剧引流智能模型路由"""
     app.include_router(router)
     app.include_router(unlock_router)
+    app.include_router(growth_router)

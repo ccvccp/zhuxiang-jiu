@@ -1250,6 +1250,178 @@ def test_t31_super_routes(monkeypatch):
     assert r.status_code == 401
     client.post("/api/v1/memberships/revoke", headers=admin,
                 json={"user_id": "u_sup_r"})
-    r = client.get("/api/v1/memberships/check", headers=auth,
+    r = client.get("/api/v1/memberships/check",
+                   headers=auth,
                    params={"drama_id": "drama_dp1", "episode_id": "303"})
     assert r.json()["data"]["can_watch"] is False
+
+
+# ------------------------------------------------------------
+# 76号 DP3(2026-10-06): 邀请裂变
+# ------------------------------------------------------------
+
+def test_t32_growth_service():
+    import asyncio
+    from services.drama76_growth_service import DramaGrowthService
+    from services.drama76_series_service import DramaSeriesService
+
+    async def run():
+        svc = DramaSeriesService(repo=_DP1_REPO)
+        g = DramaGrowthService(repo=_DP1_REPO, series=svc)
+        # 邀请码幂等(同用户恒同码, 确定性生成)
+        c1 = await g.invite_code("u_inv")
+        c1b = await g.invite_code("u_inv")
+        assert c1["invite_code"] == c1b["invite_code"]
+        assert c1["invite_code"].startswith("zx")
+        # 自邀拒 / 码无效拒
+        try:
+            await g.bind(c1["invite_code"], "u_inv")
+            raise AssertionError("自邀应拒")
+        except ValueError:
+            pass
+        try:
+            await g.bind("zxdeadbee", "u_a")
+            raise AssertionError("无效码应拒")
+        except KeyError:
+            pass
+        # 绑定即转化(登录态 bind 为有效转化证据)
+        # 达阶梯时进一步被计入发奖 → rewarded
+        rel = await g.bind(c1["invite_code"], "u_friend1")
+        assert rel["status"] in ("confirmed", "rewarded")
+        assert rel["inviter_id"] == "u_inv"
+        # 阶梯1: 邀 1 人 → 解锁一部剧(method=invite)
+        unlocked = await svc.unlocked_dramas_of("u_inv")
+        assert unlocked, "邀请人应获得一部剧解锁"
+        prog = await g.progress("u_inv")
+        assert prog["valid_count"] == 1
+        assert len(prog["rewards"]) == 1
+        assert prog["rewards"][0]["reward_type"] == "unlock_drama"
+        assert prog["rewards"][0]["value"] in unlocked
+        assert prog["next_ladder"]["threshold"] == 3
+        # 发奖幂等: 重复 confirm 不重发
+        await g.auto_confirm("u_friend1")
+        prog = await g.progress("u_inv")
+        assert len(prog["rewards"]) == 1
+        # 唯一绑定: 已绑定者再被他人邀 → 返回既有关系
+        c2 = await g.invite_code("u_inv2")
+        rel2 = await g.bind(c2["invite_code"], "u_friend1")
+        assert rel2["inviter_id"] == "u_inv"
+        # 阶梯3: 满 3 人 → super 7 天(source=invite)
+        await g.bind(c1["invite_code"], "u_friend2")
+        await g.bind(c1["invite_code"], "u_friend3")
+        assert await svc.is_super("u_inv") is True
+        store = getattr(_DP1_REPO, "store", None)
+        sup = store["drama76_super"]["u_inv"]
+        assert sup["source"] == "invite" and sup["expire_at"]
+        prog = await g.progress("u_inv")
+        assert {r["threshold"] for r in prog["rewards"]} == {1, 3}
+        assert prog["next_ladder"] is None
+        # 关系态: 前 3 人 rewarded
+        states = {r["invitee_id"]: r["status"] for r in prog["relations"]}
+        assert states["u_friend1"] == "rewarded"
+
+    asyncio.run(run())
+
+
+def test_t33_growth_routes(monkeypatch):
+    import asyncio
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from routes.drama76_routes import register_drama76_routes
+    from services.drama76_growth_service import DramaGrowthService
+    from services.drama76_series_service import DramaSeriesService
+
+    svc = DramaSeriesService(repo=_DP1_REPO)
+    monkeypatch.setattr("routes.drama76_routes._svc", svc)
+    monkeypatch.setattr(
+        "routes.drama76_routes._growth",
+        DramaGrowthService(repo=_DP1_REPO, series=svc))
+    app = FastAPI()
+    register_drama76_routes(app)
+    client = TestClient(app)
+    auth = {"X-Member-Id": "u_inv_r"}
+
+    # 三端点未登录 → 401
+    assert client.post("/api/v1/growth/invite-code").status_code == 401
+    assert client.post(
+        "/api/v1/growth/referrals/bind",
+        json={"invite_code": "zxwhatever"}).status_code == 401
+    assert client.get("/api/v1/growth/invites/me").status_code == 401
+    # 取码 200 + 幂等
+    r = client.post("/api/v1/growth/invite-code", headers=auth)
+    assert r.status_code == 200
+    code = r.json()["data"]["invite_code"]
+    r2 = client.post("/api/v1/growth/invite-code", headers=auth)
+    assert r2.json()["data"]["invite_code"] == code
+    # bind: 无效码 404 / 自邀 409 / 正常 200(即时转化)
+    r = client.post("/api/v1/growth/referrals/bind",
+                    headers={"X-Member-Id": "u_new_r"},
+                    json={"invite_code": "zxdeadbeef"})
+    assert r.status_code == 404
+    r = client.post("/api/v1/growth/referrals/bind", headers=auth,
+                    json={"invite_code": code})
+    assert r.status_code == 409
+    r = client.post("/api/v1/growth/referrals/bind",
+                    headers={"X-Member-Id": "u_new_r"},
+                    json={"invite_code": code})
+    assert r.status_code == 200
+    assert r.json()["data"]["status"] in ("confirmed", "rewarded")
+    # invites/me: 进度+下一阶梯
+    r = client.get("/api/v1/growth/invites/me", headers=auth)
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["valid_count"] == 1 and d["invite_code"] == code
+    assert d["next_ladder"]["threshold"] == 3
+    # episodes/me 尾部 auto-confirm 兜底: 造 pending 关系再访问
+    async def seed_pending():
+        g2 = DramaGrowthService(repo=_DP1_REPO, series=svc)
+        c = await g2.invite_code("u_inv2_r")
+        store = getattr(_DP1_REPO, "store", None)
+        if isinstance(store, dict):
+            store.setdefault("drama76_referrals", {})
+        rel = {"referral_id": "ref_u_late", "inviter_id": "u_inv2_r",
+               "invitee_id": "u_late", "invite_code": c["invite_code"],
+               "status": "pending", "confirmed_at": "", "created_at": ""}
+        await _DP1_REPO._save("drama76_referrals", "ref_u_late", rel)
+    asyncio.run(seed_pending())
+    r = client.get("/api/v1/dramas/drama_dp1/episodes/me",
+                   headers={"X-Member-Id": "u_late"})
+    assert r.status_code == 200
+
+    async def check():
+        return await _DP1_REPO._get("drama76_referrals", "ref_u_late")
+    rel = asyncio.run(check())
+    assert rel["status"] in ("confirmed", "rewarded")
+
+
+def test_t34_ladder_edge():
+    import asyncio
+    from services.drama76_growth_service import DramaGrowthService
+    from services.drama76_series_service import DramaSeriesService
+
+    async def run():
+        svc = DramaSeriesService(repo=_DP1_REPO)
+        g = DramaGrowthService(repo=_DP1_REPO, series=svc)
+        # u_all 先解锁全部在线剧 → 阶梯1 发 skipped
+        online = await svc.list_online()
+        assert online, "DP1 共享仓应有在线剧"
+        for d in online:
+            free_n = int(d.get("free_episodes") or 0)
+            ep = next(e for e in d["episodes"]
+                      if int(e["episode_number"]) == free_n + 1)
+            await svc.unlock("u_all", ep["episode_id"], "register")
+        c = await g.invite_code("u_all")
+        await g.bind(c["invite_code"], "u_friend_x")
+        prog = await g.progress("u_all")
+        r1 = [r for r in prog["rewards"] if r["threshold"] == 1][0]
+        assert r1["status"] == "skipped"
+        assert prog["valid_count"] == 1
+        assert prog["next_ladder"]["threshold"] == 3
+        # 阶梯3 仍正常发(不因阶梯1 skipped 中断)
+        await g.bind(c["invite_code"], "u_friend_y")
+        await g.bind(c["invite_code"], "u_friend_z")
+        assert await svc.is_super("u_all") is True
+        assert {r["threshold"] for r in
+                (await g.progress("u_all"))["rewards"]} == {1, 3}
+
+    asyncio.run(run())

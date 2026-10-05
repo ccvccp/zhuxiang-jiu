@@ -50,6 +50,13 @@
   .tag.free { background:rgba(15,220,120,.14); color:var(--brand); }
   .tag.lock { background:var(--lock); color:var(--muted); }
   .tag.cp { background:rgba(15,220,120,.14); color:var(--brand); }
+  .invite { margin-top:14px; background:var(--card);
+            border:1px solid var(--line); border-radius:10px;
+            padding:12px 14px; display:none; }
+  .invite h4 { font-size:13px; margin-bottom:6px; }
+  .invite p { color:var(--muted); font-size:12px; margin-bottom:10px; }
+  .invite .code { font-family:monospace; color:var(--brand);
+                  font-weight:600; user-select:all; }
   footer { text-align:center; color:var(--muted); font-size:12px;
            padding:18px 0 30px; }
   footer a { color:var(--brand); text-decoration:none; }
@@ -75,6 +82,7 @@
       <div class="tit" id="lockTitle">本集为会员专享内容</div>
       <div class="sub" id="lockSub">注册即可免费解锁本剧后段，超级会员全站短剧永久免费看。</div>
       <a class="btn" id="lockBtn" href="/login.html">注册免费解锁</a>
+      <a class="btn ghost" id="lockInviteBtn" href="javascript:void(0)">邀 1 位好友解锁</a>
       <a class="btn ghost" href="/index.html">了解超级会员</a>
     </div>
   </div>
@@ -82,6 +90,12 @@
   <div class="eps">
     <h3 id="epTitle">剧集列表</h3>
     <div id="epList"><div class="empty">加载中…</div></div>
+  </div>
+
+  <div class="invite" id="inviteBox">
+    <h4>邀请好友 · 一起追剧</h4>
+    <p id="inviteStat">我的邀请码 <span class="code" id="inviteCode">—</span></p>
+    <button class="btn" id="inviteCopy" type="button">复制邀请链接</button>
   </div>
 
   <footer>理性饮酒 · 未满18岁请勿饮酒<br>
@@ -102,6 +116,18 @@
   var toastEl = document.getElementById("toast");
 
   /* ---------- 会话与漏斗埋点(collect 白名单事件) ---------- */
+  var INV_KEY = "zx_inv";
+  var invCode = qs.get("inv") || "";
+  if (invCode) {
+    try { sessionStorage.setItem(INV_KEY, invCode); } catch (e) { }
+  }
+  function storedInv() {
+    try { return sessionStorage.getItem(INV_KEY) || ""; } catch (e) { return ""; }
+  }
+  function clearInv() {
+    try { sessionStorage.removeItem(INV_KEY); } catch (e) { }
+  }
+
   function sid() {
     try {
       var o = JSON.parse(localStorage.getItem("zx_rs") || "null");
@@ -177,6 +203,119 @@
     return m + "分" + (r < 10 ? "0" : "") + r + "秒";
   }
 
+  /* ---------- DP3: 邀请裂变 ---------- */
+  var inviteBox = document.getElementById("inviteBox");
+  var inviteCodeEl = document.getElementById("inviteCode");
+  var inviteStatEl = document.getElementById("inviteStat");
+  var myCode = "";
+
+  function tryBindInvite(t) {
+    var inv = storedInv();
+    if (!inv || !t) { return; }
+    fetch("/api/v1/growth/referrals/bind", {
+      method: "POST",
+      headers: { "Content-Type": "application/json",
+                 "Authorization": "Bearer " + t },
+      body: JSON.stringify({ invite_code: inv })
+    }).then(function (r) { return r.json(); })
+      .then(function (b) {
+        clearInv();
+        if (b.code === 0) {
+          track("invite_bound", { invite_code: inv });
+          toast("已接受好友邀请，快去追剧吧");
+        }
+      }).catch(clearInv);
+  }
+
+  function shareUrl() {
+    return location.origin + "/drama.html?d=" +
+      (dramaId || (curDrama && curDrama.drama_id) || "") +
+      "&inv=" + myCode;
+  }
+
+  function copyText(txt, done) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(done, function () {
+        legacyCopy(txt); done();
+      });
+    } else { legacyCopy(txt); done(); }
+  }
+  function legacyCopy(txt) {
+    var ta = document.createElement("textarea");
+    ta.value = txt; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); } catch (e) { }
+    document.body.removeChild(ta);
+  }
+
+  function fetchMyCode(then) {
+    var t = token();
+    if (!t) { return; }
+    fetch("/api/v1/growth/invite-code", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + t }
+    }).then(function (r) { return r.json(); })
+      .then(function (b) {
+        if (b.code === 0 && b.data) {
+          myCode = b.data.invite_code || "";
+          if (then) { then(); }
+        }
+      }).catch(function () { });
+  }
+
+  function renderInvitePanel() {
+    var t = token();
+    if (!t || !curDrama) { inviteBox.style.display = "none"; return; }
+    inviteBox.style.display = "block";
+    inviteCodeEl.textContent = myCode || "—";
+    fetch("/api/v1/growth/invites/me", {
+      headers: { "Authorization": "Bearer " + t }
+    }).then(function (r) { return r.json(); })
+      .then(function (b) {
+        var d = b.data || {};
+        var next = d.next_ladder;
+        var tip = next
+          ? ("已邀 " + (d.valid_count || 0) + " 人 · " +
+             (next.title || "继续邀请得奖励"))
+          : ("已邀 " + (d.valid_count || 0) + " 人 · 阶梯奖励已全部解锁");
+        inviteStatEl.innerHTML =
+          '我的邀请码 <span class="code">' + (myCode || "—") +
+          "</span><br>" + tip;
+      }).catch(function () { });
+  }
+
+  document.getElementById("inviteCopy").onclick = function () {
+    if (!myCode) { fetchMyCode(function () { doCopy(); }); return; }
+    doCopy();
+  };
+  function doCopy() {
+    if (!myCode) { toast("邀请码生成中，请稍后再试"); return; }
+    copyText(shareUrl(), function () {
+      track("invite_share_click", { drama_id: dramaId });
+      toast("邀请链接已复制，快发给好友吧");
+    });
+  }
+
+  document.getElementById("lockInviteBtn").onclick = function () {
+    var t = token();
+    if (!t) {
+      location.href = "/login.html?redirect=" +
+        encodeURIComponent(location.pathname + location.search);
+      return;
+    }
+    if (!myCode) {
+      fetchMyCode(function () {
+        copyText(shareUrl(), function () {
+          toast("邀请链接已复制：好友注册观看后你解锁本剧");
+        });
+      });
+      return;
+    }
+    copyText(shareUrl(), function () {
+      toast("邀请链接已复制：好友注册观看后你解锁本剧");
+    });
+  };
+
   function playEp(ep, title) {
     curEp = ep;
     document.getElementById("epTitle").textContent =
@@ -243,6 +382,11 @@
       .then(function (r) { return r.json(); })
       .then(function (b) {
         var eps = (b.data || {}).episodes || [];
+        if (t) {
+          /* DP3: inv 码自动绑定(跨登录回跳) + 邀请面板 */
+          tryBindInvite(t);
+          fetchMyCode(renderInvitePanel);
+        }
         if (t && (b.data || {}).is_super) {
           toast("超级会员 · 全站免费观看");
         }
