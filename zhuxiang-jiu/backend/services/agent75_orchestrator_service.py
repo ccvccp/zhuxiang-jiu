@@ -139,6 +139,80 @@ class AgentModelGateway:
                                     model=cfg.name)
 
 
+# ---------- P1: 模型路由(方案 ModelRouter——成功率历史驱动) ----------
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class ModelRouter:
+    """任务类型→模型路由: 类型过滤 + 成本/延迟/成功率历史评分
+
+    方案 _score 口径: 基础 10 - cost_weight*0.3 - latency_weight*0.2
+    + 近 50 条成功率*2.0; 历史持久化 router_history.json(重启不丢),
+    record() 由编排器每次网关调用后回写。
+    """
+
+    TYPE_MAP = {
+        "planning": ModelType.LIGHTWEIGHT,
+        "reasoning": ModelType.REASONING,
+        "classification": ModelType.LIGHTWEIGHT,
+        "summary": ModelType.LIGHTWEIGHT,
+        "generation": ModelType.REASONING,
+        "evaluation": ModelType.REASONING,
+    }
+
+    def __init__(self, gateway: AgentModelGateway) -> None:
+        self.gateway = gateway
+        self.history: dict[str, list[dict[str, Any]]] = self._load()
+
+    @staticmethod
+    def _path() -> Path:
+        return AGENT_TASK_DIR / "router_history.json"
+
+    def _load(self) -> dict[str, list[dict[str, Any]]]:
+        p = self._path()
+        if p.is_file():
+            try:
+                return json.loads(p.read_text(encoding="utf-8"))
+            except Exception:   # noqa: BLE001 损坏回落空表
+                return {}
+        return {}
+
+    def _flush(self) -> None:
+        self._path().write_text(
+            json.dumps(self.history, ensure_ascii=False), encoding="utf-8")
+
+    def route(self, task_type: str) -> ModelConfig:
+        """按任务类型选模型: 类型过滤(空则全池)+历史成功率评分"""
+        need = self.TYPE_MAP.get(task_type, ModelType.LIGHTWEIGHT)
+        cands = [m for m in self.gateway.models.values()
+                 if m.model_type is need]
+        if not cands:
+            cands = list(self.gateway.models.values())
+
+        def score(m: ModelConfig) -> float:
+            s = 10.0 - 0.3 - 0.2
+            recs = self.history.get(f"{m.model_id}:{task_type}",
+                                    [])[-50:]
+            if recs:
+                s += 2.0 * sum(1 for r in recs
+                               if r.get("success")) / len(recs)
+            return s
+
+        return sorted(cands, key=score, reverse=True)[0]
+
+    def record(self, model_id: str, task_type: str,
+               success: bool, latency_ms: int) -> None:
+        """调用结果回写(每键滚动保留最近 50 条)"""
+        key = f"{model_id}:{task_type}"
+        recs = self.history.setdefault(key, [])
+        recs.append({"success": bool(success),
+                     "latency_ms": latency_ms, "at": _now_iso()})
+        del recs[:-50]
+        self._flush()
+
+
 # ---------- 编排器(方案 WebsiteAgentOrchestrator P0) ----------
 
 _INTENT_PROMPT = (
@@ -159,38 +233,60 @@ _PROMPTS = {
 
 
 class WebsiteAgentOrchestrator:
-    """主脑 P0: 意图→路由→生成→基线评估→轨迹落盘"""
+    """主脑 P0+P1+P2: 意图→路由→生成→评估→(进化提议)→轨迹落盘"""
 
     def __init__(self, gateway: AgentModelGateway | None = None) -> None:
         self.gateway = gateway or AgentModelGateway()
+        self.router = ModelRouter(self.gateway)
         AGENT_TASK_DIR.mkdir(parents=True, exist_ok=True)
 
-    # -- Planner(P0: 单步轻量意图识别, 失败回落 chat) --
+    def _prompt_for(self, intent: str) -> str:
+        """P2: 已审批的 prompt 进化覆盖优先, 无则内置注册表"""
+        try:
+            from services.agent75_evolution_service import (
+                AgentEvolutionService)
+            override = AgentEvolutionService().active_prompt(intent)
+            if override:
+                return override
+        except Exception:   # noqa: BLE001 进化面异常不拖累主链
+            pass
+        return _PROMPTS[intent]
+
+    # -- Planner(意图识别走分类路由; 失败回落 chat) --
 
     def _plan(self, query: str) -> tuple[str, dict[str, Any]]:
+        cfg = self.router.route("classification")
         content, ok, ms = self.gateway.call(
-            "glm-flash", _INTENT_PROMPT,
-            f"用户输入: {query[:200]}")
+            cfg.model_id, _INTENT_PROMPT, f"用户输入: {query[:200]}")
+        self.router.record(cfg.model_id, "classification", ok, ms)
         intent = content.strip().lower() if ok else ""
         if intent not in INTENTS or intent == "unknown":
             intent = "chat"
         return intent, {"step_id": "plan_intent", "skill_id": "intent",
-                        "model_id": "glm-flash",
+                        "model_id": cfg.model_id,
                         "status": "success" if ok else "fallback",
                         "latency_ms": ms, "output": intent}
 
-    # -- Executor(P0: 按意图路由 prompt 的单步生成) --
+    # -- Executor(生成路由 + 失败重试一次, 方案 WorkflowStep.retry=1) --
 
     def _execute(self, query: str, intent: str
                  ) -> tuple[str, dict[str, Any]]:
+        cfg = self.router.route("generation")
         content, ok, ms = self.gateway.call(
-            "glm-reason", _PROMPTS[intent], query)
+            cfg.model_id, self._prompt_for(intent), query)
+        retries = 0
+        if not ok:                      # 重试一次(同档, 历史已记录失败)
+            retries = 1
+            content, ok, ms2 = self.gateway.call(
+                cfg.model_id, self._prompt_for(intent), query)
+            ms += ms2
+        self.router.record(cfg.model_id, "generation", ok, ms)
         return content, {"step_id": "exec_answer", "skill_id": "answer",
-                         "model_id": "glm-reason",
+                         "model_id": cfg.model_id, "retries": retries,
                          "status": "success" if ok else "failed",
                          "latency_ms": ms}
 
-    # -- Critic(P0 基线: 非空/字数/拒答句式) --
+    # -- Critic(P0 基线 + P2 进化触发位) --
 
     @staticmethod
     def _evaluate(query: str, answer: str) -> dict[str, Any]:
@@ -203,7 +299,7 @@ class WebsiteAgentOrchestrator:
             issues.append("refusal_pattern")
         return {"score": 1.0 if not issues else 0.0,
                 "issues": issues,
-                "needs_evolution": False}   # P2 进化引擎挂点
+                "needs_evolution": bool(issues)}   # P2 进化引擎入口
 
     # -- 持久化(执行日志: 每任务 JSON + jsonl 追加) --
 
@@ -264,6 +360,24 @@ class WebsiteAgentOrchestrator:
             task.status = (TaskStatus.COMPLETED
                            if not task.evaluation["issues"]
                            else TaskStatus.FAILED)
+            self._save(task)
+            # P2: 失败任务 → 进化引擎提议(仅生成 pending 候选,
+            # 不自动生效——人工审批闸门, 方案灰度口径)
+            if task.evaluation["needs_evolution"]:
+                try:
+                    from services.agent75_evolution_service import (
+                        AgentEvolutionService)
+                    cand = AgentEvolutionService(
+                        self.gateway).propose(task)
+                    if cand:
+                        task.execution_trace.append(
+                            {"step_id": "evolution_propose",
+                             "skill_id": "evolution",
+                             "status": "proposed",
+                             "candidate_id": cand.evolution_id})
+                except Exception as exc:   # noqa: BLE001
+                    logger.warning("agent75_evolution_propose_skip: %s",
+                                   exc)
             self._save(task)
             logger.info("agent75_task_done id=%s intent=%s status=%s",
                         task.task_id, intent, task.status)

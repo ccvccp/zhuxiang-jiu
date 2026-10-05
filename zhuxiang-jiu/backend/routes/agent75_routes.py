@@ -68,6 +68,64 @@ async def list_tasks(limit: int = 20,
     return {"code": 0, "data": _orchestrator.list_recent(limit)}
 
 
+# ---------- P2: 进化候选审批面(方案 /api/v1/evolution/*) ----------
+
+from services.agent75_evolution_service import AgentEvolutionService  # noqa: E402
+
+evo_router = APIRouter(
+    prefix="/api/v1/evolution",
+    tags=["网站Agent中枢(75号)·进化面"],
+)
+
+_evolution = AgentEvolutionService()
+
+
+@evo_router.get("/candidates")
+async def list_candidates(limit: int = 50,
+                          x_role: str | None = Header(default=None)):
+    _require_admin(x_role)
+    return {"code": 0, "data": _evolution.list(limit)}
+
+
+@evo_router.post("/candidates/{evolution_id}/approve")
+async def approve_candidate(evolution_id: str,
+                            x_role: str | None = Header(default=None)):
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "data": _evolution.approve(evolution_id)}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="candidate not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@evo_router.post("/candidates/{evolution_id}/reject")
+async def reject_candidate(evolution_id: str,
+                           x_role: str | None = Header(default=None)):
+    _require_admin(x_role)
+    try:
+        return {"code": 0, "data": _evolution.reject(evolution_id)}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="candidate not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@evo_router.post("/candidates/{evolution_id}/rollback")
+async def rollback_candidate(evolution_id: str,
+                             x_role: str | None = Header(default=None)):
+    _require_admin(x_role)
+    cand = _evolution.get(evolution_id)
+    if not cand:
+        raise HTTPException(status_code=404, detail="candidate not found")
+    try:
+        return {"code": 0,
+                "data": _evolution.rollback(cand.get("intent"))}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="intent not active")
+
+
 def register_agent75_routes(app):
-    """注册75号·网站Agent中枢路由"""
+    """注册75号·网站Agent中枢路由(任务面+进化面)"""
     app.include_router(router)
+    app.include_router(evo_router)

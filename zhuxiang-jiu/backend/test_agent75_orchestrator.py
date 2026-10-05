@@ -84,7 +84,8 @@ def test_t4_persistence(tmp_path):
     assert back.status == "completed" and back.intent == "summary"
     lines = (tmp_path / "tasks.jsonl").read_text(
         encoding="utf-8").strip().splitlines()
-    assert len(lines) == 3                    # planning/executing/终态
+    # P1 后: planning/executing/终态/进化检查尾存 = 4 次落盘
+    assert len(lines) == 4
     assert json.loads(lines[-1])["status"] == "completed"
     assert o.load("t_nope") is None
     assert len(o.list_recent()) == 1
@@ -131,3 +132,146 @@ def test_t5_routes(monkeypatch):
     r = client.post("/api/v1/agent/tasks", headers=admin,
                     json={"query": "再来一条"})
     assert r.status_code == 409
+
+
+# ------------------------------------------------------------
+# P1/P2(2026-10-05): 模型路由历史 + 进化引擎审批闭环
+# ------------------------------------------------------------
+
+from services.agent75_orchestrator_service import ModelRouter  # noqa: E402
+from services.agent75_evolution_service import (  # noqa: E402
+    AgentEvolutionService)
+
+
+class ProposeMockGateway(AgentModelGateway):
+    """意图步/生成步/进化提议步 三态 mock"""
+
+    PROPOSAL = ('{"type":"prompt","intent":"summary",'
+                '"prompt_text":"你是升级版摘要助手，输出要点加结论。",'
+                '"rationale":"修复过短回答"}')
+
+    def __init__(self, answer=""):
+        super().__init__()
+        self.answer = answer
+        self.seen_prompts: list[str] = []
+
+    def call(self, model_id, system, user):
+        if model_id == "glm-flash":
+            return "summary", True, 3
+        if "进化顾问" in system:
+            return self.PROPOSAL, True, 4
+        self.seen_prompts.append(system)
+        return self.answer, True, 5
+
+
+def test_t6_model_router_history(tmp_path):
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        "services.agent75_orchestrator_service.AGENT_TASK_DIR",
+        tmp_path)
+    gw = AgentModelGateway()
+    router = ModelRouter(gw)
+    # 类型路由: 分类→轻量档, 生成→推理档
+    assert router.route("classification").model_id == "glm-flash"
+    assert router.route("generation").model_id == "glm-reason"
+    assert router.route("unknown_type").model_id == "glm-flash"  # 默认轻量
+    # 成功率历史回写 + 持久化(重启不丢)
+    router.record("glm-flash", "classification", True, 10)
+    router.record("glm-flash", "classification", False, 20)
+    assert (tmp_path / "router_history.json").is_file()
+    router2 = ModelRouter(gw)
+    recs = router2.history["glm-flash:classification"]
+    assert len(recs) == 2 and recs[-1]["success"] is False
+    monkeypatch.undo()
+
+
+def test_t7_evolution_closed_loop(tmp_path):
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        "services.agent75_orchestrator_service.AGENT_TASK_DIR",
+        tmp_path)
+    # 同步 evolution service 引用的模块级常量
+    monkeypatch.setattr(
+        "services.agent75_evolution_service.AGENT_TASK_DIR",
+        tmp_path)
+
+    gw = ProposeMockGateway(answer="")   # 生成步空回答 → 任务失败
+    o = WebsiteAgentOrchestrator(gw)
+    task = o.run("总结这篇内容")
+    assert task.status == "failed"
+    assert task.evaluation["needs_evolution"] is True
+    # 进化提议已生成 pending 候选 + 轨迹记录
+    cand_ids = [t["candidate_id"] for t in task.execution_trace
+                if t.get("step_id") == "evolution_propose"]
+    assert cand_ids
+
+    evo = AgentEvolutionService()
+    cand = evo.get(cand_ids[0])
+    assert cand["validation_status"] == "pending"
+    assert cand["intent"] == "summary"
+
+    # 覆盖未生效前: 内置 prompt
+    assert "升级版" not in o._prompt_for("summary")
+    # 审批生效 → 覆盖即刻可被编排器消费
+    evo.approve(cand_ids[0])
+    assert "升级版" in o._prompt_for("summary")
+    # 下一任务实际吃到覆盖 prompt
+    gw2 = ProposeMockGateway(answer="要点一：xxx；结论：好。")
+    o2 = WebsiteAgentOrchestrator(gw2)
+    o2.run("再总结一次")
+    assert any("升级版" in s for s in gw2.seen_prompts)
+    # 回滚 → 回落内置
+    evo.rollback("summary")
+    assert "升级版" not in o2._prompt_for("summary")
+    monkeypatch.undo()
+
+
+def test_t8_evolution_routes(tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from routes.agent75_routes import register_agent75_routes
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        "services.agent75_orchestrator_service.AGENT_TASK_DIR",
+        tmp_path)
+    monkeypatch.setattr(
+        "services.agent75_evolution_service.AGENT_TASK_DIR",
+        tmp_path)
+
+    app = FastAPI()
+    register_agent75_routes(app)
+    client = TestClient(app)
+    admin = {"X-Role": "admin"}
+
+    # 制造一个 pending 候选(经真实失败任务链)
+    monkeypatch.setattr(
+        "routes.agent75_routes._orchestrator",
+        WebsiteAgentOrchestrator(ProposeMockGateway(answer="")))
+    r = client.post("/api/v1/agent/tasks", headers=admin,
+                    json={"query": "总结"})
+    assert r.status_code == 200
+
+    r = client.get("/api/v1/evolution/candidates", headers=admin)
+    assert r.status_code == 200
+    rows = r.json()["data"]
+    assert rows and rows[0]["validation_status"] == "pending"
+    eid = rows[0]["evolution_id"]
+
+    # approve → approved; reject 已决态 → 409
+    r = client.post(f"/api/v1/evolution/candidates/{eid}/approve",
+                    headers=admin)
+    assert r.status_code == 200
+    assert r.json()["data"]["validation_status"] == "approved"
+    r = client.post(f"/api/v1/evolution/candidates/{eid}/reject",
+                    headers=admin)
+    assert r.status_code == 409
+
+    # rollback → active 清空; 未知候选 404
+    r = client.post(f"/api/v1/evolution/candidates/{eid}/rollback",
+                    headers=admin)
+    assert r.status_code == 200
+    r = client.post("/api/v1/evolution/candidates/evo_nope/approve",
+                    headers=admin)
+    assert r.status_code == 404
+    monkeypatch.undo()
