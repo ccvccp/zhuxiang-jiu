@@ -409,6 +409,10 @@ register_sv73_routes(app)
 from routes.agent75_routes import register_agent75_routes
 register_agent75_routes(app)
 
+# 短剧引流智能模型(76号 DP0 剧集编排层)
+from routes.drama76_routes import register_drama76_routes
+register_drama76_routes(app)
+
 # NexusFlow智枢·流 AI智能全域发布大模型(74号 P1 规则中枢)
 from routes.nexus74_routes import register_nexus74_routes
 register_nexus74_routes(app)

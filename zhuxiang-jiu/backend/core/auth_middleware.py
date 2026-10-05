@@ -131,6 +131,9 @@ PUBLIC_EXACT = {
 # 路由层 _require_admin 拦截(无注入头 → 403), 安全性不降级
 PUBLIC_GET_PREFIXES = (
     "/api/product",                 # 产品列表/详情/搜索/评价查看
+    "/api/v1/dramas",               # 76号短剧引流: 剧集/分集/解锁态
+                                    # (游客浏览面, 组剧 POST 走路由层
+                                    # _require_admin——同 site-theme 口径)
     "/api/activity/list",           # 活动列表
     "/api/activity/stats/",         # 活动统计
     "/api/activity/leaderboard/",   # 擂台榜单

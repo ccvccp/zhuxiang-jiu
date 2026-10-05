@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>竹香短剧 · 免费连播</title>
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --line:#232833;
+          --text:#e8eaf0; --muted:#8a93a6; --brand:#0fdc78;
+          --brand-text:#004d26; --lock:#2a2f3d; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text);
+         font:14px/1.7 "PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:720px; margin:0 auto; padding:16px; }
+  header { display:flex; align-items:center; gap:10px; padding:8px 0 14px; }
+  header img { width:34px; height:34px; border-radius:8px; }
+  header b { font-size:16px; }
+  header span { color:var(--muted); font-size:12px; }
+  .player { position:relative; background:#000; border-radius:12px;
+            overflow:hidden; }
+  .player video { width:100%; aspect-ratio:9/16; max-height:70vh;
+                  display:block; object-fit:contain; background:#000; }
+  .lock-layer { position:absolute; inset:0; background:rgba(10,12,16,.82);
+                display:flex; flex-direction:column; align-items:center;
+                justify-content:center; gap:10px; text-align:center;
+                padding:20px; }
+  .lock-layer .tit { font-size:16px; font-weight:600; }
+  .lock-layer .sub { color:var(--muted); font-size:12px; max-width:420px; }
+  .btn { background:var(--brand); color:var(--brand-text); border:none;
+         border-radius:999px; padding:10px 26px; font-size:14px;
+         font-weight:600; cursor:pointer; text-decoration:none; }
+  .btn.ghost { background:transparent; color:var(--brand);
+               border:1px solid var(--brand); }
+  .eps { margin-top:14px; }
+  .eps h3 { font-size:14px; margin-bottom:10px; }
+  .ep { display:flex; align-items:center; gap:12px; background:var(--card);
+        border:1px solid var(--line); border-radius:10px; padding:10px 12px;
+        margin-bottom:8px; cursor:pointer; }
+  .ep.active { border-color:var(--brand); }
+  .ep .num { width:30px; height:30px; border-radius:8px; background:var(--lock);
+             display:flex; align-items:center; justify-content:center;
+             font-size:13px; flex:none; }
+  .ep.locked .num { color:var(--muted); }
+  .ep .meta { flex:1; min-width:0; }
+  .ep .meta b { font-size:14px; display:block;
+                white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ep .meta span { color:var(--muted); font-size:12px; }
+  .ep .tag { font-size:11px; padding:2px 8px; border-radius:999px;
+             flex:none; }
+  .tag.free { background:rgba(15,220,120,.14); color:var(--brand); }
+  .tag.lock { background:var(--lock); color:var(--muted); }
+  .tag.cp { background:rgba(15,220,120,.14); color:var(--brand); }
+  footer { text-align:center; color:var(--muted); font-size:12px;
+           padding:18px 0 30px; }
+  footer a { color:var(--brand); text-decoration:none; }
+  .empty { text-align:center; color:var(--muted); padding:60px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="images/ip/ip-square.png" alt="竹香">
+    <div><b>竹香短剧</b><br><span>AI 微短剧 · 免费连播</span></div>
+  </header>
+
+  <div class="player">
+    <video id="video" controls playsinline
+           poster="images/ip/ip-anim-poster.jpg"></video>
+    <div class="lock-layer" id="lockLayer" style="display:none">
+      <div class="tit" id="lockTitle">本集为会员专享内容</div>
+      <div class="sub" id="lockSub">注册即可免费解锁本剧后段，超级会员全站短剧永久免费看。</div>
+      <a class="btn" id="lockBtn" href="/login.html">注册免费解锁</a>
+      <a class="btn ghost" href="/index.html">了解超级会员</a>
+    </div>
+  </div>
+
+  <div class="eps">
+    <h3 id="epTitle">剧集列表</h3>
+    <div id="epList"><div class="empty">加载中…</div></div>
+  </div>
+
+  <footer>理性饮酒 · 未满18岁请勿饮酒<br>
+    <a href="/index.html">回首页</a></footer>
+</div>
+
+<script>
+(function () {
+  var qs = new URLSearchParams(location.search);
+  var dramaId = qs.get("d") || "";
+  var curEp = null;
+  var listEl = document.getElementById("epList");
+  var video = document.getElementById("video");
+  var lock = document.getElementById("lockLayer");
+
+  function fmtDur(s) {
+    s = s || 0; var m = Math.floor(s / 60), r = s % 60;
+    return m + "分" + (r < 10 ? "0" : "") + r + "秒";
+  }
+
+  function playEp(ep, title) {
+    curEp = ep;
+    document.getElementById("epTitle").textContent =
+      "剧集列表 · " + (title || "");
+    document.querySelectorAll(".ep").forEach(function (el) {
+      el.classList.toggle("active",
+        el.getAttribute("data-ep") === ep.episode_id);
+    });
+    if (!ep.is_unlocked) {
+      video.pause(); video.removeAttribute("src");
+      document.getElementById("lockTitle").textContent =
+        "第" + ep.episode_number + "集 · 后段内容";
+      lock.style.display = "flex";
+      return;
+    }
+    lock.style.display = "none";
+    video.src = ep.video_url;
+    video.play().catch(function () { });
+  }
+
+  function render(d) {
+    document.title = d.title + " · 竹香短剧";
+    fetch("/api/v1/dramas/" + d.drama_id + "/episodes")
+      .then(function (r) { return r.json(); })
+      .then(function (b) {
+        var eps = (b.data || {}).episodes || [];
+        listEl.innerHTML = "";
+        eps.forEach(function (ep) {
+          var el = document.createElement("div");
+          el.className = "ep" + (ep.is_unlocked ? "" : " locked");
+          el.setAttribute("data-ep", ep.episode_id);
+          var tag = ep.is_checkpoint
+            ? '<span class="tag cp">卡点集</span>'
+            : (ep.is_unlocked ? '<span class="tag free">免费</span>'
+                              : '<span class="tag lock">🔒 解锁</span>');
+          el.innerHTML =
+            '<div class="num">' + ep.episode_number + "</div>" +
+            '<div class="meta"><b>' + (ep.title || "") + "</b>" +
+            "<span>" + fmtDur(ep.duration_seconds) +
+            (ep.cliff_hint || "") + "</span></div>" + tag;
+          el.onclick = function () { playEp(ep, d.title); };
+          listEl.appendChild(el);
+        });
+        var first = eps.filter(function (e) { return e.is_unlocked; })[0];
+        if (first) { playEp(first, d.title); }
+      });
+  }
+
+  if (dramaId) {
+    fetch("/api/v1/dramas/" + dramaId)
+      .then(function (r) { return r.json(); })
+      .then(function (b) {
+        var d = b.data;
+        if (!d) { listEl.innerHTML =
+          '<div class="empty">剧集不存在</div>'; return; }
+        render(d);
+      });
+  } else {
+    fetch("/api/v1/dramas").then(function (r) { return r.json(); })
+      .then(function (b) {
+        var rows = b.data || [];
+        if (!rows.length) { listEl.innerHTML =
+          '<div class="empty">暂无上线短剧</div>'; return; }
+        render(rows[0]);
+      });
+  }
+})();
+</script>
+</body>
+</html>
