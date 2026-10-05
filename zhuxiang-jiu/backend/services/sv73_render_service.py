@@ -93,7 +93,14 @@ def tts_mode() -> bool:
 # I=-14 LUFS(抖音/YouTube 安全标准) TP=-1.5(防 AAC 转码过冲)
 # LRA=11(对话类动态范围); 单遍动态模式(流水线够用, 两遍线性
 # 需预扫描不划算)
-LOUDNORM_AF = "loudnorm=I=-14:TP=-1.5:LRA=11"
+# alimiter 硬顶(同日晚补): loudnorm 动态模式 TP 限制非硬限幅,
+# cid77 独白瞬态爆发实证过冲 TP=+1.49 dBTP(内容平缓的 cid70 同链
+# -1.13 正常)——补 0.75 线性(-2.5 dB)样本峰值硬顶, 留 ~1dB
+# 真峰值过采样余量, 保证 dBTP<=-1.5
+# level=false 必须显式关: alimiter 默认 level=true 自动回抬电平,
+# 实证 limit=0.75 仍输出 TP=+1.34 的根因
+LOUDNORM_AF = ("loudnorm=I=-14:TP=-1.5:LRA=11,"
+               "alimiter=limit=0.75:level=false")
 
 
 # 品牌素材系列(2026-10-05 入库)——selling 镜底图池, 人设分池:
