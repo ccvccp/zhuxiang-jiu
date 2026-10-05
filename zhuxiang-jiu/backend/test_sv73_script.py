@@ -483,3 +483,34 @@ def test_t12b_persona_voice_and_image_routing():
         "unknown") == "/root/assets/ip/zhuxiaomei_front.jpg"
     # 本地素材在位(跑批前置)
     assert Path(dh_batch.DH_IMAGES["xiaozhushuaige"][0]).is_file()
+
+
+# ------------------------------------------------------------
+# T13 drama LLM 三段拆分拼接(2026-10-05 实证: flash 把三段独白
+#     拆成多个 cover 场景返回——只取首个=纯铺垫段必败 lint)
+# ------------------------------------------------------------
+
+
+def test_t13_drama_cover_segments_join(monkeypatch):
+    fake = {"scenes": [
+        {"role": "cover", "text": "中秋独饮",
+         "voiceover": "三年来中秋都是独饮，家人总说我太孤僻。",
+         "highlightWords": ["孤僻"]},
+        {"role": "cover", "text": "变局来了",
+         "voiceover": "可是今年终于摆上了竹香酒。",
+         "highlightWords": ["竹香酒"]},
+        {"role": "cover", "text": "敬团圆",
+         "voiceover": "这团圆宴，赢回来！",
+         "highlightWords": ["赢回来"]},
+    ]}
+    monkeypatch.setattr(
+        Sv73ScriptService, "_chat_json",
+        lambda self, s, u: (fake, "glm-4-flash"))
+    sb = _run(Sv73ScriptService().generate(
+        {**HOTSPOT, "fingerprint": "fp-sv73-t13"},
+        persona="xiaozhushuaige", template="drama_monologue"))
+    assert sb["track"] == "glm-4-flash"    # 拼接后 lint 通过不再回落
+    vo = sb["scenes"][0]["voiceover"]
+    # 拼接保住转折词与爆发收束
+    assert "终于" in vo and ("！" in vo or "!" in vo)
+    assert sv73mod.lint_drama(sb["scenes"]) == []

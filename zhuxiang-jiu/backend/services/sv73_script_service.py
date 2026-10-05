@@ -493,6 +493,12 @@ class Sv73ScriptService:
                 "第二段用「可是/直到/谁知/终于」类转折词引出变局, "
                 "第三段感叹句爆发收束并自然带出竹香酒"
                 "(敬一杯/赢回来); 每段留一个情绪钩子。\n"
+                "示例(仅结构参考, 禁照抄): 「三年来谁都笑我不自量力。"
+                "可这一天终于来了, 这杯竹香酒, 敬每一个不服输的自己!」"
+                "——第二段含「可/终于」转折词, 结尾「!」爆发收束; "
+                "你的输出必须同样包含转折词与感叹爆发两类要素"
+                "(2026-10-05 两批实证: 无范例时 flash 不遵循结构, "
+                "LLM 轨 1/4 过审率)。\n"
                 "红线: 不得劝酒或描述饮酒动作; 不得功效宣称(养生/"
                 "保健/治疗类表述); 不得权威背书或引用研究数据; "
                 "不编造热点中没有的信息; 口吻必须符合人设。"
@@ -540,21 +546,52 @@ class Sv73ScriptService:
         if not isinstance(scenes, list):
             return None, TRACK_RULE
         by_role: dict = {}
+        cover_vos: list[str] = []   # drama 轨: flash 三段拆分形态拼接用
         for sc in scenes:
             if not isinstance(sc, dict):
                 continue
             role = str(sc.get("role") or "")
             if role in ("cover", "selling", "action"):  # 角色白名单
                 words = sc.get("highlightWords")
+                vo_clipped = _clip(sc.get("voiceover", ""), vo_limit)
+                if role == "cover" and vo_clipped:
+                    cover_vos.append(vo_clipped)
                 by_role.setdefault(role, {
                     "text": _clip(sc.get("text", ""), TEXT_MAX_CHARS),
-                    "voiceover": _clip(sc.get("voiceover", ""),
-                                       vo_limit),
+                    "voiceover": vo_clipped,
                     "highlightWords": (
                         [_clip(w, HIGHLIGHT_MAX_CHARS)
                          for w in words[:HIGHLIGHT_MAX_WORDS]]
                         if isinstance(words, list) else []),
                 })
+        # drama 三段拼接(2026-10-05 实证: flash 把三段独白拆成多个
+        # cover 场景返回——只取首个=纯铺垫段, lint_drama 必败;
+        # 拼接还原完整独白: 句末智能连接(前段已句末标点则不再加,
+        # 防「！，」病句)+句末对齐截断(防句中拦腰)双候选 lint 择优)
+        if (template == "drama_monologue" and len(cover_vos) > 1
+                and "cover" in by_role):
+            joined = ""
+            for seg in (s.rstrip("，,；; ") for s in cover_vos if s):
+                if joined and joined[-1] not in "。！？!?":
+                    joined += "，"
+                joined += seg
+
+            def _sent_clip(text: str, limit: int) -> str:
+                t = text[:limit]
+                m = re.match(r"^.*[。！？!?]", t, re.S)
+                return m.group(0) if (m and m.group(0)) else t
+
+            pick = ""
+            for cand_vo in (_sent_clip(joined, DRAMA_VOICEOVER_MAX),
+                            joined[:DRAMA_VOICEOVER_MAX],
+                            joined[-DRAMA_VOICEOVER_MAX:]):
+                if cand_vo and lint_drama(
+                        [{"role": "drama_oral",
+                          "voiceover": cand_vo}]) == []:
+                    pick = cand_vo
+                    break
+            by_role["cover"]["voiceover"] = (
+                pick or joined[:DRAMA_VOICEOVER_MAX])
         return by_role, track
 
     # ---------- 场景组装(注册表重建) ----------
