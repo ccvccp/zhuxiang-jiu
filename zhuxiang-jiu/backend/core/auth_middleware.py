@@ -354,8 +354,13 @@ class JWTAuthMiddleware:
                 member = await self._service.get_current_member(token)
                 inject_identity(scope, member)
                 return
-            except Exception:   # noqa: BLE001 公开面宽容: 坏 token=游客
-                logger.info("public_path_token_invalid guest_fallback")
+            except Exception as exc:   # noqa: BLE001 公开面宽容: 坏 token=游客
+                logger.info("public_path_token_invalid guest_fallback "
+                            "path=%s token_len=%d err=%s",
+                            scope.get("path"), len(token), exc)
+        else:
+            logger.info("public_path_no_token path=%s auth_header=%d",
+                        scope.get("path"), len(authorization))
         _strip_identity_headers(scope)
 
     async def _validate(self, send, token: str):

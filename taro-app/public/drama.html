@@ -337,7 +337,7 @@
 
   function renderSuperPanel(isSuper) {
     var t = token();
-    if (!t || !curDrama) { superBox.style.display = "none"; return; }
+    if (!t) { superBox.style.display = "none"; return; }
     superBox.style.display = "block";
     if (isSuper) {
       superStatEl.textContent = "已是超级会员 · 全站短剧免费观看中";
@@ -519,7 +519,9 @@
         var lockedCp = eps.filter(function (e) {
           return e.is_checkpoint && !e.is_unlocked; })[0];
         if (lockedCp && t) {
-          /* 已登录回跳: 自动幂等解锁(老用户免手动) */
+          /* 已登录回跳: 自动幂等解锁(老用户免手动)
+             先渲染锁定态(curDrama 就位), 解锁回调重渲全集 */
+          renderEpisodes(d, eps);
           doUnlock(lockedCp);
           return;
         }
