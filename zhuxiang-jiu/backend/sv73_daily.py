@@ -50,7 +50,7 @@ def fetch_hotspots(token: str, limit: int = 20) -> list[dict]:
 
 
 def run_one(token: str, hs: dict, platform: str,
-            template: str) -> dict | None:
+            template: str, persona: str = "") -> dict | None:
     body = {
         "hotspot": {
             "hotspotId": hs.get("hotspotId") or 0,
@@ -62,6 +62,8 @@ def run_one(token: str, hs: dict, platform: str,
         "platform": platform,
         "template": template,
     }
+    if persona:
+        body["persona"] = persona
     s, b = http("POST", "/api/sv73/pipeline/run", body, token=token)
     if s != 200:
         print(f"    run 失败: {s} {str(b)[:120]}")
@@ -75,7 +77,10 @@ def main() -> int:
                     help="排产条数(默认 5——周产量口径)")
     ap.add_argument("--template", default="tier",
                     help="模板(tier=分级路由; 或显式 vertical/"
-                         "dh_oral/dh_mix)")
+                         "dh_oral/dh_mix/drama_monologue)")
+    ap.add_argument("--persona", default="",
+                    help="IP 人设(默认 zhuxiaomei; 可选 xiaozhushuaige"
+                         "——小竹帅哥第二人设 2026-10-05)")
     ap.add_argument("--platforms", default="douyin,wechat_channels",
                     help="平台轮换池(逗号分隔)")
     ap.add_argument("--dry", action="store_true",
@@ -102,7 +107,7 @@ def main() -> int:
         label = PLATFORM_LABELS.get(plat, plat)
         print(f"  [{i + 1}/{args.count}] {label} "
               f"{str(hs.get('title'))[:30]} ...")
-        r = run_one(token, hs, plat, args.template)
+        r = run_one(token, hs, plat, args.template, args.persona)
         if r is None:
             continue
         # 幂等撞车(同热点同品类同人设同模板→同 scriptId)→
@@ -110,7 +115,8 @@ def main() -> int:
         if r.get("reused"):
             hs2 = {**hs, "title": f"{hs.get('title')}·{label}"}
             print("    幂等复用→标题变体重试 ...")
-            r = run_one(token, hs2, plat, args.template) or r
+            r = run_one(token, hs2, plat, args.template,
+                        args.persona) or r
         sb = r.get("storyboard") or {}
         tpl = (sb.get("template") or {}).get("name", "?")
         content = r.get("content") or {}
@@ -122,7 +128,7 @@ def main() -> int:
             "reused": r.get("reused"),
             "sc": content.get("shortCode") or "-",
         })
-        if tpl in ("dh_oral", "dh_mix"):
+        if tpl in ("dh_oral", "dh_mix", "drama_monologue"):
             dh_sids.append(sb.get("scriptId"))
 
     print(f"\n== 排产完成 {len(rows)} 条 ==")

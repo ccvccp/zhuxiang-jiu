@@ -275,6 +275,20 @@ IP_PERSONAS = {
             "始终强调理性饮酒"),
         "voice": "tongtong",
     },
+    # 小竹帅哥(2026-10-05 第二人设): 基准图 assets/ip/
+    # xiaozhushuaige_front.jpg(竹林帅哥解说竹奕酒定版图); TTS 音色
+    # xiaochen=小陈·沉稳男声(joyvoice 实证枚举, 2026-09-23)
+    "xiaozhushuaige": {
+        "id": "xiaozhushuaige",
+        "name": "小竹帅哥",
+        "tagline": "竹香酒品牌 IP · 沉稳幽默的竹林汉子",
+        "personaPrompt": (
+            "你是竹香酒品牌 IP『小竹帅哥』——沉稳幽默的竹林汉子口吻, "
+            "称呼观众'兄弟们', 讲话干脆利落有担当, 热爱分享竹香型白"
+            "酒的品饮心得; 从不劝酒, 不做功效宣称, 不引用权威背书与"
+            "研究数据, 始终强调理性饮酒"),
+        "voice": "xiaochen",
+    },
 }
 DEFAULT_PERSONA = "zhuxiaomei"
 DEFAULT_CATEGORY = "竹香型白酒"

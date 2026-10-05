@@ -90,9 +90,24 @@ ADH = {
     "host": "connect.weste.seetacloud.com",
     "port": 26657, "user": "root", "password": "/u9tQeN02hTs",
 }
-# 口播基准图: 本地(随代码版本) → 每次跑批前自动上传远端(md5 校验)
-DH_IMAGE_LOCAL = Path(__file__).resolve().parent / "assets" / "ip" / "zhuxiaomei_front.jpg"
-DH_IMAGE_REMOTE = "/root/assets/ip/zhuxiaomei_front.jpg"
+# 口播基准图: persona → (本地, 远端)——每次跑批前全部自动上传远端
+# (md5 校验); 2026-10-05 第二人设小竹帅哥入列(竹林帅哥解说竹奕酒
+# 定版图 1.9MB, SadTalker 非标分辨率由 dh 服务 720x1280 归一处理)
+_ASSET_IP = Path(__file__).resolve().parent / "assets" / "ip"
+DH_IMAGES = {
+    "zhuxiaomei": (_ASSET_IP / "zhuxiaomei_front.jpg",
+                   "/root/assets/ip/zhuxiaomei_front.jpg"),
+    "xiaozhushuaige": (_ASSET_IP / "xiaozhushuaige_front.jpg",
+                       "/root/assets/ip/xiaozhushuaige_front.jpg"),
+}
+# 兼容旧引用(缺省人设)
+DH_IMAGE_LOCAL = DH_IMAGES["zhuxiaomei"][0]
+DH_IMAGE_REMOTE = DH_IMAGES["zhuxiaomei"][1]
+
+
+def dh_image_for(persona: str) -> str:
+    """storyboard persona → 远端基准图路径(未注册人设回落竹小妹)"""
+    return DH_IMAGES.get(persona, DH_IMAGES["zhuxiaomei"])[1]
 # 远端布局(2026-10-01 Pro 迁移: SadTalker 挪入系统盘随镜像, 数据盘
 # /root/autodl-tmp 不再依赖——Pro create 全新实例无数据盘)
 DH_SADTALKER_DIR = "/root/SadTalker"
@@ -303,7 +318,8 @@ def build_one(ssh, sid: str, token: str, key: str) -> bool:
         print("    TTS 失败")
         return False
 
-    # ③ 上传 → 远端 E2E → 下载
+    # ③ 上传 → 远端 E2E → 下载(基准图按 storyboard persona 注入——
+    #    混人设批次各用各的定版图, 2026-10-05 第二人设)
     run(ssh, f"mkdir -p {REMOTE_ROOT}")
     push(ssh, Path(wav), f"{REMOTE_ROOT}/{sid}_tts.wav")
     push(ssh, Path("storyboards") / f"{sid}_prod.json"
@@ -313,7 +329,7 @@ def build_one(ssh, sid: str, token: str, key: str) -> bool:
 import importlib.util, json, os
 from pathlib import Path
 os.environ['SV73_VIDEO_DIR'] = '{REMOTE_ROOT}'
-os.environ['SV73_DH_IMAGE'] = '{DH_IMAGE_REMOTE}'
+os.environ['SV73_DH_IMAGE'] = '{dh_image_for(sb.get("persona") or "zhuxiaomei")}'
 os.environ['SV73_DH_MODE'] = 'real'
 os.environ['SV73_SADTALKER_DIR'] = '{DH_SADTALKER_DIR}'
 spec = importlib.util.spec_from_file_location("dh", "{REMOTE_SVC}")
@@ -458,13 +474,18 @@ def main() -> int:
     key = prod_llm_key()
 
     # 素材/服务文件上传(随代码版本——Pro 全新实例不依赖旧数据盘)
-    print("[基准图] 竹小妹定版图上传(md5 校验) ...")
-    if not DH_IMAGE_LOCAL.is_file() or not DH_SVC_LOCAL.is_file():
-        print(f"  缺素材: {DH_IMAGE_LOCAL} / {DH_SVC_LOCAL}")
+    print("[基准图] 全人设定版图上传(md5 校验) ...")
+    if not DH_SVC_LOCAL.is_file():
+        print(f"  缺服务文件: {DH_SVC_LOCAL}")
         return 1
+    for persona, (local, remote) in DH_IMAGES.items():
+        if not local.is_file():
+            print(f"  缺素材: {local}")
+            return 1
     run(ssh, f"mkdir -p {DH_IMAGE_REMOTE.rsplit('/', 1)[0]}"
              f" {REMOTE_ROOT} {REMOTE_SVC.rsplit('/', 1)[0]}")
-    push(ssh, DH_IMAGE_LOCAL, DH_IMAGE_REMOTE)
+    for persona, (local, remote) in DH_IMAGES.items():
+        push(ssh, local, remote)
     push(ssh, DH_SVC_LOCAL, REMOTE_SVC)
 
     ok = fail = 0

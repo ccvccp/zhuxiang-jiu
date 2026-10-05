@@ -441,3 +441,45 @@ def test_t11b_drama_mix_plan_reuse():
     assert plan["offsets"] == [round(19.2 - sv73mod.SCENE_FADE, 2)]
     assert plan["total"] == round(
         19.2 + 4.5 - sv73mod.SCENE_FADE, 2)
+
+
+# ------------------------------------------------------------
+# T12 第二人设 xiaozhushuaige(2026-10-05): 注册表+双模板组合+
+#     TTS 音色映射(IP_VOICE 派生)+ dh_batch 基准图路由
+# ------------------------------------------------------------
+
+
+def test_t12_persona_xiaozhushuaige(monkeypatch):
+    _patch_rule(monkeypatch)
+    assert "xiaozhushuaige" in sv73mod.IP_PERSONAS
+    p = sv73mod.IP_PERSONAS["xiaozhushuaige"]
+    assert p["voice"] == "xiaochen"   # 小陈·沉稳男声(joyvoice 枚举)
+    # vertical + 新人设
+    sb = _run(Sv73ScriptService().generate(
+        {**HOTSPOT, "fingerprint": "fp-sv73-p12"},
+        persona="xiaozhushuaige"))
+    assert_schema(sb)
+    assert sb["persona"] == "xiaozhushuaige"
+    # drama + 新人设(独白短剧兄弟们口吻)
+    sb2 = _run(Sv73ScriptService().generate(
+        {**HOTSPOT, "fingerprint": "fp-sv73-p12b"},
+        persona="xiaozhushuaige", template="drama_monologue"))
+    assert_schema(sb2)
+    assert sb2["persona"] == "xiaozhushuaige"
+
+
+def test_t12b_persona_voice_and_image_routing():
+    """TTS 音色派生(IP_VOICE)+ dh_batch 基准图路由(本端纯函数)"""
+    from services.sv73_render_service import IP_VOICE
+    assert IP_VOICE["xiaozhushuaige"] == "xiaochen"
+    assert IP_VOICE["zhuxiaomei"] == "tongtong"
+    import dh_batch
+    assert dh_batch.dh_image_for(
+        "xiaozhushuaige") == "/root/assets/ip/xiaozhushuaige_front.jpg"
+    assert dh_batch.dh_image_for(
+        "zhuxiaomei") == "/root/assets/ip/zhuxiaomei_front.jpg"
+    # 未注册人设回落竹小妹(防呆)
+    assert dh_batch.dh_image_for(
+        "unknown") == "/root/assets/ip/zhuxiaomei_front.jpg"
+    # 本地素材在位(跑批前置)
+    assert Path(dh_batch.DH_IMAGES["xiaozhushuaige"][0]).is_file()
