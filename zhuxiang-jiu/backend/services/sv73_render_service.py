@@ -88,18 +88,31 @@ def tts_mode() -> bool:
     ).strip().lower() in ("on", "1", "true")
 
 
-# 品牌素材系列(2026-10-05 入库: 竹林美女解说竹奕酒动画解说帧 ×7,
-# D:\网站素材图\竹小妹\竹小妹动画解说图 同步)——selling 镜底图池;
-# 缺失静默回落纯色卡(零依赖)
-_SERIES_DIR = (Path(__file__).resolve().parent.parent
-               / "assets" / "ip" / "zhuxiaomei_series")
+# 品牌素材系列(2026-10-05 入库)——selling 镜底图池, 人设分池:
+#   zhuxiaomei      竹林美女解说竹奕酒动画解说帧 ×7
+#   xiaozhushuaige  竹林帅哥解说竹奕酒动画解说帧 ×8
+# (同人设池缺失回落竹小妹池; 全缺失静默回落纯色卡——零依赖)
+_SERIES_DIRS = {
+    "zhuxiaomei": (Path(__file__).resolve().parent.parent
+                   / "assets" / "ip" / "zhuxiaomei_series"),
+    "xiaozhushuaige": (Path(__file__).resolve().parent.parent
+                       / "assets" / "ip" / "xiaozhushuaige_series"),
+}
+_SERIES_DIR = _SERIES_DIRS["zhuxiaomei"]   # 缺省池(兼容旧引用)
 
 
-def _series_pages() -> list:
+def _series_pages(persona: str = "zhuxiaomei") -> list:
+    d = _SERIES_DIRS.get(persona, _SERIES_DIR)
     try:
-        return sorted(_SERIES_DIR.glob("p*.jpg"))
+        files = sorted(d.glob("p*.jpg"))
     except OSError:
-        return []
+        files = []
+    if not files and d != _SERIES_DIR:
+        try:
+            files = sorted(_SERIES_DIR.glob("p*.jpg"))
+        except OSError:
+            files = []
+    return files
 
 
 class Sv73RenderService:
@@ -114,7 +127,8 @@ class Sv73RenderService:
 
     # ---------- 页面渲染(大字卡) ----------
 
-    def _render_scene(self, sc: dict, tpl: dict):
+    def _render_scene(self, sc: dict, tpl: dict,
+                      persona: str = "zhuxiaomei"):
         """单镜 → PNG 页(品牌头+大字+高亮金+IP 角标)
 
         布局全按 storyboard.template 尺寸参数化(P1 三模板);
@@ -124,11 +138,11 @@ class Sv73RenderService:
         from PIL import Image, ImageDraw
         w, h = tpl["pageW"], tpl["pageH"]
         img = Image.new("RGB", (w, h), C_BG)
-        # selling 镜品牌素材底图(竹林美女解说系列): cover 铺底+米白
-        # 60% 遮罩保大字可读; 素材缺失静默回落纯色卡(确定性选图:
-        # 镜序取模——同 storyboard 渲染幂等)
-        if sc["role"] == "selling" and _series_pages():
-            series = _series_pages()
+        # selling 镜品牌素材底图(人设分池: 竹小妹/小竹帅哥解说系列):
+        # cover 铺底+米白 60% 遮罩保大字可读; 素材缺失静默回落纯色卡
+        # (确定性选图: 镜序取模——同 storyboard 渲染幂等)
+        if sc["role"] == "selling" and _series_pages(persona):
+            series = _series_pages(persona)
             bg = Image.open(
                 series[sc["index"] % len(series)]).convert("RGB")
             sr = max(w / bg.width, h / bg.height)
@@ -221,9 +235,10 @@ class Sv73RenderService:
         SV73_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
         sid = storyboard["scriptId"]
         tpl = storyboard["template"]
+        persona = storyboard.get("persona") or "zhuxiaomei"
         pages = []
         for i, sc in enumerate(storyboard["scenes"], 1):
-            img = self._render_scene(sc, tpl)
+            img = self._render_scene(sc, tpl, persona)
             path = SV73_VIDEO_DIR / f"{sid}_p{i}.png"
             img.save(path, "PNG")
             pages.append(path)

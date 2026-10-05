@@ -287,10 +287,12 @@ def test_r8_pages_distinct():
 
 
 def test_r10_selling_series_bg():
-    """selling 镜吃素材底图池: 素材在位≥7 张; 同 storyboard
-    两次渲染幂等(确定性选图: 镜序取模)"""
+    """selling 镜吃素材底图池: 双人设分池在位(竹小妹×7/小竹帅哥×8);
+    同 storyboard 两次渲染幂等(确定性选图: 镜序取模);
+    人设分池互异(同镜序两池底图不同)"""
     from services.sv73_render_service import _series_pages
-    assert len(_series_pages()) >= 7
+    assert len(_series_pages("zhuxiaomei")) >= 7
+    assert len(_series_pages("xiaozhushuaige")) >= 8
     sb = _make_storyboard()
     p1 = Sv73RenderService().render_pages(sb)
     p2 = Sv73RenderService().render_pages(sb)
@@ -298,6 +300,9 @@ def test_r10_selling_series_bg():
     # 四页仍互异(素材底不破坏防同图回归)
     blobs = [Path(p).read_bytes() for p in p2]
     assert len(set(blobs)) == len(blobs)
+    # 人设分池: 同镜选图来自各自池(池首文件路径不同即证)
+    assert (_series_pages("zhuxiaomei")[1]
+            != _series_pages("xiaozhushuaige")[1])
 
 
 # ------------------------------------------------------------
