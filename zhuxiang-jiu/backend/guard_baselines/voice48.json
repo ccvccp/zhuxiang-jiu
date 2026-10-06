@@ -1,0 +1,8 @@
+{
+ "fingerprint": "de5425275bc0b188",
+ "params": {
+  "services.asr_stream_service:_PACING_MAX_RATE": "2.0",
+  "services.asr_stream_service:_PACING_BUDGET_MS": "300.0",
+  "services.asr_stream_service:_FLUSH_CHUNK": "3200"
+ }
+}
