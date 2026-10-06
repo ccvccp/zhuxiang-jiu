@@ -1,4 +1,4 @@
-"""asr_stream_service 单测(2026-10-06 唤醒迟缓修复 / 10-07 限速回放)
+﻿"""asr_stream_service 单测(2026-10-06 唤醒迟缓修复 / 10-07 限速回放)
 
 根因: feed 在 task-started(ready) 前丢弃音频——v2 协议
 arm→建流→ready 约 1s 窗口内用户已开口, 唤醒词短促前部被丢
@@ -46,7 +46,7 @@ def _mk():
 
 def test_feed_buffers_before_started(monkeypatch):
     """ready 前 feed 不丢: 缓冲进 _pending, ws 零发送"""
-    monkeypatch.setattr(asm, "_FLUSH_GAP", 0)
+    monkeypatch.setattr(asm, "_PACING_MAX_RATE", 1000.0)
     s = _mk()
     asyncio.run(s.feed(b"\x01\x02"))
     asyncio.run(s.feed(b"\x03\x04"))
@@ -57,7 +57,7 @@ def test_feed_buffers_before_started(monkeypatch):
 
 def test_flush_pending_after_started(monkeypatch):
     """task-started 后补投: 分块限速回放(块序保持) + 后续直通"""
-    monkeypatch.setattr(asm, "_FLUSH_GAP", 0)
+    monkeypatch.setattr(asm, "_PACING_MAX_RATE", 1000.0)
     s = _mk()
     asyncio.run(s.feed(b"\x01\x02"))
     asyncio.run(s.feed(b"\x03\x04"))
@@ -73,7 +73,7 @@ def test_flush_pending_after_started(monkeypatch):
 
 def test_flush_chunked_pacing(monkeypatch):
     """限速回放形态: 大缓冲按 100ms 块分帧发送(v63 突发涌入教训)"""
-    monkeypatch.setattr(asm, "_FLUSH_GAP", 0)
+    monkeypatch.setattr(asm, "_PACING_MAX_RATE", 1000.0)
     s = _mk()
     big = b"\x07" * (asm._FLUSH_CHUNK * 3 + 500)   # 3.5 块
     asyncio.run(s.feed(big))
@@ -85,7 +85,7 @@ def test_flush_chunked_pacing(monkeypatch):
 
 def test_flush_failure_sets_failed(monkeypatch):
     """补投失败快速置败(finish 立即 fallback, 不拖 8s 超时)"""
-    monkeypatch.setattr(asm, "_FLUSH_GAP", 0)
+    monkeypatch.setattr(asm, "_PACING_MAX_RATE", 1000.0)
     s = _mk()
     asyncio.run(s.feed(b"\x01"))
     s._started.set()
@@ -97,7 +97,7 @@ def test_flush_failure_sets_failed(monkeypatch):
 
 def test_pending_guard_and_no_ws(monkeypatch):
     """保护: 未建连(ws None)feed 静默丢弃; 缓冲超 512KB 丢最旧"""
-    monkeypatch.setattr(asm, "_FLUSH_GAP", 0)
+    monkeypatch.setattr(asm, "_PACING_MAX_RATE", 1000.0)
     s = AsrStreamSession(lambda d: None)   # 无 ws
     asyncio.run(s.feed(b"\x01"))           # 不抛
     assert s._pending == []

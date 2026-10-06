@@ -96,7 +96,11 @@ def active_conns() -> int:
 
 
 _FLUSH_CHUNK = 3200          # flush 分块(100ms @16k16bit)
-_FLUSH_GAP = 0.05            # flush 块间隔(≈2x 实时回放限速)
+_PACING_MAX_RATE = 2.0       # 百炼收帧限速(倍实时; v63 教训:
+                              # N 倍突发涌入时间轴崩识别全空——
+                              # TCP 缓冲排空的面板直通路径同样
+                              # 需节拍, 非仅 pending 回放)
+_PACING_BUDGET_MS = 300.0    # 起步余量(允许 300ms 内瞬时发完)
 
 
 class AsrStreamSession:
@@ -116,6 +120,12 @@ class AsrStreamSession:
         self._failed = ""
         self._started = asyncio.Event()
         self._done = asyncio.Event()
+        # 发送节拍(2026-10-07 直通路径补丁): 百炼收帧 ≤2x 实时——
+        # 面板重开窗期帧在 WS/TCP 缓冲排队, _seg_pump 排空时直通
+        # send 仍会突发涌入(pending 不参与该路径), feed/flush 统一
+        # 令牌桶节拍; _fed_ms=已发音频毫秒(16k16bit mono 32B/ms)
+        self._fed_ms = 0.0
+        self._feed_t0 = 0.0
         # ready 前音频缓冲(2026-10-06 唤醒迟缓修复): v2 协议
         # arm→建流→ready 约 1s 窗口内用户已开口——唤醒词短促,
         # 前部音频被丢 → ASR 无 partial → final 空转写(text=None)
@@ -252,6 +262,21 @@ class AsrStreamSession:
                 self._failed = str(exc)
                 self._done.set()
 
+    async def _pacing_wait(self, chunk_bytes: int) -> None:
+        """发送节拍(令牌桶): 已发音频时长不得超过 已历时间×倍率
+        +起步余量——超速则小睡追平(单次 ≤1s 防长阻塞)"""
+        import time as _time
+        now = _time.monotonic()
+        if self._feed_t0 == 0.0:
+            self._feed_t0 = now
+        budget_ms = ((now - self._feed_t0) * _PACING_MAX_RATE
+                     * 1000.0) + _PACING_BUDGET_MS
+        if self._fed_ms > budget_ms:
+            debt_ms = self._fed_ms - budget_ms
+            await asyncio.sleep(min(1.0, debt_ms
+                                    / _PACING_MAX_RATE / 1000.0))
+        self._fed_ms += chunk_bytes / 32.0   # 16k16bit mono → ms
+
     async def feed(self, pcm: bytes) -> None:
         """转发音频二进制帧(16k 16bit mono PCM, 段内专用连接)
 
@@ -272,6 +297,7 @@ class AsrStreamSession:
         if not pcm:
             return
         try:
+            await self._pacing_wait(len(pcm))    # 直通路径同节拍
             await self._ws.send(pcm)
         except Exception as exc:
             logger.warning("stream_feed_failed: %s", exc)
@@ -296,6 +322,7 @@ class AsrStreamSession:
         self._pending = []
         for i in range(0, len(buf), _FLUSH_CHUNK):
             try:
+                await self._pacing_wait(min(_FLUSH_CHUNK, len(buf) - i))
                 await self._ws.send(buf[i:i + _FLUSH_CHUNK])
             except Exception as exc:
                 logger.warning("stream_flush_failed: %s", exc)
@@ -303,8 +330,6 @@ class AsrStreamSession:
                     self._failed = str(exc)
                     self._done.set()
                 return
-            if i + _FLUSH_CHUNK < len(buf):
-                await asyncio.sleep(_FLUSH_GAP)
 
     async def finish(self, timeout: float = 8) -> str | None:
         """finish-task → 等终态, 返回最终文本(失败/空返回 None)"""
