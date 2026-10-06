@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=96";
+  var VER = "v=97";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -903,13 +903,31 @@
         }
       } else if (m.type === "partial" && m.text) {
         eng.lastPartial = m.text;
+        /* 播报窗防重唤醒(2026-10-07 抢话修复): 「我在，请吩咐」
+           外放期间用户插话若带「小竹」→ 原逻辑再次 onWakeHit
+           重新应答, 对话轮被重置(体感"抢话不听讲"); 窗内唤醒
+           命中静默——面板已在对话态, 插话由面板文本层 barge-in
+           切断执行处理 */
+        if (inSelfReply()) { return; }
         if (matchWake(m.text)) { onWakeHit(); }
       } else if (m.type === "final") {
         if (eng.pendingResub) { eng.pendingResub = null; }
         var ft = m.text || eng.lastPartial || "";
+        if (inSelfReply()) {
+          /* 播报窗内 final: 含唤醒词不重弹应答; 面板未开时
+             例外放行(首唤醒应答自身尾段竞态由 selfUtter 兜底) */
+          if (panelOpen()) { return; }
+        }
         if (matchWake(ft)) {
           onWakeHit();
         } else if (ft) {
+          /* 交接窗有效语音直入(面板开麦真空期兜底, 见
+             onWakeHit 注记): ≥2 实义字即直入, 纯语气词除外 */
+          if (eng.handoffUntil > Date.now()
+              && meaningfulText(ft)) {
+            onWakeHitIntent(ft);
+            return;
+          }
           /* v80 member 窗意图直入: 唤醒后 5 分钟内免唤醒词
              (02:46:51 实证「换一款」转写出来但无响应——续问
              窗 5s 已关, member 窗与 widget 两窗断层); 意图
@@ -1181,6 +1199,20 @@
      意图语音(动词白名单防环境声)免喊唤醒词直接弹面板提交 */
   var WAKE_AT_KEY = "xz.wakeAt";
   var selfReplyAt = 0;  /* widget 应答「我在，请吩咐」播放时刻 */
+  var pendingWakeReply = false;  /* 应答挂起待面板麦就绪(应答即就绪) */
+  /* 播报窗判定: widget 应答外放起 4s 内(插话防重唤醒) */
+  function inSelfReply() {
+    return selfReplyAt > 0 && Date.now() - selfReplyAt < 4000;
+  }
+  function panelOpen() {
+    return panel && panel.classList.contains("open");
+  }
+  /* 交接窗有效文本: ≥2 实义字(纯语气/叹词不算) */
+  function meaningfulText(t) {
+    return String(t || "")
+      .replace(/[嗯啊哦呃唉嗨呀吧呢了。,.!！？?\s]/g, "")
+      .length >= 2;
+  }
   var INTENT_HEAD = new RegExp(
     "^(看|来|介绍|查|买|加|推荐|换|帮我"
     + "|怎么|多少|为什么|什么|哪|有没有"
@@ -1210,12 +1242,27 @@
 
   function onWakeHit() {
     eng.emptyStreak = 0; /* 命中即清连续空计数 */
+    /* 交接窗(2026-10-07 唤醒两次修复): 面板弹窗+重取麦克风
+       1~3s 真空期内 widget 引擎仍在识别——窗内有效语音直入
+       面板首轮(onWakeHitIntent), 用户"我在请吩咐"后立刻说的
+       指令不再被丢弃(原仅动词白名单命中才直入, 白名单外
+       指令静默丢弃=用户被迫再唤醒一次) */
+    eng.handoffUntil = Date.now() + 8000;
     teardownSeg();
     try {
       localStorage.setItem(WAKE_AT_KEY, String(Date.now()));
     } catch (e) { /* 忽略 */ }
     wakeBeep();
-    speakWakeReply(); /* 「我在，请吩咐」播报(用户要求) */
+    /* 应答即就绪: 「我在，请吩咐」延后到面板 mic-ready 信号再播
+       (开麦真空 1~3s 期间播报=用户听指令说话被丢→被迫二次唤醒);
+       8s 兜底: 面板没开起来(登录态/网络异常)仍给声反馈 */
+    pendingWakeReply = true;
+    setTimeout(function () {
+      if (pendingWakeReply) {
+        pendingWakeReply = false;
+        speakWakeReply();
+      }
+    }, 8000);
     openPanel();
     /* 免唤醒窗口打通: widget 唤醒(ws_asr 轨)不写面板会话——
        服务端 wake 窗口(5 分钟)未被点亮, 唤醒后面板说话被打回
@@ -1273,6 +1320,16 @@
         不自愈(13:09:47 实证二次唤醒只识出「小。」)——拆
         旧采集链重取流, 唤醒识别质量恢复 */
       rebuildWakeStream();
+      return;
+    }
+    if (d.type === "xz-panel-mic-ready") {
+      /* 应答即就绪(2026-10-07 唤醒两次修复): 面板麦克风真正
+         可收音的时刻——延后的「我在，请吩咐」此刻才播, 用户
+         听到应答即说话不再落入面板开麦 1~3s 真空期 */
+      if (pendingWakeReply) {
+        pendingWakeReply = false;
+        speakWakeReply();
+      }
       return;
     }
     if (d.type === "xz-panel-maximize") { maximizePanel(); return; }

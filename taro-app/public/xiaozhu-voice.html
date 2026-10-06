@@ -3242,6 +3242,13 @@ function wireCloudCapture() {
     })();
     recStart = Date.now();
     cloudActive = true;
+    /* 应答即就绪(2026-10-07): 采集链就绪即通知宿主——widget
+       延后的「我在，请吩咐」此刻开播, 用户听到应答时面板已
+       可收音(开麦真空期说话不再丢); 每轮续听同发, 宿主仅
+       pending 态消费, 无副作用 */
+    try {
+      parent.postMessage({ type: "xz-panel-mic-ready" }, "*");
+    } catch (e) { /* 宿主非 iframe 忽略 */ }
     setWave(true, true);
     recTimer = setInterval(function () {
       var sec = (Date.now() - recStart) / 1000;
