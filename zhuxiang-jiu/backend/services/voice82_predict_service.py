@@ -188,8 +188,13 @@ class Voice82PredictService:
 
     # ---- 构建 ----
 
-    async def rebuild_matrices(self, limit_members: int = 100) -> dict:
-        """全量重建全局+角色矩阵(幂等; EMA 平滑)"""
+    async def rebuild_matrices(self, limit_members: int = 30) -> dict:
+        """全量重建全局+角色矩阵(幂等; EMA 平滑)
+
+        生产小机(1.6G)降载口径: ①不嵌套调 rebuild_profile(省
+        一倍扫描, role 由本地 infer 快算) ②会员/轮次/评分流
+        全限额——首跑 30 会员足够矩阵冷启动
+        """
         members = await self._all_members(limit_members)
         global_pairs: list = []
         role_pairs: dict = {}
@@ -206,8 +211,22 @@ class Voice82PredictService:
             pairs = self.transition_pairs(by_session)
             if not pairs:
                 continue
-            prof = await self._dialog.rebuild_profile(mid)
-            role = (prof.get("role") or {}).get("role") or "member"
+            # role 本地快算(零额外扫描)
+            intent_counts: dict = {}
+            for t in turns:
+                it = str(t.get("intent") or "")
+                if it:
+                    intent_counts[it] = intent_counts.get(it, 0) + 1
+            dom: dict = {}
+            tot = 0
+            for it, n in intent_counts.items():
+                d = biz_domain_of(it)
+                if d:
+                    dom[d] = dom.get(d, 0) + n
+                    tot += n
+            dist = {d: n / (tot or 1) for d, n in dom.items()}
+            from services.voice82_dialog_service import infer_role
+            role, _, _ = infer_role(mid, intent_counts, dist)
             roles_resolved[mid] = role
             global_pairs.append(pairs)
             role_pairs.setdefault(role, []).append(pairs)
@@ -253,7 +272,7 @@ class Voice82PredictService:
             client = await get_redis_client()
             keys = await client.keys(_k(
                 "voice48", self._repo.TABLE_SESSIONS, "*"))
-            for k in keys[:2000]:
+            for k in keys[:200]:       # 小机限额(200 会话扫描上限)
                 raw = await client.hgetall(k)
                 mid = (raw.get(b"memberId") or raw.get("memberId"))
                 if mid is not None:

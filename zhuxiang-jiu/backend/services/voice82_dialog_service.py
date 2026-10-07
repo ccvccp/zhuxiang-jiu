@@ -257,7 +257,7 @@ class Voice82DialogService:
         for sid in session_ids:
             try:
                 turns.extend(await self._repo.list_turns(
-                    str(sid), limit=200))
+                    str(sid), limit=50))   # 小机限额(每会话50轮)
             except Exception:   # noqa: BLE001  fail-soft 残缺会话
                 continue
         return turns
@@ -268,7 +268,7 @@ class Voice82DialogService:
                   "hook_timeout": 0, "total": 0}
         try:
             cases = await self._repo.list_records(
-                self._repo.TABLE_FAILURES, limit=1000)
+                self._repo.TABLE_FAILURES, limit=400)  # 小机限额
         except Exception:       # noqa: BLE001
             return counts
         sids = {str(s) for s in session_ids}
