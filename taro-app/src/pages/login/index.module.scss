@@ -386,3 +386,40 @@
   margin-top: $spacing-md;
   padding: $spacing-sm 0;
 }
+
+// 成年声明勾选行(酒类合规 P0-1 · 45号 P6-D1 信值条款留痕)
+.ageRow {
+  display: flex;
+  align-items: flex-start;
+  margin: 8rpx 0 20rpx;
+  gap: 12rpx;
+}
+
+.ageCheckOn,
+.ageCheckOff {
+  flex-shrink: 0;
+  width: 34rpx;
+  height: 34rpx;
+  line-height: 34rpx;
+  text-align: center;
+  font-size: 26rpx;
+  border-radius: 8rpx;
+  margin-top: 2rpx;
+}
+
+.ageCheckOn {
+  background: #355c44;
+  color: #fff;
+  border: 2rpx solid #355c44;
+}
+
+.ageCheckOff {
+  border: 2rpx solid #c0c0c0;
+  background: #fff;
+}
+
+.ageText {
+  font-size: 24rpx;
+  color: #666;
+  line-height: 34rpx;
+}

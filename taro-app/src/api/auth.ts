@@ -15,12 +15,17 @@ export interface AuthResult {
 }
 
 export const AuthAPI = {
-  /** 手机号注册(返回令牌并自动保存会话) */
-  async register(phone: string, password: string, nickname?: string): Promise<AuthResult> {
+  /** 手机号注册(返回令牌并自动保存会话; ageConfirmed=成年声明 酒类合规) */
+  async register(phone: string, password: string, nickname?: string, ageConfirmed?: boolean): Promise<AuthResult> {
     const res = await request<any>({
       url: '/api/auth/register',
       method: 'POST',
-      data: { phone, password, nickname: nickname || undefined },
+      data: {
+        phone,
+        password,
+        nickname: nickname || undefined,
+        ageConfirmed: !!ageConfirmed,
+      },
     });
     return saveSession(res);
   },

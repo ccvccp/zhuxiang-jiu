@@ -53,6 +53,7 @@ const LoginPage: React.FC = () => {
   // 通道与注册态
   const [channel, setChannel] = useState<Channel>('password');
   const [registerMode, setRegisterMode] = useState(false);
+  const [ageAgreed, setAgeAgreed] = useState(false); // 成年声明(酒类合规 P0-1)
   // 表单
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -179,9 +180,14 @@ const LoginPage: React.FC = () => {
       Taro.showToast({ title: '密码至少 6 位', icon: 'none' });
       return;
     }
+    // 酒类合规: 成年声明必勾(P0-1; 同时触发 45号 P6-D1 信值条款留痕)
+    if (!ageAgreed) {
+      Taro.showToast({ title: '请先勾选成年声明', icon: 'none' });
+      return;
+    }
     setSubmitting(true);
     try {
-      await AuthAPI.register(phone, password, nickname || undefined);
+      await AuthAPI.register(phone, password, nickname || undefined, true);
       Taro.showToast({ title: '注册成功', icon: 'success' });
       setTimeout(() => Taro.navigateBack(), 1200);
     } catch (e) {
@@ -437,6 +443,19 @@ const LoginPage: React.FC = () => {
                     onInput={(e) => setNickname(e.detail.value)}
                   />
                 </View>
+              </View>
+            )}
+            {registerMode && (
+              <View
+                className={styles.ageRow}
+                onClick={() => setAgeAgreed((v) => !v)}
+              >
+                <Text className={ageAgreed ? styles.ageCheckOn : styles.ageCheckOff}>
+                  {ageAgreed ? '✓' : ''}
+                </Text>
+                <Text className={styles.ageText}>
+                  我已年满 18 周岁，同意接受身份核验，并已知悉《信值条款》
+                </Text>
               </View>
             )}
             <View className={styles.formItem}>
