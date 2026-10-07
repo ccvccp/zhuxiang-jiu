@@ -296,7 +296,7 @@ def test_t12_observability():
         pr = r["profiles"]
         assert pr["total"] == 3
         assert pr["sameValue"] == 2 and \
-            pr["legacyRemaining"] == 1               # 分类口径
+            pr["legacyPending"] == 1               # 分类口径(内存态 idmap 不可读)
         assert pr["byGrade"].get("watch") == 3        # 档位分布
         # no-redis 段降级(内存测试环境惯例)
         assert r["events"] == {"note": "no-redis"}

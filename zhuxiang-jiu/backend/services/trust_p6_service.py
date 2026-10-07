@@ -250,23 +250,42 @@ async def observability() -> dict:
     """
     out: dict = {"success": True, "generatedAt": _now_iso()}
     try:
+        import json as _json
+        from repositories.backend import get_redis_client
         from repositories.trust_value_repository import id_digest
         repo = TrustValue45Repository()
         profiles = await repo.list_profiles(limit=5000)
+        # P7 已迁档集合(排除出 legacyPending 计数)
+        migrated: set = set()
+        try:
+            client = await get_redis_client()
+            for _k, v in (await client.hgetall(
+                    "zhuxiang:trust45:idmap") or {}).items():
+                v = v.decode() if isinstance(v, bytes) else v
+                try:
+                    migrated.add(int(_json.loads(v).get("newTrustId")))
+                except (ValueError, TypeError):
+                    pass
+        except Exception:                 # noqa: BLE101
+            pass
         by_grade: dict = {}
-        same_value = legacy = 0
+        same_value = legacy_pending = legacy_migrated = 0
         for p in profiles:
             g = str(p.get("grade") or "?")
             by_grade[g] = by_grade.get(g, 0) + 1
+            tid = p.get("trustId")
             if str(p.get("idDigest") or "") == id_digest(
-                    f"member:{p.get('trustId')}"):
+                    f"member:{tid}"):
                 same_value += 1
+            elif int(tid) in migrated:
+                legacy_migrated += 1
             else:
-                legacy += 1
+                legacy_pending += 1
         out["profiles"] = {"total": len(profiles),
                            "byGrade": by_grade,
                            "sameValue": same_value,
-                           "legacyRemaining": legacy}
+                           "legacyMigrated": legacy_migrated,
+                           "legacyPending": legacy_pending}
     except Exception as exc:              # noqa: BLE101
         out["profiles"] = {"error": str(exc)[:120]}
     # ---- events(审计流水视角; 78号 no-redis 降级惯例) ----

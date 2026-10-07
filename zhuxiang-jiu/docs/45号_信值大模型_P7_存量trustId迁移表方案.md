@@ -153,6 +153,9 @@ trust45_inventory(2026-10-01 生产实证: seq=1/真实存量 1 档/
 | 联动2 语音行为入分 | **50号语音信值积分引擎已存在**+voicepay_risk 评分器 | 已覆盖(报告不知 50号) |
 | 联动1/3/4 | 82号 影子期/D4 未灰度 | 记 82号 毕业后评估/D4 灰度时挂/下轮候选 |
 
-**shadow 观察期数据分析**(报告短期 P0 二项): 留痕 **0 条**——
-D3 挂点(E3 forfeited/P3 redeem 等)从未触发过真实事件, 无数据可析,
-等真实业务事件后 `observability.shadow` 段自动出数。
+**shadow 观察期数据分析**(报告短期 P0 二项): 留痕 2 条均为
+**P6 验收测试信号**(10-01 trustId=38 escrow_forfeit delta=-5,
+非真实业务事件)——真实业务信号 0 条, 无误伤面可析, 等真实
+E3 forfeited/redeem 事件后 `observability.shadow` 段自动出数。
+(注: 留痕嵌 state p6ShadowSignals 环形 200, 非独立键——此前
+按独立键扫描误判零。)
