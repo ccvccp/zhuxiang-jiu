@@ -1,4 +1,4 @@
-﻿"""asr_stream_service 单测(2026-10-06 唤醒迟缓修复 / 10-07 限速回放)
+"""asr_stream_service 单测(2026-10-06 唤醒迟缓修复 / 10-07 限速回放)
 
 根因: feed 在 task-started(ready) 前丢弃音频——v2 协议
 arm→建流→ready 约 1s 窗口内用户已开口, 唤醒词短促前部被丢
