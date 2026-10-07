@@ -85,7 +85,10 @@ const TrustPage: React.FC = () => {
   }, []);
 
   const loadData = useCallback(async (tid?: number | null) => {
-    const id = tid ?? getCachedTrustId();
+    // 45号: 缓存空时回退 memberId 同值档(注册即开通 trustId=memberId,
+    // 注册流程不写 trust_id_cache——不回退会把已开档的新会员误判为
+    // 无档, 引导重复实名建档生成僵尸档)
+    const id = tid ?? getCachedTrustId() ?? myTrustId();
     try {
       const pts = await PointsAPI.account(Number(myTrustId()) || 0).catch(() => null);
       if (pts) setPoints(pts.totalPoints ?? 0);
