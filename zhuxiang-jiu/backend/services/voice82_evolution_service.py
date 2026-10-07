@@ -18,17 +18,21 @@ P2 边界(计划 §四):
     voice82_effective   已 promote 生效参数 {key: {params, ...}}
 """
 
+import asyncio
 import json
 import logging
 import os
+from datetime import UTC, datetime
 
 from core.helpers import ts
 
 from repositories.backend import (
     get_in_memory_store, get_redis_client, is_redis_mode, _k,
 )
+from repositories.xiaozhu_repository import Xiaozhu48Repository
 from services.voice82_dialog_service import (
-    PARAM_DEFAULTS, PARAM_KEYS, Voice82DialogService,
+    PARAM_DEFAULTS, PARAM_KEYS, SCORE_KIND, Voice82DialogService,
+    biz_domain_of,
 )
 
 logger = logging.getLogger("voice82_evolution")
@@ -40,6 +44,9 @@ SHADOW_POSITIVE_RATIO = 0.55  # 正反馈占优阈值
 TBL_SIGNALS = "voice82_signals"
 TBL_CHALLENGER = "voice82_challenger"
 TBL_EFFECTIVE = "voice82_effective"
+
+SESSION_IDLE_MINUTES = 30      # 无新轮次视为已结束(离线采集判定)
+COLLECT_BATCH = 50             # 每轮采集会话上限(小机限额)
 
 
 def evolution_mode() -> str:
@@ -125,6 +132,7 @@ class Voice82EvolutionService:
 
     def __init__(self):
         self._dialog = Voice82DialogService()
+        self._repo = Xiaozhu48Repository()
 
     # ---- KV 原语(同 P0/P1 范式) ----
 
@@ -165,7 +173,9 @@ class Voice82EvolutionService:
                "memberId": str(member_id or ""),
                "turns": int(summary.get("turns") or 0),
                "ts": ts(),
-               "score": Voice82StrategyScorer.score(sig), **sig}
+               "score": Voice82StrategyScorer.score(sig), **sig,
+               # 原始计数留档(观测可回溯——审计四维从何而来)
+               "summary": dict(summary)}
         await self._hset(TBL_SIGNALS, str(session_id), rec)
         return {"success": True, **rec}
 
@@ -291,6 +301,119 @@ class Voice82EvolutionService:
                 "effective": True,
                 "promotedAt": eff.get("promotedAt")}
 
+    # ---- 离线信号采集(零侵入——周期扫已结束会话, 幂等) ----
+
+    async def _recent_sessions(self, limit: int = 150) -> list[dict]:
+        """最近会话(ts 降序; 小机限额 200 键扫描)"""
+        rows: list[dict] = []
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(
+                "voice48", self._repo.TABLE_SESSIONS, "*"))
+            for k in keys[:200]:
+                raw = await client.hgetall(k)
+                rows.append({
+                    kk.decode() if isinstance(kk, bytes) else kk:
+                    vv.decode() if isinstance(vv, bytes) else vv
+                    for kk, vv in (raw or {}).items()})
+        else:
+            store = get_in_memory_store()
+            rows = [dict(r) for r in (
+                store.get(self._repo.TABLE_SESSIONS) or {}).values()]
+        rows.sort(key=lambda r: str(r.get("ts") or ""), reverse=True)
+        return rows[:limit]
+
+    @staticmethod
+    def _last_active_utc(turns: list[dict]):
+        """末轮活跃时间(解析失败/缺失 → None=视为久远已结束)"""
+        best = None
+        for t in turns:
+            try:
+                dt = datetime.fromisoformat(str(t.get("ts") or ""))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=UTC)
+            except ValueError:
+                continue
+            if best is None or dt > best:
+                best = dt
+        return best
+
+    async def collect_ended_sessions(
+            self, limit: int = COLLECT_BATCH,
+            idle_minutes: int = SESSION_IDLE_MINUTES) -> dict:
+        """离线信号采集: 已结束会话 → 四维信号落流
+
+        判定口径:
+            - 零轮次跳过(无行为可学, 防页面预开会话噪声)
+            - 已录 sessionId 幂等跳过
+            - 结束 = status=closed 或 末轮超 idle_minutes
+              (ts 解析失败视为久远已结束——脏数据不卡采集)
+        聚合: 轮次/executed 来自 turns; repeat/negative/fragment
+              来自 48号评分流(kind=turn_score); 招商命中=政策/样品域;
+              exitedEarly 无浏览器信号暂 False(P3 卸载事件回填)
+        """
+        sessions = await self._recent_sessions(limit * 3)
+        try:
+            cases = await self._repo.list_records(
+                self._repo.TABLE_FAILURES, limit=400)
+        except Exception:                     # noqa: BLE001 fail-soft
+            cases = []
+        tracks_by_sid: dict = {}
+        for c in cases:
+            if c.get("kind") != SCORE_KIND:
+                continue
+            tracks_by_sid.setdefault(
+                str(c.get("sessionId") or ""), []).append(c)
+
+        cutoff = datetime.now(UTC).timestamp() - idle_minutes * 60
+        recorded = skipped_active = skipped_empty = 0
+        for s in sessions:
+            if recorded >= limit:
+                break
+            sid = str(s.get("sessionId") or "")
+            if not sid:
+                continue
+            if await self._hgetall(TBL_SIGNALS, sid):
+                continue                       # 幂等
+            try:
+                turns = await self._repo.list_turns(sid, limit=50)
+            except Exception:                 # noqa: BLE001
+                turns = []
+            if not turns:
+                skipped_empty += 1
+                continue
+            last = self._last_active_utc(turns)
+            if (str(s.get("status")) != "closed" and last is not None
+                    and last.timestamp() > cutoff):
+                skipped_active += 1
+                continue
+            tracks = tracks_by_sid.get(sid) or []
+            intents = [str(t.get("intent") or "") for t in turns]
+            summary = {
+                "turns": len(turns),
+                "executedCount": sum(
+                    1 for t in turns if str(
+                        t.get("executed")).lower() in ("true", "1")),
+                "repeatCount": sum(
+                    1 for c in tracks if c.get("track") == "repeat"),
+                "interruptCount": sum(
+                    1 for c in tracks if c.get("track") == "negative"),
+                "fragmentCount": sum(
+                    1 for c in tracks if c.get("track") == "fragment"),
+                "bizGoalsHit": sum(
+                    1 for i in intents
+                    if biz_domain_of(i) in ("政策", "样品")),
+                "exitedEarly": False,
+                "manualEscalated": any(
+                    w in i for i in intents
+                    for w in ("人工", "客服", "human")),
+            }
+            await self.record_signals(sid, s.get("memberId"), summary)
+            recorded += 1
+        return {"success": True, "scanned": len(sessions),
+                "recorded": recorded, "skippedActive": skipped_active,
+                "skippedEmpty": skipped_empty}
+
     # ---- 灰度门槛观测 ----
 
     async def shadow_status(self) -> dict:
@@ -309,3 +432,63 @@ class Voice82EvolutionService:
                 "ready": ready,
                 "note": "ready=影子达标可评估 promote(仍走人工)"
                 if ready else "未达标(继续观察)"}
+
+
+# ------------------------------------------------------------------
+# 信号采集调度器(VOICE82_SIGNALS_AUTO=on 启用; 默认 off 宪法)
+# ------------------------------------------------------------------
+
+_signals_task: asyncio.Task | None = None
+
+
+def signals_auto_enabled() -> bool:
+    """采集总开关(默认 off——观测面数据由人工/API 首跑亦可)"""
+    return os.environ.get(
+        "VOICE82_SIGNALS_AUTO", "off").strip().lower() == "on"
+
+
+def signals_interval_seconds() -> int:
+    try:
+        return max(300, int(os.environ.get(
+            "VOICE82_SIGNALS_INTERVAL_SECONDS", "1800")))
+    except ValueError:
+        return 1800
+
+
+async def _signals_loop() -> None:
+    interval = signals_interval_seconds()
+    logger.info("voice82_signals_scheduler started interval=%ss",
+                interval)
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            # 81号 HRM 批任务闸门(未注册 id 恒放行——Tier 接入前
+            # 不受约束, amber/red 期如需暂缓再入册)
+            from services.hrm81_service import run_gated
+            result = await run_gated(
+                "voice82_signals",
+                Voice82EvolutionService().collect_ended_sessions)
+            if result and result.get("recorded"):
+                logger.info("voice82_signals_collected +%s/%s",
+                            result.get("recorded"),
+                            result.get("scanned"))
+        except Exception as exc:              # noqa: BLE001
+            logger.warning("信号采集异常(继续运行): %s", exc)
+
+
+def start_signals_scheduler() -> bool:
+    """启动采集调度(幂等; VOICE82_SIGNALS_AUTO=off 返回 False)"""
+    global _signals_task
+    if not signals_auto_enabled():
+        logger.info("voice82_signals_scheduler disabled "
+                    "(VOICE82_SIGNALS_AUTO=off)")
+        return False
+    if _signals_task is not None and not _signals_task.done():
+        return True
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.warning("voice82_signals_scheduler no event loop")
+        return False
+    _signals_task = loop.create_task(_signals_loop())
+    return True

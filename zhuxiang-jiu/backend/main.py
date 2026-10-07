@@ -599,6 +599,12 @@ async def _on_startup():
     # 分段铁律见 hrm81_scheduler)
     from services.hrm81_scheduler import start_scheduler as start_hrm81
     start_hrm81()
+    # 82号·小竹对话逻辑学习进化: 信号离线采集(VOICE82_SIGNALS_AUTO
+    # =off 可关闭, 默认 off——零侵入扫已结束会话幂等落信号)
+    from services.voice82_evolution_service import (
+        start_signals_scheduler,
+    )
+    start_signals_scheduler()
     # 40号·平台流量DV博主: 作品雷达 + 发布出队 + 学习回流(BLOGGER_RADAR_AUTO/BLOGGER_PUBLISH_AUTO/BLOGGER_LEARNING_AUTO=off 可关闭)
     # + 雷达2.0采集评分/引擎学习回流(2026-10-03 检查升级补齐,
     #   BLOGGER_RADAR2_AUTO/BLOGGER_ENGINE_LEARNING_AUTO=off 可关闭)

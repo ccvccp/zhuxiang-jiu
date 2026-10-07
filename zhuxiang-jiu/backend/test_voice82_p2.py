@@ -5,6 +5,9 @@
       discard 回滚/信号表读写/灰度门槛/44号注册三处
 """
 
+import json
+import uuid
+
 import pytest
 
 from repositories.backend import get_in_memory_store
@@ -260,3 +263,84 @@ async def test_default_weights_wired():
     w = default_weights("voice82_strategy")
     assert set(w) == set(
         Voice82StrategyScorer.WEIGHTS)               # T32 单一事实源
+
+
+# ============ T33-T37: 离线信号采集器(零侵入) ============
+
+async def _seed_voice_session(mid, turn_ts=None, tracks=(),
+                              status="active", with_turns=True,
+                              intent="agent.policy"):
+    """造 48号会话源数据: session + turn + 评分流"""
+    from core.helpers import ts as _ts
+    repo = Xiaozhu48Repository()
+    store = get_in_memory_store()
+    sid = f"s-{uuid.uuid4().hex[:8]}"
+    store.setdefault(repo.TABLE_SESSIONS, {})[sid] = {
+        "sessionId": sid, "memberId": str(mid), "status": status,
+        "ts": "2026-10-01T09:00:00+00:00"}
+    if with_turns:
+        seq = await repo.next_turn_seq(sid)
+        await repo.save_turn({
+            "turnId": f"t-{uuid.uuid4().hex[:8]}",
+            "sessionId": sid, "seq": seq, "channel": "voice",
+            "audioMeta": {}, "rawText": "", "wake": True,
+            "intent": intent, "action": intent, "reply": "ok",
+            "card": {}, "jump": None, "latencyMs": 100.0,
+            "ts": turn_ts or "2026-10-01T10:00:00+00:00",
+            "executed": True})
+    for tr in tracks:
+        await repo.save_record(repo.TABLE_FAILURES, {
+            "caseId": await repo._next_id(repo.TABLE_FAILURES),
+            "sessionId": sid, "memberId": str(mid), "rawText": "",
+            "kind": "turn_score", "ts": "x", "reward": 0.5,
+            "task": 1, "eff": 0.5, "smooth": 0.5,
+            "intent": "chat", "track": tr, "latencyMs": 100.0})
+    return sid
+
+
+async def test_collect_ended_session():
+    await _seed_voice_session(21, tracks=("repeat", "fragment"))
+    r = await Voice82EvolutionService().collect_ended_sessions()
+    assert r["success"] and r["recorded"] == 1        # T33
+    v = await Voice82EvolutionService().signals_view(member_id=21)
+    rec = v["signals"][0]
+    sm = json.loads(rec["summary"])
+    assert float(sm["repeatCount"]) == 1 and \
+        float(sm["fragmentCount"]) == 1
+    assert float(sm["bizGoalsHit"]) == 1     # agent.policy→政策域
+    assert float(rec["score"]) > 0
+
+
+async def test_collect_skips_active():
+    from core.helpers import ts as _ts
+    await _seed_voice_session(22, turn_ts=_ts())     # 末轮=现在
+    r = await Voice82EvolutionService().collect_ended_sessions()
+    assert r["skippedActive"] == 1                     # T34
+    assert (await Voice82EvolutionService().signals_view(
+        member_id=22))["count"] == 0
+
+
+async def test_collect_idempotent():
+    await _seed_voice_session(23)
+    await Voice82EvolutionService().collect_ended_sessions()
+    s2 = await Voice82EvolutionService().collect_ended_sessions()
+    assert s2["recorded"] == 0                         # T35 幂等
+    assert (await Voice82EvolutionService().signals_view(
+        member_id=23))["count"] == 1
+
+
+async def test_collect_skips_zero_turns():
+    await _seed_voice_session(24, with_turns=False)
+    r = await Voice82EvolutionService().collect_ended_sessions()
+    assert r["skippedEmpty"] == 1                      # T36
+    assert (await Voice82EvolutionService().signals_view(
+        member_id=24))["count"] == 0
+
+
+async def test_collect_closed_immediately():
+    from core.helpers import ts as _ts
+    await _seed_voice_session(25, turn_ts=_ts(), status="closed")
+    r = await Voice82EvolutionService().collect_ended_sessions()
+    assert r["recorded"] == 1                          # T37
+    assert (await Voice82EvolutionService().signals_view(
+        member_id=25))["count"] == 1   # closed 不受空闲阈约束

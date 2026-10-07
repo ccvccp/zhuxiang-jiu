@@ -135,6 +135,17 @@ async def voice82_signals_view(memberId: int = None, limit: int = 20,
         member_id=memberId, limit=max(1, min(limit, 100)))
 
 
+@router.post("/signals/collect")
+async def voice82_signals_collect(x_role: str = Header(
+        default="", alias="X-Role")):
+    """手动采集已结束会话信号(观测面——与调度器同源, 幂等)"""
+    _require_admin(x_role)
+    from services.voice82_evolution_service import (
+        Voice82EvolutionService,
+    )
+    return await Voice82EvolutionService().collect_ended_sessions()
+
+
 @router.post("/challenger/{member_id}")
 async def voice82_challenger_build(member_id: int,
                                    x_role: str = Header(
