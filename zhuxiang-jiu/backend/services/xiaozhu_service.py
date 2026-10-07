@@ -4887,6 +4887,10 @@ class XiaozhuService:
             "reply": result.get("reply", ""),
             "card": result.get("card") or {},
             "jump": result.get("jump"),
+            # 82号P2: 执行态落 turn(此前仅响应体透传未落库——
+            # evolution 影子信号 executedCount 恒 0, reward 上限
+            # 被压到 0.2, positive 恒 False, 影子永不达标)
+            "executed": bool(result.get("executed", False)),
             "latencyMs": extras.get("latencyMs") or 0.0,
             "wakeScore": round(_ws, 3),
             # 48号 P3-2: EMA 轨留痕(rule 默认/emaPass/emaBlock/
