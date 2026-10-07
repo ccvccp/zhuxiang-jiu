@@ -871,6 +871,20 @@ async def trust45_mode_resume(
         raise _handle(e) from e
 
 
+@router.get("/observability")
+async def trust45_observability():
+    """信值系统观测聚合(报告借鉴·建议7 轻量——纯读永不关停)
+
+    五段: profiles 档案分布/events 审计流水/D3 shadow 留痕/
+    P7 迁移 idmap/灰度态——运维巡检单端点。
+    """
+    try:
+        from services.trust_p6_service import observability
+        return await observability()
+    except Exception as e:
+        raise _handle(e) from e
+
+
 def register_trust_value_routes(app) -> None:
     """注册45号路由(main.py startup 调用)"""
     app.include_router(router)

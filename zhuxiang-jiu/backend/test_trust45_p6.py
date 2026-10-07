@@ -276,3 +276,34 @@ def test_t11_state_json_roundtrip():
     empty = repo._deserialize(repo._serialize(
         {"p6": {}, "p6ShadowSignals": []}))
     assert empty["p6"] == {} and empty["p6ShadowSignals"] == []
+
+
+def test_t12_observability():
+    """T12: 观测面聚合(报告借鉴建议7 轻量)——五段结构+分类口径"""
+
+    async def run():
+        # 造 2 同值档 + 1 存量档
+        svc = TrustProfileService()
+        await svc.create_role("person", "甲", "member:1001",
+                              trust_id=1001)
+        await svc.create_role("person", "乙", "member:1002",
+                              trust_id=1002)
+        await svc.create_role("person", "存量", "real-digest-x")
+        r = await p6.observability()
+        assert r["success"] is True
+        assert set(r) >= {"profiles", "events", "shadow",
+                          "migrations", "mode"}       # 五段结构
+        pr = r["profiles"]
+        assert pr["total"] == 3
+        assert pr["sameValue"] == 2 and \
+            pr["legacyRemaining"] == 1               # 分类口径
+        assert pr["byGrade"].get("watch") == 3        # 档位分布
+        # no-redis 段降级(内存测试环境惯例)
+        assert r["events"] == {"note": "no-redis"}
+        assert r["migrations"] == {"note": "no-redis"}
+        # shadow 段: 无留痕零计数不炸
+        assert r["shadow"]["count"] == 0
+        # mode 段: 结构在位
+        assert "mode" in r["mode"] or "error" in r["mode"]
+
+    asyncio.run(run())

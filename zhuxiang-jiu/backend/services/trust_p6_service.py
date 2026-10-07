@@ -235,3 +235,120 @@ async def repair_alpha_factor(trust_id: int) -> float:
         return 1.2 if grade == "healthy" else 1.0
     except Exception:  # noqa: BLE101
         return 1.0
+
+
+# ============================================================
+# 观测面聚合(P6+ 借鉴报告建议7 轻量版——纯读, fail-soft)
+# ============================================================
+
+async def observability() -> dict:
+    """信值系统观测聚合(报告借鉴·优化升级报告 §4.3 建议7)
+
+    五段: profiles(档案/档位分布/同值存量分类)/events(总数+近
+    50 条真变更数——审计流水 events 表即变更流水, delta≠0 计)/
+    shadow(D3 留痕)/migrations(P7 idmap)/mode(灰度态)。
+    """
+    out: dict = {"success": True, "generatedAt": _now_iso()}
+    try:
+        from repositories.trust_value_repository import id_digest
+        repo = TrustValue45Repository()
+        profiles = await repo.list_profiles(limit=5000)
+        by_grade: dict = {}
+        same_value = legacy = 0
+        for p in profiles:
+            g = str(p.get("grade") or "?")
+            by_grade[g] = by_grade.get(g, 0) + 1
+            if str(p.get("idDigest") or "") == id_digest(
+                    f"member:{p.get('trustId')}"):
+                same_value += 1
+            else:
+                legacy += 1
+        out["profiles"] = {"total": len(profiles),
+                           "byGrade": by_grade,
+                           "sameValue": same_value,
+                           "legacyRemaining": legacy}
+    except Exception as exc:              # noqa: BLE101
+        out["profiles"] = {"error": str(exc)[:120]}
+    # ---- events(审计流水视角; 78号 no-redis 降级惯例) ----
+    try:
+        from repositories.backend import (
+            get_redis_client, is_redis_mode,
+        )
+        if not is_redis_mode():
+            out["events"] = {"note": "no-redis"}
+        else:
+            client = await get_redis_client()
+            keys = [k.decode() if isinstance(k, bytes) else k
+                    for k in await client.keys(
+                        "zhuxiang:trust45:trust45_events:*")]
+            ids = sorted(
+                (int(k.rsplit(":", 1)[-1]) for k in keys
+                 if k.rsplit(":", 1)[-1].isdigit()),
+                reverse=True)[:50]
+            changes = 0
+            last = None
+            for eid in ids:
+                raw = await client.hgetall(
+                    f"zhuxiang:trust45:trust45_events:{eid}")
+                d = {(k.decode() if isinstance(k, bytes) else k):
+                     (v.decode() if isinstance(v, bytes) else v)
+                     for k, v in raw.items()}
+                try:
+                    if abs(float(d.get("delta") or 0)) > 0:
+                        changes += 1
+                except ValueError:
+                    pass
+                if last is None:
+                    last = {"eventId": d.get("eventId"),
+                            "trustId": d.get("trustId"),
+                            "source": d.get("source"),
+                            "ts": d.get("ts")}
+            out["events"] = {"total": len(keys),
+                             "recent50ScoreChanges": changes,
+                             "last": last}
+    except Exception as exc:              # noqa: BLE101
+        out["events"] = {"error": str(exc)[:120]}
+    # ---- shadow 留痕(D3) ----
+    try:
+        rows = await shadow_signals(limit=200)
+        out["shadow"] = {"count": len(rows),
+                         "lastSource": (rows[0].get("source")
+                                        if rows else None)}
+    except Exception as exc:              # noqa: BLE101
+        out["shadow"] = {"error": str(exc)[:120]}
+    # ---- migrations(P7 idmap) ----
+    try:
+        from repositories.backend import (
+            get_redis_client, is_redis_mode,
+        )
+        if not is_redis_mode():
+            out["migrations"] = {"note": "no-redis"}
+        else:
+            client = await get_redis_client()
+            raw = await client.hgetall(
+                "zhuxiang:trust45:idmap") or {}
+            entries = []
+            import json as _json
+            for k, v in raw.items():
+                old = k.decode() if isinstance(k, bytes) else k
+                try:
+                    snap = _json.loads(
+                        v.decode() if isinstance(v, bytes) else v)
+                except (ValueError, TypeError):
+                    continue
+                entries.append({"old": old,
+                                "new": snap.get("newTrustId"),
+                                "migratedAt": snap.get("migratedAt")})
+            out["migrations"] = {"idmapCount": len(entries),
+                                 "entries": entries[:10]}
+    except Exception as exc:              # noqa: BLE101
+        out["migrations"] = {"error": str(exc)[:120]}
+    # ---- mode(灰度态) ----
+    try:
+        from services.trust45_mode_service import Trust45ModeService
+        st = await Trust45ModeService().status_view()
+        out["mode"] = {"mode": (st.get("data") or st).get("mode")
+                       if isinstance(st, dict) else None}
+    except Exception as exc:              # noqa: BLE101
+        out["mode"] = {"error": str(exc)[:120]}
+    return out
