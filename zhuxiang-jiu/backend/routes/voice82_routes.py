@@ -101,6 +101,104 @@ async def voice82_predict(payload: dict,
     return await Voice82PredictService().predict(member_id, intent)
 
 
+# ============================================================
+# P2: 在线强化(信号观测无门槛; challenger/promote/discard 决策面
+# —— off 409; promote 恒人工, auto_apply=False 铁律)
+# ============================================================
+
+@router.post("/signals")
+async def voice82_signals_record(payload: dict,
+                                 x_role: str = Header(
+                                     default="", alias="X-Role")):
+    """会话信号采集(观测面——off 也可采): {sessionId, memberId, summary}"""
+    _require_admin(x_role)
+    from services.voice82_evolution_service import (
+        Voice82EvolutionService,
+    )
+    sid = payload.get("sessionId")
+    if sid is None:
+        raise HTTPException(status_code=422, detail="sessionId 必填")
+    return await Voice82EvolutionService().record_signals(
+        sid, payload.get("memberId"), payload.get("summary") or {})
+
+
+@router.get("/signals")
+async def voice82_signals_view(memberId: int = None, limit: int = 20,
+                               x_role: str = Header(
+                                   default="", alias="X-Role")):
+    """信号观测(最近 N 条/按会员过滤)"""
+    _require_admin(x_role)
+    from services.voice82_evolution_service import (
+        Voice82EvolutionService,
+    )
+    return await Voice82EvolutionService().signals_view(
+        member_id=memberId, limit=max(1, min(limit, 100)))
+
+
+@router.post("/challenger/{member_id}")
+async def voice82_challenger_build(member_id: int,
+                                   x_role: str = Header(
+                                       default="", alias="X-Role")):
+    """生成参数候选(决策面: off → 409; auto_apply=False)"""
+    _require_admin(x_role)
+    from services.voice82_evolution_service import (
+        Voice82EvolutionService,
+    )
+    r = await Voice82EvolutionService().build_challenger(member_id)
+    if not r.get("success") and "off" in str(r.get("error")):
+        raise HTTPException(status_code=409, detail=r.get("error"))
+    return r
+
+
+@router.post("/challenger/{member_id}/promote")
+async def voice82_challenger_promote(member_id: int,
+                                     x_role: str = Header(
+                                         default="",
+                                         alias="X-Role")):
+    """人工 promote: 候选 → effective(仅 assist 消费)"""
+    _require_admin(x_role)
+    from services.voice82_evolution_service import (
+        Voice82EvolutionService,
+    )
+    return await Voice82EvolutionService().promote(member_id)
+
+
+@router.post("/challenger/{member_id}/discard")
+async def voice82_challenger_discard(member_id: int,
+                                     x_role: str = Header(
+                                         default="",
+                                         alias="X-Role")):
+    """一键回滚(弃候选+撤 effective)"""
+    _require_admin(x_role)
+    from services.voice82_evolution_service import (
+        Voice82EvolutionService,
+    )
+    return await Voice82EvolutionService().discard(member_id)
+
+
+@router.get("/effective/{member_id}")
+async def voice82_effective(member_id: int,
+                            x_role: str = Header(
+                                default="", alias="X-Role")):
+    """生效参数(shadow 不生效/assist 才覆盖)"""
+    _require_admin(x_role)
+    from services.voice82_evolution_service import (
+        Voice82EvolutionService,
+    )
+    return await Voice82EvolutionService().effective_params(member_id)
+
+
+@router.get("/shadow-status")
+async def voice82_shadow_status(x_role: str = Header(
+        default="", alias="X-Role")):
+    """灰度门槛观测(≥200 会话且正反馈占优 → ready)"""
+    _require_admin(x_role)
+    from services.voice82_evolution_service import (
+        Voice82EvolutionService,
+    )
+    return await Voice82EvolutionService().shadow_status()
+
+
 def register_voice82_routes(app):
     """路由注册(routes/__init__ register 函数族惯例)"""
     app.include_router(router)

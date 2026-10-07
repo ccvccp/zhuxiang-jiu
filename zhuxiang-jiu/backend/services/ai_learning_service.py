@@ -179,6 +179,8 @@ SCORER_REGISTRY = {
     "voicepay_risk": {"label": "小竹语音支付风险评分", "module": "48小竹智能语音大模型", "batch": 52},
     # ---- 第五十三批(73号sv·短视频智能模型 P2: 分镜风格评分——数据闭环) ----
     "sv73_storyboard": {"label": "智能分镜风格评分", "module": "73号sv短视频智能模型", "batch": 53},
+    # ---- 第五十四批(82号·小竹语音对话逻辑学习进化 P2: 对话策略评分) ----
+    "voice82_strategy": {"label": "小竹对话策略评分", "module": "82小竹对话逻辑学习进化", "batch": 54},
 }
 
 # 治理档案型评分器(46号审批总线档案, 不参与 Hedge 学习周期)。
@@ -371,6 +373,9 @@ DECISION_THRESHOLDS = {
     # 73号sv·分镜风格三级(数据闭环: 优先排期/常规/降权观察)
     "sv73_storyboard": [(60.0, "high"), (30.0, "medium"),
                         (0.0, "low")],
+    # 82号·小竹对话策略三级(进化闭环: 优先进化/常规观察/回滚候选)
+    "voice82_strategy": [(60.0, "high"), (30.0, "medium"),
+                         (0.0, "low")],
 }
 
 # 学习配置默认值(可按评分器覆盖)
@@ -415,6 +420,13 @@ def default_weights(scorer_id: str) -> dict:
             VoicePayRiskScorer,
         )
         return dict(VoicePayRiskScorer.WEIGHTS)
+    if scorer_id == "voice82_strategy":
+        # 82号 P2: 小竹对话策略四因子(信号四维), 单一事实源
+        # 在评分器类
+        from services.voice82_evolution_service import (
+            Voice82StrategyScorer,
+        )
+        return dict(Voice82StrategyScorer.WEIGHTS)
     if scorer_id == "blogger_work_gate":
         # 40号博主引流: 作品跟随价值五因子, 单一事实源在评分器类
         from services.ai_scoring_service import BloggerWorkScorer
