@@ -31,8 +31,10 @@ def test_hit_detection_exact_files():
         "taro-app/public/xiaozhu-voice.html",      # 守卫
     ])
     assert not r["clean"]
-    assert set(r["hits"]) == {"voice48"}
+    # 82号入册后面板文件交叉命中双模块(voice48+voice82 都要过套件)
+    assert set(r["hits"]) == {"voice48", "voice82"}
     assert len(r["hits"]["voice48"]) == 2
+    assert len(r["hits"]["voice82"]) == 1   # 面板(asr_stream 不在 82清单)
 
 
 def test_param_fingerprint_stability_and_drift():
