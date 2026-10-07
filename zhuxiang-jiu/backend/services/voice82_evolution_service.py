@@ -427,6 +427,22 @@ class Voice82EvolutionService:
                         refreshed += 1
                 except Exception:             # noqa: BLE001
                     continue
+        # 影子门槛自动提示(ready 翻转时 log 一次——运营巡检可见;
+        # 回落自动复位, 再达标再提示)
+        global _ready_announced
+        try:
+            sh = await self.shadow_status()
+            if sh.get("ready") and not _ready_announced:
+                _ready_announced = True
+                logger.info(
+                    "voice82_shadow_READY sessions=%s positiveRatio=%s"
+                    " 影子达标——可评估 promote: POST challenger/"
+                    "{mid}/build+promote 后 VOICE82_MODE=assist",
+                    sh.get("sessions"), sh.get("positiveRatio"))
+            elif not sh.get("ready"):
+                _ready_announced = False
+        except Exception:                     # noqa: BLE001 fail-soft
+            pass
         return {"success": True, "scanned": len(sessions),
                 "recorded": recorded, "skippedActive": skipped_active,
                 "skippedEmpty": skipped_empty,
@@ -530,6 +546,7 @@ async def wire_params(result: dict | None,
 # ------------------------------------------------------------------
 
 _signals_task: asyncio.Task | None = None
+_ready_announced = False         # 影子达标提示节流(翻转打一次)
 
 
 def signals_auto_enabled() -> bool:
