@@ -286,6 +286,17 @@ _CANCEL_CONFIRM_RE = re.compile(
     r"^(?:取消|不确认|算了|不要了|不提交|取消订单|"
     r"先不下单|先不买了)[的了呀啊哦。,.!！?？]*$")
 
+# 83号 P0·ASR-05 分场景热词包(键=82号画像 topGoal 业务域;
+# 会员业务偏好→场景词注入, 与对话逻辑学习进化模型打通)
+_SCENE_HOTWORDS = {
+    "政策": ("代理", "招商", "起订量", "区域保护", "返利",
+             "结算", "加盟"),
+    "样品": ("样品", "试饮", "试喝", "地址", "城市", "快递"),
+    "价格": ("报价", "多少钱", "整箱", "单瓶", "优惠", "活动"),
+    "库存": ("库存", "现货", "发货", "物流", "几天到"),
+    "售后": ("售后", "退货", "退款", "客服", "投诉"),
+}
+
 # 规格找酒解析(真机实证会话 109: "四十二度的/一斤装的有吗/
 # 52度的朱一九"找酒表达 5 连全断——用户核心购酒意图落
 # general/chat 兜底; 度数(中文/数字)/容量(斤)/系列词规则
@@ -1068,7 +1079,7 @@ class XiaozhuService:
             asr = await HubService().transcribe_upload(
                 audio_bytes, filename=filename,
                 member_id=member_id,
-                hotwords=await self._asr_hotwords())
+                hotwords=await self._asr_hotwords(member_id))
         logger.info("voice48_timing sid=%s asr_ms=%d "
                     "audio_bytes=%d dur_s=%s%s",
                     session_id,
@@ -3363,12 +3374,18 @@ class XiaozhuService:
                     wrong, right, key)
         return record
 
-    async def _asr_hotwords(self) -> list[str]:
+    async def _asr_hotwords(self, member_id=None) -> list[str]:
         """ASR 热词表(P0 Fun-ASR: system 实体词表数据源)
 
-        三源合一去重: ASR_HOTWORDS 静态种子(品牌词) + 在售
-        产品名 + 误听修正表右词(运营动态词); 智谱轨不使用该
-        参数(零开销); fail-soft: 任一源失败只降词不阻断转写。
+        五源合一去重(83号 P0 扩三源→五源):
+          ① ASR_HOTWORDS 静态种子(品牌词)
+          ② 在售产品名  ③ 误听修正表右词(运营动态词)
+          ④ 82号画像场景词包(会员业务偏好 topGoal→场景词,
+             与对话逻辑学习进化模型打通——fail-soft 画像未
+             构建即跳过)
+          ⑤ 地区词种子(业务固定六城, ACC-03)
+        智谱轨不使用该参数(零开销); fail-soft: 任一源失败只
+        降词不阻断转写。
         """
         words: list[str] = []
         seen: set[str] = set()
@@ -3397,6 +3414,24 @@ class XiaozhuService:
                 _add((rec or {}).get("to"))
         except Exception:
             pass
+        # ④ 82号画像场景词包(会员业务偏好→热词增强)
+        if member_id is not None:
+            try:
+                from services.voice82_dialog_service import (
+                    Voice82DialogService,
+                )
+                prof = await Voice82DialogService().get_profile(
+                    member_id)
+                if prof.get("success"):
+                    top = (prof.get("profile")
+                           or {}).get("topGoal") or ""
+                    for w in _SCENE_HOTWORDS.get(top, []):
+                        _add(w)
+            except Exception:               # noqa: BLE001
+                pass
+        # ⑤ 地区词种子(ACC-03: 业务固定六城)
+        for w in ("浙江", "衢州", "杭州", "宁波", "温州", "金华"):
+            _add(w)
         return words[:120]
 
     async def _fix_asr_mishear(self, text: str) -> str:

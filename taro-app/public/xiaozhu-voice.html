@@ -1725,6 +1725,9 @@ function streamConnect() {
             { type: "xz-lat",
               text: "barge cut_after_ms=" + _barMs },
             "*"); } catch (e) {}
+          /* 83号P1: 打断事件入服务端通道(LINK-08 尾巴——
+             console/postMessage 不落库不可聚合) */
+          voice83Event("barge_cut", { afterMs: _barMs });
         }
         smT("listening", "barge_cut");  /* v82 影子镜像 */
         stopTtsNow();
@@ -2298,6 +2301,20 @@ function pumpTts(ctl) {
 /* v3 全链路延迟埋点: vad断句→提交→响应→首块出声 四段
    [LAT] 结构化输出(PC 调试/真机远程指导)——卡在哪段
    一目了然(VAD等待/识别+规则/TTS合成) */
+/* 83号P1: 语音事件通道(唤醒/打断——fire-and-forget 同 /lat
+   口径, 失败静默; 服务端 voice83:events 日键收集) */
+function voice83Event(type, meta) {
+  try {
+    var _a = getAuth() || {};
+    var _hh = { "Content-Type": "application/json",
+                "X-Member-Id": String(_a.uid || "") };
+    if (_a.token) _hh["Authorization"] = "Bearer " + _a.token;
+    fetch("/api/voice83/events", { method: "POST",
+      headers: _hh,
+      body: JSON.stringify({ type: type, meta: meta || {} })
+    }).catch(function () {});
+  } catch (e) {}
+}
 function latReport() {
   var m = S.latMarks || {};
   var seg = function (a, b) {
@@ -2879,6 +2896,8 @@ window.addEventListener("message", function (ev) {
        (06:59 实证「小竹小竹。」成轮污染上下文)——2s 内
        免提轮静默丢弃 */
     S.woken = true;
+    /* 83号P1: 唤醒命中事件入服务端通道(误唤醒率可观测) */
+    voice83Event("wake_hit");
     /* 静默等待式 S1(四态状态机): 语音应答已取消(widget 改纯
        声学「叮-咚」), wakeVadMute 只需盖 beep 尾音(0.4s
        beep+0.6s 余量)——1s 后用户即可说话, 比 2.5s 提速;

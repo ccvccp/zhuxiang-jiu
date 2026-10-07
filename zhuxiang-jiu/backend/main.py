@@ -76,6 +76,7 @@ from routes import (
     # 硬件资源智能模型(81号·HRM 水位三档+批任务闸门+容量建议书)
     register_hrm81_routes,
     register_voice82_routes,
+    register_voice83_routes,
     # 全域会员智能增长(80号·分享积分轨+新人礼)
     register_growth80_routes,
     # 用户认证模块
@@ -277,6 +278,7 @@ register_maintenance_routes(app)
 register_ibms_routes(app)
 register_hrm81_routes(app)
 register_voice82_routes(app)
+register_voice83_routes(app)
 register_growth80_routes(app)
 register_auth_routes(app)
 register_promotion_routes(app)
