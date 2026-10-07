@@ -104,6 +104,14 @@ const TrustPage: React.FC = () => {
         if (!bal) {
           setTrustId(null);
           Taro.removeStorageSync('trust_id_cache');
+          // 45号 P7: 旧缓存档已失效(如 trustId 迁移)时, 回退 memberId
+          // 同值档重试一次——首次进入即展示新档, 免二次进出;
+          // 显式传参路径不回退(防递归), 真无档停在建档态
+          const fallback = myTrustId();
+          if (tid == null && fallback && fallback !== id) {
+            loadData(fallback);
+            return;
+          }
         } else {
           setTrustId(id);
           setBalance(bal);
