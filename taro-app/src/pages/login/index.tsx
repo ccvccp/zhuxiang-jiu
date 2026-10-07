@@ -54,6 +54,9 @@ const LoginPage: React.FC = () => {
   const [channel, setChannel] = useState<Channel>('password');
   const [registerMode, setRegisterMode] = useState(false);
   const [ageAgreed, setAgeAgreed] = useState(false); // 成年声明(酒类合规 P0-1)
+  // 体验授权条款(注册时一次同意, 免运行时二次确认打断)
+  const [micAgreed, setMicAgreed] = useState(false);   // 语音体验(设备麦克风)
+  const [geoAgreed, setGeoAgreed] = useState(false);   // 地理位置(附近门店/配送)
   // 表单
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -187,7 +190,7 @@ const LoginPage: React.FC = () => {
     }
     setSubmitting(true);
     try {
-      await AuthAPI.register(phone, password, nickname || undefined, true);
+      await AuthAPI.register(phone, password, nickname || undefined, true, micAgreed, geoAgreed);
       Taro.showToast({ title: '注册成功', icon: 'success' });
       setTimeout(() => Taro.navigateBack(), 1200);
     } catch (e) {
@@ -455,6 +458,32 @@ const LoginPage: React.FC = () => {
                 </Text>
                 <Text className={styles.ageText}>
                   我已年满 18 周岁，同意接受身份核验，并已知悉《信值条款》
+                </Text>
+              </View>
+            )}
+            {registerMode && (
+              <View
+                className={styles.ageRow}
+                onClick={() => setMicAgreed((v) => !v)}
+              >
+                <Text className={micAgreed ? styles.ageCheckOn : styles.ageCheckOff}>
+                  {micAgreed ? '✓' : ''}
+                </Text>
+                <Text className={styles.ageText}>
+                  我同意使用语音体验，授权开启设备麦克风（可选）
+                </Text>
+              </View>
+            )}
+            {registerMode && (
+              <View
+                className={styles.ageRow}
+                onClick={() => setGeoAgreed((v) => !v)}
+              >
+                <Text className={geoAgreed ? styles.ageCheckOn : styles.ageCheckOff}>
+                  {geoAgreed ? '✓' : ''}
+                </Text>
+                <Text className={styles.ageText}>
+                  我同意使用地理位置服务体验，授权开启定位（附近门店/配送，可选）
                 </Text>
               </View>
             )}

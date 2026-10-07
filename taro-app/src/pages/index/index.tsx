@@ -157,11 +157,17 @@ const IndexPage: React.FC = () => {
 
   // 附近推荐: 定位(3s 超时兜底 + 默认坐标) → nearby 门店
   // 独立异步流(不阻塞首屏主数据 —— H5 定位权限挂起时热销/活动仍正常渲染)
+  // 体验授权条款式前移: 注册时未勾「地理位置服务」(geo_consent=0)
+  // 的会员不再发起浏览器定位弹窗(默认坐标兜底); 存量会员无标记保持原行为
   const loadNearbyStores = async () => {
     let lng = DEFAULT_LNG;
     let lat = DEFAULT_LAT;
     try {
-      const loc = await Promise.race([
+      let geoDenied = false;
+      try {
+        geoDenied = localStorage.getItem('geo_consent') === '0';
+      } catch (_) { /* 标记读取失败按默认行为 */ }
+      const loc = geoDenied ? null : await Promise.race([
         Taro.getLocation({ type: 'wgs84' }),
         new Promise<null>(resolve => setTimeout(() => resolve(null), 3000)),
       ]);

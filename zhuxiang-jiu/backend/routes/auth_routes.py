@@ -45,6 +45,10 @@ class RegisterRequest(BaseModel):
         None, description="出生日期 ISO8601(可选, 提供时硬校验≥18周岁, 酒类合规)")
     ageConfirmed: bool = Field(
         False, description="成年声明(酒类合规, 落库供下单年龄门复用)")
+    voiceConsent: bool = Field(
+        False, description="语音体验授权(设备麦克风, 注册时条款式同意)")
+    geoConsent: bool = Field(
+        False, description="地理位置服务授权(附近门店/配送, 注册时条款式同意)")
 
 
 class LoginRequest(BaseModel):
@@ -273,6 +277,8 @@ async def register(data: RegisterRequest,
             nickname=data.nickname,
             birthdate=data.birthdate,
             age_confirmed=data.ageConfirmed,
+            voice_consent=data.voiceConsent,
+            geo_consent=data.geoConsent,
         )
         await _attach_click_attribution(request, result)
         await _record_member_device(request, result)

@@ -101,12 +101,17 @@ class AuthService:
 
     async def register(self, phone: str, password: str, nickname: str = None,
                        role: str = ROLE_MEMBER, birthdate: str = None,
-                       age_confirmed: bool = False) -> dict:
+                       age_confirmed: bool = False,
+                       voice_consent: bool = False,
+                       geo_consent: bool = False) -> dict:
         """手机号注册(PBKDF2 哈希 + JWT 双令牌)
 
         酒类合规(P0-1):
             - birthdate 提供时硬校验(未满 18 周岁拒绝注册)
             - ageConfirmed 为成年声明标记, 落库供下单年龄门复用
+        体验授权(条款式前移——运行时免二次确认打断):
+            - voiceConsent 语音体验(设备麦克风)
+            - geoConsent 地理位置服务(附近门店/配送)
 
         Raises:
             ValueError: 手机号/密码格式非法, 手机号已注册, 角色非法, 未满 18 周岁
@@ -144,6 +149,9 @@ class AuthService:
                 "role": role,
                 # 酒类合规年龄声明(P0-1)
                 "ageConfirmed": bool(age_confirmed),
+                # 体验授权(注册时条款式同意, 落库审计)
+                "voiceConsent": bool(voice_consent),
+                "geoConsent": bool(geo_consent),
                 "birthdate": birthdate or "",
                 "ageVerified": age_verified,
                 "created_at": _now_iso(),

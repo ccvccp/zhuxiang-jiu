@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=100";
+  var VER = "v=101";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -341,15 +341,24 @@
     return localStorage.getItem(WAKE_KEY) === "on";
   }
 
-  /* 球点击: 已开启→开面板(手动); 未开启→引导开启唤醒, 取消则直接开面板 */
+  /* 球点击: 已开启→开面板(手动); 未开启→引导开启唤醒, 取消则直接开面板
+     体验授权条款式前移: 注册时勾选「语音体验」的会员(voice_consent=1)
+     已预同意麦克风授权 → 跳过运行时 confirm 打断, 直接开启;
+     存量会员无标记/明确未勾(0) 保持原确认弹窗行为 */
+  function micConsented() {
+    try { return localStorage.getItem("voice_consent") === "1"; }
+    catch (e) { return false; }
+  }
   function onBallClick() {
     if (panel.classList.contains("mini")) { maximizePanel(); return; }
     if (wakeOn()) { openPanel(); return; }
-    var ok = confirm('开启「小竹」语音唤醒？\n\n'
-      + '开启后对着麦克风呼唤"小竹、小竹"或"你好小竹"即可唤出语音精灵\n'
-      + '(需使用麦克风, 仅在检测到人声时上传音频);\n'
-      + '小竹球将缩小为小点常驻, 点击它随时可直接打开面板。');
-    if (!ok) { openPanel(); return; } /* 不开唤醒 → 当普通入口用 */
+    if (!micConsented()) {
+      var ok = confirm('开启「小竹」语音唤醒？\n\n'
+        + '开启后对着麦克风呼唤"小竹、小竹"或"你好小竹"即可唤出语音精灵\n'
+        + '(需使用麦克风, 仅在检测到人声时上传音频);\n'
+        + '小竹球将缩小为小点常驻, 点击它随时可直接打开面板。');
+      if (!ok) { openPanel(); return; } /* 不开唤醒 → 当普通入口用 */
+    }
     enableWake();
   }
 

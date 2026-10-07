@@ -15,8 +15,10 @@ export interface AuthResult {
 }
 
 export const AuthAPI = {
-  /** 手机号注册(返回令牌并自动保存会话; ageConfirmed=成年声明 酒类合规) */
-  async register(phone: string, password: string, nickname?: string, ageConfirmed?: boolean): Promise<AuthResult> {
+  /** 手机号注册(返回令牌并自动保存会话; ageConfirmed=成年声明 酒类合规;
+   *  voiceConsent/geoConsent=体验授权条款式同意, 落库+本地标记免运行时二次确认) */
+  async register(phone: string, password: string, nickname?: string, ageConfirmed?: boolean,
+                 voiceConsent?: boolean, geoConsent?: boolean): Promise<AuthResult> {
     const res = await request<any>({
       url: '/api/auth/register',
       method: 'POST',
@@ -25,8 +27,16 @@ export const AuthAPI = {
         password,
         nickname: nickname || undefined,
         ageConfirmed: !!ageConfirmed,
+        voiceConsent: !!voiceConsent,
+        geoConsent: !!geoConsent,
       },
     });
+    // 体验授权本地标记(勾=1 未勾=0; 运行时 widget/页面按标记免二次确认,
+    // 存量会员无标记保持原行为零回归)
+    try {
+      localStorage.setItem('voice_consent', voiceConsent ? '1' : '0');
+      localStorage.setItem('geo_consent', geoConsent ? '1' : '0');
+    } catch (_) { /* 标记失败不阻断注册 */ }
     return saveSession(res);
   },
 
