@@ -410,9 +410,27 @@ class Voice82EvolutionService:
             }
             await self.record_signals(sid, s.get("memberId"), summary)
             recorded += 1
+        # P3: 同轮刷新已录会员的画像(去重限 10——小机限额)
+        refreshed = 0
+        if recorded:
+            seen: dict = {}
+            for s in sessions:
+                mid = str(s.get("memberId") or "")
+                if mid and mid not in seen:
+                    seen[mid] = 1
+                if len(seen) >= 10:
+                    break
+            for mid in list(seen):
+                try:
+                    r = await self._dialog.rebuild_profile(mid)
+                    if r.get("success"):
+                        refreshed += 1
+                except Exception:             # noqa: BLE001
+                    continue
         return {"success": True, "scanned": len(sessions),
                 "recorded": recorded, "skippedActive": skipped_active,
-                "skippedEmpty": skipped_empty}
+                "skippedEmpty": skipped_empty,
+                "profilesRefreshed": refreshed}
 
     # ---- 灰度门槛观测 ----
 
@@ -432,6 +450,79 @@ class Voice82EvolutionService:
                 "ready": ready,
                 "note": "ready=影子达标可评估 promote(仍走人工)"
                 if ready else "未达标(继续观察)"}
+
+
+# ------------------------------------------------------------------
+# P3 语音链接入: 对话响应参数注入(路由层消费)
+# ------------------------------------------------------------------
+
+# 面板现行基线——shadow 恒下发此值(生产零行为变化, 只通管道)。
+# 注意与 PARAM_DEFAULTS.vad_silence_ms=800 口径不同: 那是画像
+# 推断基数, 此处以面板实判 1200ms 为 shadow 基线(assist 时
+# effective 值 clamp 白名单 400-2000 内使用)
+PANEL_BASELINE = {"vad_silence_ms": 1200, "tts_pace": "normal",
+                  "probe_depth": 1, "confirm_threshold": 0.7,
+                  "interrupt_first": "off"}
+
+
+async def wire_params(result: dict | None,
+                      member_id) -> dict | None:
+    """对话响应注入 voice82 节奏参数(fail-soft——82号故障
+    不阻断对话主链, 异常返回 None 响应不带字段)
+
+    语义: shadow → 恒注面板现行基线(零行为变化), 有 challenger
+          候选时留痕对比日志; assist → 注入 effective 覆盖值
+          (全部 clamp 白名单边界内)。
+    """
+    try:
+        svc = Voice82EvolutionService()
+        e = await svc.effective_params(member_id)
+        effective = bool(e.get("effective"))
+        params = dict(PANEL_BASELINE)
+        if effective:
+            p = e.get("params") or {}
+            # None 哨兵取值(0 是 probe_depth 合法档——or 兜底会吞)
+            _vad = p.get("vad_silence_ms")
+            params["vad_silence_ms"] = int(max(400, min(
+                2000, int(_vad if _vad is not None else 1200))))
+            params["tts_pace"] = (
+                p.get("tts_pace")
+                if p.get("tts_pace") in ("slow", "normal", "brisk")
+                else "normal")
+            _pd = p.get("probe_depth")
+            params["probe_depth"] = int(max(0, min(
+                2, int(_pd if _pd is not None else 1))))
+            _ct = p.get("confirm_threshold")
+            params["confirm_threshold"] = round(max(0.5, min(
+                0.9, float(_ct if _ct is not None else 0.7))), 2)
+            params["interrupt_first"] = (
+                p.get("interrupt_first")
+                if p.get("interrupt_first") in ("on", "off")
+                else "off")
+        payload = {"mode": e.get("mode"), "effective": effective,
+                   "vadSilenceMs": params["vad_silence_ms"],
+                   "ttsPace": params["tts_pace"],
+                   "probeDepth": params["probe_depth"],
+                   "confirmThreshold": params["confirm_threshold"],
+                   "interruptFirst": params["interrupt_first"]}
+        if isinstance(result, dict):
+            result["voice82"] = payload
+        if not effective and member_id is not None:
+            # shadow 留痕: 候选若在, 记"如果 assist 会用"(观测)
+            try:
+                cand = await svc._hgetall(
+                    TBL_CHALLENGER, f"m{int(member_id)}")
+                if cand and cand.get("params"):
+                    logger.info(
+                        "voice82_shadow_wire member=%s would=%s "
+                        "actual=panel_baseline", member_id,
+                        cand.get("params"))
+            except Exception:               # noqa: BLE001
+                pass
+        return payload
+    except Exception as exc:               # noqa: BLE001
+        logger.debug("voice82_wire_skip: %s", exc)
+        return None
 
 
 # ------------------------------------------------------------------

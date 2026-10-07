@@ -238,7 +238,7 @@ async def voice_turn(session_id: int, body: dict,
             import time as _t
             XiaozhuService._LAST_WAKE_AT[member_id] = \
                 _t.time()
-        return await XiaozhuService().handle_voice(
+        result = await XiaozhuService().handle_voice(
             session_id, audio_bytes, member_id,
             filename=str(body.get("filename")
                          or "audio.webm"),
@@ -247,6 +247,11 @@ async def voice_turn(session_id: int, body: dict,
                          == "tap"),
             transcript=transcript or None,
             stream_bytes=int(body.get("streamBytes") or 0))
+        # 82号 P3: 节奏参数注入(fail-soft——异常时响应不带
+        # voice82 字段, 前端走内置默认, 对话零影响)
+        from services.voice82_evolution_service import wire_params
+        await wire_params(result, member_id)
+        return result
     except Exception as e:
         raise _handle(e) from e
 

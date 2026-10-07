@@ -581,6 +581,9 @@ function nowHM() {
 var S = { sid: null, turnCount: 0, woken: false, pending: false,
           mode: "cloud", micState: "idle", tts: true,
           handfree: true, ttsPlaying: false, vadSpoke: false,
+          /* 82号P3: 下发静默完判(0=未下发, 走内置 1200 基线;
+             shadow 态后端恒发 1200 同现行——零行为变化) */
+          vadSilenceMs: 0,
           hidden: false, lastSpoken: "",
           ttsCtx: null, ttsSrc: null, packTTS: null,
           /* 78号P1: 预取缓存音色归属(切音色作废旧缓存);
@@ -1212,6 +1215,11 @@ function handleTurn(j, channel) {
   /* 调试徽章(intent/track/latency/mode)不再进气泡——
      用户反馈: 技术字段不展示(顶部 modePill 保留模式态) */
   var tr = j.turn || {};
+  /* 82号P3: 节奏参数应用(VAD 完判; ttsPace/probeDepth 等
+     管道已下发, 执行位 P3.1 按行为机制逐个接) */
+  if (j.voice82 && j.voice82.vadSilenceMs) {
+    S.vadSilenceMs = j.voice82.vadSilenceMs;
+  }
   if (j.xiaoMode) document.getElementById("modePill").textContent = j.xiaoMode;
   var wakeWarn = "";
   if (j.wakeHint) {
@@ -3227,7 +3235,7 @@ function wireCloudCapture() {
           if (S.vadSpoke && vadSilentAt) {
             var endsAsk = /[吗呢吧？?]$/.test(
               String(S.streamPartial || "").trim());
-            if (now - vadSilentAt > (endsAsk ? 600 : 1200)) {
+            if (now - vadSilentAt > (endsAsk ? 600 : (S.vadSilenceMs || 1200))) {
               cloudStop();
               return;
             }

@@ -1,0 +1,9 @@
+{
+ "fingerprint": "28a517573bdc6e0e",
+ "params": {
+  "services.voice82_dialog_service:COLD_START_SESSIONS": "10",
+  "services.voice82_dialog_service:EMA_ALPHA": "0.3",
+  "services.voice82_evolution_service:SHADOW_MIN_SESSIONS": "200",
+  "services.voice82_evolution_service:SESSION_IDLE_MINUTES": "30"
+ }
+}

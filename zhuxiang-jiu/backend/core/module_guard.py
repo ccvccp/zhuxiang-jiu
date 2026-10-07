@@ -104,6 +104,38 @@ PROTECTED_MODULES: dict[str, dict] = {
                 "xz-panel-mic-ready",),
         },
     },
+    "voice82": {
+        "name": "小竹对话逻辑学习进化(82号 P3 语音链接入)",
+        # 交叉守卫: xiaozhu_routes(VAD wire 注入点)与面板文件
+        # 同时在 voice48 清单——动它们两个模块套件都要过
+        "guard_files": (
+            "zhuxiang-jiu/backend/services/voice82_dialog_service.py",
+            "zhuxiang-jiu/backend/services/voice82_predict_service.py",
+            "zhuxiang-jiu/backend/services/voice82_evolution_service.py",
+            "zhuxiang-jiu/backend/routes/voice82_routes.py",
+            "zhuxiang-jiu/backend/routes/xiaozhu_routes.py",
+            "taro-app/public/xiaozhu-voice.html",
+        ),
+        "param_probe": (
+            "services.voice82_dialog_service:COLD_START_SESSIONS",
+            "services.voice82_dialog_service:EMA_ALPHA",
+            "services.voice82_evolution_service:SHADOW_MIN_SESSIONS",
+            "services.voice82_evolution_service:SESSION_IDLE_MINUTES",
+        ),
+        "suite_cmd": [
+            sys.executable, "-m", "pytest",
+            "zhuxiang-jiu/backend/test_voice82_p0.py",
+            "zhuxiang-jiu/backend/test_voice82_p1.py",
+            "zhuxiang-jiu/backend/test_voice82_p2.py",
+            "zhuxiang-jiu/backend/test_voice82_p3.py", "-q",
+        ],
+        "static_asserts": {
+            "taro-app/public/xiaozhu-voice.html": (
+                "S.vadSilenceMs",),
+            "zhuxiang-jiu/backend/routes/xiaozhu_routes.py": (
+                "wire_params",),
+        },
+    },
 }
 
 
