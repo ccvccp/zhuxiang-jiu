@@ -131,7 +131,7 @@ PROTECTED_MODULES: dict[str, dict] = {
         ],
         "static_asserts": {
             "taro-app/public/xiaozhu-voice.html": (
-                "S.vadSilenceMs",),
+                "S.vadSilenceMs", "S.ttsPace"),
             "zhuxiang-jiu/backend/routes/xiaozhu_routes.py": (
                 "wire_params",),
         },

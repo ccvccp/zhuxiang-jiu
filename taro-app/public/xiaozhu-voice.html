@@ -584,6 +584,9 @@ var S = { sid: null, turnCount: 0, woken: false, pending: false,
           /* 82号P3: 下发静默完判(0=未下发, 走内置 1200 基线;
              shadow 态后端恒发 1200 同现行——零行为变化) */
           vadSilenceMs: 0,
+          /* 82号P3.1: 画像节奏语速档(ttsSpeedVal 消费——仅当
+             用户未手动设置时生效, 显式偏好恒优先) */
+          ttsPace: "normal",
           hidden: false, lastSpoken: "",
           ttsCtx: null, ttsSrc: null, packTTS: null,
           /* 78号P1: 预取缓存音色归属(切音色作废旧缓存);
@@ -990,8 +993,14 @@ function buzz(ms) {
 /* v2 G: 语速(本地偏好——慢 0.8/标准 1/快 1.2, cogtts spike
    实证服务端 speed 生效; 桌面 speechSynthesis 同步缩放) */
 function ttsSpeedVal() {
-  var v = parseFloat(localStorage.getItem("xz.ttsSpeed") || "1");
-  return (v === 0.8 || v === 1.2) ? v : 1;
+  var raw = localStorage.getItem("xz.ttsSpeed");
+  if (raw !== null) {   /* 显式设置过(含选回标准 1)恒优先 */
+    var v = parseFloat(raw);
+    return (v === 0.8 || v === 1.2) ? v : 1;
+  }
+  /* 82号P3.1: 从未手动设置 → 画像节奏档(shadow 恒 normal=1
+     零行为变化; assist+promote 后 brisk 会员 1.2) */
+  return { slow: 0.8, normal: 1, brisk: 1.2 }[S.ttsPace] || 1;
 }
 function setTtsSpeed(v) {
   localStorage.setItem("xz.ttsSpeed", String(v));
@@ -1219,6 +1228,9 @@ function handleTurn(j, channel) {
      管道已下发, 执行位 P3.1 按行为机制逐个接) */
   if (j.voice82 && j.voice82.vadSilenceMs) {
     S.vadSilenceMs = j.voice82.vadSilenceMs;
+  }
+  if (j.voice82 && j.voice82.ttsPace) {
+    S.ttsPace = j.voice82.ttsPace;
   }
   if (j.xiaoMode) document.getElementById("modePill").textContent = j.xiaoMode;
   var wakeWarn = "";
