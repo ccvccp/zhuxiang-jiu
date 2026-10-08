@@ -1,4 +1,4 @@
-"""G3 商品图理解: 产品页视觉问答 fail-soft 一致性测试
+﻿"""G3 商品图理解: 产品页视觉问答 fail-soft 一致性测试
 
 小竹Agent方案甄别后真缺口 G3(用户提级首位):
 产品页问外观类问题 → page_context 随轮上报 → 主图
@@ -35,6 +35,13 @@ async def main():
     svc = XiaozhuService()
 
     print("[01 触发条件门控(未命中一律 None)]")
+    os.environ["XIAOZHU_VISION_MODE"] = "off"
+    r = await svc._vision_product_qa(
+        "这酒什么颜色",
+        {"page": "product-detail", "productId": "68"},
+        {"sessionId": 1})
+    record("开关 off → None(一键回归)", r is None)
+    os.environ["XIAOZHU_VISION_MODE"] = "on"
     r = await svc._vision_product_qa(
         "这酒什么颜色", None, {"sessionId": 1, "memberId": 1})
     record("无 page_context → None", r is None)
@@ -72,7 +79,7 @@ async def main():
     _orig_vision = _llm_mod.provider_client.vision
     _seen = {}
 
-    def _fake_vision(prompt, url, media_type="image"):
+    def _fake_vision(prompt, url, media_type="image", force=False):
         _seen["prompt"] = prompt
         _seen["url"] = url
         return ("这款是白瓷瓶身、红色瓶盖，"
@@ -95,7 +102,7 @@ async def main():
     record("card 恒 None(纯对话)", (r or {}).get("card") is None)
 
     print("[03 视觉轨 80 字上限 + 空回退]")
-    def _long_vision(prompt, url, media_type="image"):
+    def _long_vision(prompt, url, media_type="image", force=False):
         return "瓶" * 200
 
     _llm_mod.provider_client.vision = _long_vision
@@ -107,7 +114,7 @@ async def main():
            r is not None and len(r["reply"]) <= 80,
            f"len={len((r or {}).get('reply') or '')}")
 
-    def _empty_vision(prompt, url, media_type="image"):
+    def _empty_vision(prompt, url, media_type="image", force=False):
         return None
 
     _llm_mod.provider_client.vision = _empty_vision

@@ -55,6 +55,14 @@ def _llm_mode_enabled() -> bool:
         "XIAOZHU_LLM_MODE", "off").lower() in ("on", "1",
                                                "true")
 
+
+def _vision_mode_enabled() -> bool:
+    """G3 商品图理解视觉轨开关(默认 on——与知识库
+    KNOWLEDGE_MEDIA_LLM 相互独立, off 一键回归纯文本 chat)"""
+    return os.environ.get(
+        "XIAOZHU_VISION_MODE", "on").lower() in ("on", "1",
+                                                 "true")
+
 # 唤醒词与近似音容错(ASR 常见误听映射——mock 确定性)
 WAKE_WORDS = ("小竹", "小朱", "小珠", "小猪", "小竹竹",
               "小主", "晓竹")
@@ -2301,6 +2309,8 @@ class XiaozhuService:
         local_guardrail 合规过滤。
         """
         try:
+            if not _vision_mode_enabled():
+                return None
             if not page_context:
                 return None
             if str(page_context.get("page") or "") \
@@ -2333,7 +2343,8 @@ class XiaozhuService:
                 "口语化, 不超过70字, 不报价格数字。"
             ).format(str(product.get("name") or "这款产品"),
                      str(text or "").strip()[:60])
-            vision_reply = provider_client.vision(prompt, image)
+            vision_reply = provider_client.vision(
+                prompt, image, force=True)
             if not vision_reply:
                 return None
             reply = str(vision_reply).strip()[:80]

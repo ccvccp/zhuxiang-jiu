@@ -500,7 +500,8 @@ class LLMProviderClient:
         return vectors or None
 
     def vision(self, prompt: str, url: str,
-               media_type: str = "image") -> str | None:
+               media_type: str = "image",
+               force: bool = False) -> str | None:
         """多模态视觉理解(图片 GLM-4V / 视频 GLM-4V-Plus)
 
         OpenAI 兼容 content 数组格式: text + image_url/video_url;
@@ -510,12 +511,17 @@ class LLMProviderClient:
             prompt: 视觉理解指令(如"客观描述图片内容")
             url: 媒体地址(http/https 公网可达)
             media_type: "image" | "video"
+            force: True 时旁路 KNOWLEDGE_MEDIA_LLM 知识库开关,
+                仅要求 LLM key 在(调用方自持独立开关——如小竹
+                G3 商品图理解 XIAOZHU_VISION_MODE)
 
         Returns:
             模型回复文本; 未配置 key、URL 为空、请求失败、
             响应异常均返回 None。
         """
-        if not media_llm_enabled() or not (url or "").strip():
+        gate = (llm_enabled() if force
+                else media_llm_enabled())
+        if not gate or not (url or "").strip():
             return None
         from core.metrics import llm_timer
         api_key = os.environ["LLM_API_KEY"].strip()
