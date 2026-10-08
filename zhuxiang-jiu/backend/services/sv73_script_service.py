@@ -332,6 +332,7 @@ IP_PERSONAS = {
         "outfits": {
             "default": "assets/ip/roles/role_zhongnian_f.jpg",
             "autumn": "assets/ip/roles/role_zhongnian_f_autumn.jpg",
+            "winter": "assets/ip/roles/role_zhongnian_f_winter.jpg",
             "spring": "assets/ip/roles/role_zhongnian_f_spring.jpg"},
     },
     "role_zhongnian_m": {
@@ -348,6 +349,7 @@ IP_PERSONAS = {
         "outfits": {
             "default": "assets/ip/roles/role_zhongnian_m.jpg",
             "autumn": "assets/ip/roles/role_zhongnian_m_autumn.jpg",
+            "winter": "assets/ip/roles/role_zhongnian_m_winter.jpg",
             "spring": "assets/ip/roles/role_zhongnian_m_spring.jpg"},
     },
     "role_laonian_f": {
@@ -364,6 +366,7 @@ IP_PERSONAS = {
         "outfits": {
             "default": "assets/ip/roles/role_laonian_f.jpg",
             "autumn": "assets/ip/roles/role_laonian_f_autumn.jpg",
+            "winter": "assets/ip/roles/role_laonian_f_winter.jpg",
             "spring": "assets/ip/roles/role_laonian_f_spring.jpg"},
     },
     "role_laonian_m": {
@@ -380,6 +383,7 @@ IP_PERSONAS = {
         "outfits": {
             "default": "assets/ip/roles/role_laonian_m.jpg",
             "autumn": "assets/ip/roles/role_laonian_m_autumn.jpg",
+            "winter": "assets/ip/roles/role_laonian_m_winter.jpg",
             "spring": "assets/ip/roles/role_laonian_m_spring.jpg"},
     },
     "role_tong_f": {
@@ -395,6 +399,7 @@ IP_PERSONAS = {
         "outfits": {
             "default": "assets/ip/roles/role_tong_f.jpg",
             "autumn": "assets/ip/roles/role_tong_f_autumn.jpg",
+            "winter": "assets/ip/roles/role_tong_f_winter.jpg",
             "spring": "assets/ip/roles/role_tong_f_spring.jpg"},
     },
     "role_tong_m": {
@@ -410,6 +415,7 @@ IP_PERSONAS = {
         "outfits": {
             "default": "assets/ip/roles/role_tong_m.jpg",
             "autumn": "assets/ip/roles/role_tong_m_autumn.jpg",
+            "winter": "assets/ip/roles/role_tong_m_winter.jpg",
             "spring": "assets/ip/roles/role_tong_m_spring.jpg"},
     },
 }

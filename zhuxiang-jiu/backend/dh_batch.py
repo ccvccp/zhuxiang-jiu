@@ -125,6 +125,9 @@ DH_IMAGES = {
     "role_zhongnian_f_spring": (
         _ROLES / "role_zhongnian_f_spring.jpg",
         "/root/assets/ip/roles/role_zhongnian_f_spring.jpg"),
+    "role_zhongnian_f_winter": (
+        _ROLES / "role_zhongnian_f_winter.jpg",
+        "/root/assets/ip/roles/role_zhongnian_f_winter.jpg"),
     "role_zhongnian_m": (_ROLES / "role_zhongnian_m.jpg",
                          "/root/assets/ip/roles/role_zhongnian_m.jpg"),
     "role_zhongnian_m_autumn": (
@@ -133,6 +136,9 @@ DH_IMAGES = {
     "role_zhongnian_m_spring": (
         _ROLES / "role_zhongnian_m_spring.jpg",
         "/root/assets/ip/roles/role_zhongnian_m_spring.jpg"),
+    "role_zhongnian_m_winter": (
+        _ROLES / "role_zhongnian_m_winter.jpg",
+        "/root/assets/ip/roles/role_zhongnian_m_winter.jpg"),
     "role_laonian_f": (_ROLES / "role_laonian_f.jpg",
                        "/root/assets/ip/roles/role_laonian_f.jpg"),
     "role_laonian_f_autumn": (
@@ -141,6 +147,9 @@ DH_IMAGES = {
     "role_laonian_f_spring": (
         _ROLES / "role_laonian_f_spring.jpg",
         "/root/assets/ip/roles/role_laonian_f_spring.jpg"),
+    "role_laonian_f_winter": (
+        _ROLES / "role_laonian_f_winter.jpg",
+        "/root/assets/ip/roles/role_laonian_f_winter.jpg"),
     "role_laonian_m": (_ROLES / "role_laonian_m.jpg",
                        "/root/assets/ip/roles/role_laonian_m.jpg"),
     "role_laonian_m_autumn": (
@@ -149,6 +158,9 @@ DH_IMAGES = {
     "role_laonian_m_spring": (
         _ROLES / "role_laonian_m_spring.jpg",
         "/root/assets/ip/roles/role_laonian_m_spring.jpg"),
+    "role_laonian_m_winter": (
+        _ROLES / "role_laonian_m_winter.jpg",
+        "/root/assets/ip/roles/role_laonian_m_winter.jpg"),
 }
 # 兼容旧引用(缺省人设)
 DH_IMAGE_LOCAL = DH_IMAGES["zhuxiaomei"][0]
