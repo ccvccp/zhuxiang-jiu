@@ -331,6 +331,7 @@ IP_PERSONAS = {
         "allow_alcohol": True,
         "outfits": {
             "default": "assets/ip/roles/role_zhongnian_f.jpg",
+            "autumn": "assets/ip/roles/role_zhongnian_f_autumn.jpg",
             "spring": "assets/ip/roles/role_zhongnian_f_spring.jpg"},
     },
     "role_zhongnian_m": {
@@ -346,6 +347,7 @@ IP_PERSONAS = {
         "allow_alcohol": True,
         "outfits": {
             "default": "assets/ip/roles/role_zhongnian_m.jpg",
+            "autumn": "assets/ip/roles/role_zhongnian_m_autumn.jpg",
             "spring": "assets/ip/roles/role_zhongnian_m_spring.jpg"},
     },
     "role_laonian_f": {
@@ -361,6 +363,7 @@ IP_PERSONAS = {
         "allow_alcohol": True,
         "outfits": {
             "default": "assets/ip/roles/role_laonian_f.jpg",
+            "autumn": "assets/ip/roles/role_laonian_f_autumn.jpg",
             "spring": "assets/ip/roles/role_laonian_f_spring.jpg"},
     },
     "role_laonian_m": {
@@ -376,6 +379,7 @@ IP_PERSONAS = {
         "allow_alcohol": True,
         "outfits": {
             "default": "assets/ip/roles/role_laonian_m.jpg",
+            "autumn": "assets/ip/roles/role_laonian_m_autumn.jpg",
             "spring": "assets/ip/roles/role_laonian_m_spring.jpg"},
     },
     "role_tong_f": {
@@ -390,6 +394,7 @@ IP_PERSONAS = {
         "allow_alcohol": False,   # 广告法§40: 未成年人形象禁入酒类广告
         "outfits": {
             "default": "assets/ip/roles/role_tong_f.jpg",
+            "autumn": "assets/ip/roles/role_tong_f_autumn.jpg",
             "spring": "assets/ip/roles/role_tong_f_spring.jpg"},
     },
     "role_tong_m": {
@@ -404,6 +409,7 @@ IP_PERSONAS = {
         "allow_alcohol": False,   # 广告法§40: 未成年人形象禁入酒类广告
         "outfits": {
             "default": "assets/ip/roles/role_tong_m.jpg",
+            "autumn": "assets/ip/roles/role_tong_m_autumn.jpg",
             "spring": "assets/ip/roles/role_tong_m_spring.jpg"},
     },
 }
