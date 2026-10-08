@@ -318,6 +318,74 @@ class Drama84ScriptService:
             },
         }
 
+    # ---------- P1: 集成片登记 36号 content(76号组剧消费) ----------
+
+    async def register_episode(self, sid: str, ep_no: int,
+                               video: str,
+                               duration: float) -> dict:
+        """84号集成片 → 36号 content(episode_id 供 76号组剧;
+        状态恒 pending 走三审, sv73.storyboardId={sid}_ep{n})
+        """
+        series = self.get_series(sid)
+        if series is None:
+            raise KeyError(f"剧本不存在({sid})")
+        eps = series.get("episodes") or []
+        if not (1 <= ep_no <= len(eps)):
+            raise ValueError(f"集号越界(ep={ep_no})")
+        ep = eps[ep_no - 1]
+        # 幂等: 同 storyboardId 已登记直接返回
+        from repositories.promo_repository import PromoRepository
+        repo = PromoRepository()
+        rows = await repo.list_contents()
+        sbid = f"{sid}_ep{ep_no}"
+        for c in rows or []:
+            if ((c.get("sv73") or {}).get("storyboardId")
+                    == sbid):
+                return c
+        flaws = lint_series(series)
+        import datetime as _dt
+        content = {
+            "contentId": await repo.next_id("content"),
+            "contentGroupId": 0,
+            "hotspotId": int((series.get("hotspot") or {})
+                             .get("hotspotId") or 0),
+            "platform": "douyin",
+            "title": f"{series['title']}·第{ep_no}集 "
+                     f"{ep.get('title') or ''}".strip()[:40],
+            "body": " ".join(ln["text"] for ln in ep["lines"]),
+            "hashtags": "#独白短剧",
+            "cta": "",
+            "coverHint": "84号连续短剧(数字人分镜轮切)",
+            "complianceScore": (100 if not flaws else 60),
+            "complianceViolations": flaws,
+            "hardFail": [],
+            "requiresManualReview": bool(flaws),
+            "status": "pending",
+            "shortCode": "",
+            "receipt": {},
+            "scheduledAt": "",
+            "publishedAt": "",
+            "createdAt": _dt.datetime.now(
+                _dt.timezone.utc).isoformat(),
+            "sv73": {
+                "storyboardId": sbid,
+                "video": video,
+                "pages": [],
+                "audioTrack": "",
+                "totalDuration": duration,
+                "track": series.get("track") or "rule",
+                "bgmMood": "warm",
+                "persona": ",".join(sorted({
+                    ln["persona"] for ln in ep["lines"]})),
+                "shadow": False,
+                "template": "drama84_series",
+                "complianceScore": (100 if not flaws else 60),
+                "matchTop": series.get("title"),
+                "matchFallback": False,
+            },
+        }
+        return await repo.save_content(content)
+
     # ---------- schema fail-hard(73号 assert 同款纪律) ----------
 
     @staticmethod

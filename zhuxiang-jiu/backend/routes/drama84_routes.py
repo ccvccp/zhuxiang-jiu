@@ -67,6 +67,34 @@ async def generate_series(payload: SeriesGenerateRequest,
         raise HTTPException(status_code=409, detail=str(e)) from e
 
 
+class AttachEpisodeRequest(BaseModel):
+    ep: int = Field(ge=1, le=80, description="集号")
+    video: str = Field(max_length=300,
+                       description="成片路径(sv73_videos/d84_xxx_epN.mp4)")
+    duration: float = Field(75.0, gt=0, le=600,
+                            description="成片时长秒")
+
+
+@router.post("/api/drama84/series/{sid}/attach-episode")
+async def attach_episode(sid: str, payload: AttachEpisodeRequest,
+                         x_role: str | None = Header(None)):
+    """集成片登记 36号 content(P1: 76号组剧 episode_id 消费)"""
+    _require_admin(x_role)
+    _mode_guard()
+    try:
+        row = await _service.register_episode(
+            sid, payload.ep, payload.video, payload.duration)
+        return {"success": True, "data": {
+            "contentId": row.get("contentId"),
+            "storyboardId": ((row.get("sv73") or {})
+                             .get("storyboardId")),
+            "status": row.get("status")}}
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+
 @router.get("/api/drama84/series")
 async def list_series(x_role: str | None = Header(None)):
     """剧本清单(观测面)"""

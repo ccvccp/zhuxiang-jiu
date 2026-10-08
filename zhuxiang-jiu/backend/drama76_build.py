@@ -39,7 +39,9 @@ def _sid(cid: str) -> str:
                        input=pipe, capture_output=True, text=True,
                        timeout=60, encoding="utf-8", errors="ignore")
     sid = (r.stdout or "").strip()
-    if not sid.startswith("sv73_"):
+    # 84号剧集集成片 storyboardId 为 d84_ 前缀(多角色分镜轮切,
+    # 本地成片 d84_{sid}_ep{n}.mp4 同目录可寻)——与 sv73_ 并存
+    if not (sid.startswith("sv73_") or sid.startswith("d84_")):
         print(f"[fail] cid {cid} 查询失败: {r.stdout} {r.stderr[-200:]}")
         sys.exit(1)
     return sid
@@ -66,17 +68,20 @@ def main() -> int:
     eps = []
     for i, cid in enumerate(cids, 1):
         sid = _sid(cid)
-        local = Path("sv73_videos") / f"{sid}_mix.mp4"
+        # 84号集成片文件名=d84_..._ep{n}.mp4(无 _mix 后缀)
+        fname = (f"{sid}.mp4" if sid.startswith("d84_")
+                 else f"{sid}_mix.mp4")
+        local = Path("sv73_videos") / fname
         if not local.is_file():
             print(f"[fail] 本地成片缺失: {local}")
             return 1
-        url = f"/videos/drama/{sid}_mix.mp4"
+        url = f"/videos/drama/{fname}"
         eps.append({"episode_id": cid, "title": titles[i - 1] if
                     i - 1 < len(titles) else f"第{i}集",
                     "video_url": url,
                     "duration_seconds": 22,
                     "cliff_note": ""})
-        print(f"  ep{i}: cid={cid} {sid}_mix.mp4 "
+        print(f"  ep{i}: cid={cid} {fname} "
               f"({local.stat().st_size // 1024}KB)")
 
     # ① 上传成片到 dist
