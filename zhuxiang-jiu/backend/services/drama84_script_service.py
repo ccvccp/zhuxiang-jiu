@@ -219,7 +219,10 @@ class Drama84ScriptService:
                     f"集数: {episodes}\n"
                     + (f"剧名倾向: {title}\n" if title else ""))
             raw = provider_client.chat(
-                system, user, temperature=0.5, model=model)
+                system, user, temperature=0.5, model=model,
+                # 大 JSON 单次成形(6 集全量)——全局默认超时不够,
+                # 生产实证 glm 主档 read timeout 降级; 专用 90s
+                timeout=90)
             if not raw:
                 return None
             m = re.search(r"\{[\s\S]*\}", raw)
@@ -246,9 +249,27 @@ class Drama84ScriptService:
         na = IP_PERSONAS[a]["name"]
         nb = IP_PERSONAS[b]["name"]
         stages = ("困境", "转机", "前行", "考验", "翻盘", "圆梦")
+        # 台词随 stage 变化(每集有差异——固定模板硬循环会让
+        # 每集逐字相同, 观感不可接受)
+        beat_lines = {
+            "困境": [("焦急", "这事比想象中难办"),
+                     ("委屈", "难道就这样认输了")],
+            "转机": [("惊喜", "原来转机就在眼前"),
+                     ("振奋", "这一步走对了")],
+            "前行": [("坚定", "认准的路就走下去"),
+                     ("感概", "一路走来真不容易")],
+            "考验": [("紧张", "这次的难关不简单"),
+                     ("沉着", "越乱越要稳得住")],
+            "翻盘": [("扬眉", "终于等到这一天"),
+                     ("欣喜", "苦日子熬出头了")],
+            "圆梦": [("欣慰", "竹香酒馆守住了"),
+                     ("感恩", "谢谢一路撑住的人")],
+        }
         eps = []
         for i in range(1, episodes + 1):
             stage = stages[min(i - 1, len(stages) - 1)]
+            va = beat_lines[stage][0]
+            vb = beat_lines[stage][1]
             eps.append({
                 "ep": i,
                 "title": f"{ht}·{stage}",
@@ -260,14 +281,14 @@ class Drama84ScriptService:
                 },
                 "lines": [
                     {"persona": a, "character": na,
-                     "emotion": "焦急", "scene": "竹林小院",
-                     "text": f"这{ht}的事, 比想象中难办"},
+                     "emotion": va[0], "scene": "竹林小院",
+                     "text": va[1]},
                     {"persona": b, "character": nb,
                      "emotion": "沉稳", "scene": "竹林小院",
                      "text": "别慌, 我有一坛竹香老酒"},
                     {"persona": a, "character": na,
-                     "emotion": "惊讶", "scene": "竹林小院",
-                     "text": "就凭这杯酒, 能行吗"},
+                     "emotion": vb[0], "scene": "竹林小院",
+                     "text": vb[1]},
                     {"persona": b, "character": nb,
                      "emotion": "笃定", "scene": "竹林小院",
                      "text": "竹香入喉, 办法就有了, 且看下回"},
