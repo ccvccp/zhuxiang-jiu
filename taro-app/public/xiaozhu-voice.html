@@ -1520,13 +1520,37 @@ function sendFromInput() {
   inp.value = "";
   sendText(text);
 }
+/* G3 商品图理解: 从父页面路由提取页面语境(iframe 与主站
+   同源, hash/browser 路由双兼容)——产品页
+   #/pages/product-detail/index?id=xx → {page:'product-detail',
+   productId:xx}; 非产品页/读不到返回 undefined(JSON.stringify
+   自动忽略, 零开销) */
+function pageCtx() {
+  try {
+    var href = (window.parent && window.parent.location
+                && window.parent.location.href) || "";
+    var m = href.match(/product-detail\/index\?([^#]*)/);
+    if (!m) return undefined;
+    var pid = "";
+    var pairs = m[1].split("&");
+    for (var i = 0; i < pairs.length; i++) {
+      var kv = pairs[i].split("=");
+      if (kv[0] === "id" || kv[0] === "productId") {
+        pid = decodeURIComponent(kv[1] || "");
+        break;
+      }
+    }
+    if (!pid) return undefined;
+    return { page: "product-detail", productId: pid };
+  } catch (e) { return undefined; }
+}
 function sendText(text) {
   if (!S.sid || S.pending) { showToast(S.pending ? "上一轮处理中…" : "会话未开启"); return; }
   appendUser(text, "text");
   setPending(true);
   showTyping();
   apiFetch("/api/xiaozhu/sessions/" + S.sid + "/text", {
-    method: "POST", body: JSON.stringify({ text: wakePrefix(ctxInject(text)) })
+    method: "POST", body: JSON.stringify({ text: wakePrefix(ctxInject(text)), pageContext: pageCtx() })
   }).then(function (j) {
     setPending(false); removeTyping();
     if (!j || j.success === false) { appendBot((j && (j.error || j.detail)) || "指令失败", null, null, "__err__"); return; }
@@ -1546,7 +1570,7 @@ function sendVoice(b64, durationSec) {
       /* 手动录音(长按/点击麦克风)=tap 语义: 按下即明确交互,
          免唤醒直接执行("给我买42度500ml的酒"不再要求叫小竹);
          免提后台聆听不传——反语音霸权红线不变 */
-      mode: S.handfree ? undefined : "tap" })
+      mode: S.handfree ? undefined : "tap", pageContext: pageCtx() })
   }).then(handleVoiceResp).catch(function (e) { setPending(false); removeTyping(); setMicStatus("云端识别失败"); turnError(e); scheduleHandfree(1200); });
 }
 /* P1 流式轨提交: 转写已在流式会话完成(说完了就出字),
@@ -1605,6 +1629,7 @@ function postVoiceTranscript(text, durationSec, skipSelfCheck) {
     body: JSON.stringify({ textTranscript: wakePrefix(ctxInject(text)), filename: "audio.wav",
       durationSec: Math.round(durationSec * 10) / 10,
       streamBytes: stBytes, mode: S.handfree ? undefined : "tap",
+      pageContext: pageCtx(),
       /* 唤醒标志(21:00:35 实证: 唤醒撞 WS 断连时 member 窗
          点不亮→真指令 not_woken; 窗开/已唤醒=唤醒后轮次,
          服务端据此点亮窗, 不依赖 WS 连接健康) */

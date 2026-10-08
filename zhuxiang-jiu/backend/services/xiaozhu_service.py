@@ -1028,6 +1028,7 @@ class XiaozhuService:
                            wakeup_free: bool = False,
                            transcript: str = None,
                            stream_bytes: int = 0,
+                           page_context: dict = None,
                            ) -> dict:
         """语音轮次全链: ASR(35号复用)→唤醒→指令路由→直达
 
@@ -1041,6 +1042,10 @@ class XiaozhuService:
         transcript(P1 流式轨): 百炼实时识别的最终文本——跳过
         重复转写直进指令链(误听修正/唤醒/audioMeta 全保留);
         stream_bytes 为流式 PCM 累计字节(audioMeta 观测用)。
+
+        page_context(G3 商品图理解): 前端随轮上报的页面
+        语境({page, productId}——产品页问外观类问题时
+        视觉轨取主图理解, 详见 _vision_product_qa)。
 
         Raises:
             KeyError: 会话不存在/已关闭
@@ -1120,11 +1125,16 @@ class XiaozhuService:
         return await self._handle_text_internal(
             session, asr["text"], channel="voice",
             audio_meta=audio_meta,
-            wakeup_free=wakeup_free)
+            wakeup_free=wakeup_free,
+            page_context=page_context)
 
     async def handle_text(self, session_id: int,
-                          text: str) -> dict:
+                          text: str,
+                          page_context: dict = None,
+                          ) -> dict:
         """文本轮次(与语音同链——键盘兜底/无障碍入口)
+
+        page_context 同 handle_voice(G3 商品图理解页面语境)。
 
         Raises:
             KeyError: 会话不存在/已关闭
@@ -1134,7 +1144,8 @@ class XiaozhuService:
         if not str(text or "").strip():
             raise ValueError("文本内容不能为空")
         return await self._handle_text_internal(
-            session, str(text), channel="text")
+            session, str(text), channel="text",
+            page_context=page_context)
 
     # --------------------------------------------------------
     # 内部: 文本→唤醒→指令→直达
@@ -1186,6 +1197,7 @@ class XiaozhuService:
                                     channel: str,
                                     audio_meta: dict = None,
                                     wakeup_free: bool = False,
+                                    page_context: dict = None,
                                     ) -> dict:
         import time
         started = time.monotonic()
@@ -1620,7 +1632,8 @@ class XiaozhuService:
                 saved_smart = await self._exec_smart_intent(
                     session, channel, text, command_text,
                     smart, audio_meta,
-                    wakeup_free=wakeup_free)
+                    wakeup_free=wakeup_free,
+                    page_context=page_context)
                 if saved_smart is not None:
                     # v92-P0b chat 轨评分补缺(原直 return 绕过
                     # _evolve_turn——smart 轮零评分记录, Bandit
@@ -2019,6 +2032,7 @@ class XiaozhuService:
                                  smart: dict,
                                  audio_meta: dict,
                                  wakeup_free: bool = False,
+                                 page_context: dict = None,
                                  ) -> dict | None:
         """智能意图执行(数字仍由执行层产生——防幻觉红线)
 
@@ -2202,6 +2216,20 @@ class XiaozhuService:
                         {"audioMeta": audio_meta,
                          "commandText": command_text,
                          "track": "llm_dialog"})
+            # G3 商品图理解(小竹Agent方案真缺口·提级首位):
+            # 产品页问外观类问题(颜色/包装/防伪...)——纯文本
+            # LLM 看不到图必编造; page_context 随轮上报后视觉
+            # 轨取主图 glm-4v 理解应答(fail-soft: 未命中/视觉
+            # 失败返回 None 回退下方 chat 原轨, 零回归)
+            _vision = await self._vision_product_qa(
+                command_text, page_context, session)
+            if _vision is not None:
+                return await self._save_turn(
+                    session, channel, text, "chat", _vision,
+                    {"audioMeta": audio_meta,
+                     "commandText": command_text,
+                     "track": "vision_dialog",
+                     "visionUsed": True})
             # 防幻觉红线: LLM reply 禁数字(prompt 约束),
             # 不产卡片——纯对话存在感
             # v83-B 虚假执行守卫(07:27:42 实证: 应答复读轮
@@ -2246,6 +2274,83 @@ class XiaozhuService:
                  "commandText": command_text,
                  "track": "llm_dialog"})
         return None  # unknown/无语境 → 规则轨兜底
+
+    # --------------------------------------------------------
+    # G3 商品图理解(小竹Agent方案甄别后真缺口·用户提级首位)
+    # --------------------------------------------------------
+
+    # 视觉触发词表: 外观/视觉类问题信号(命中才进视觉轨——
+    # 产品页普通问题"多少钱/几度"不触发, 省一次 glm-4v 调用)
+    _VISION_TRIGGER_WORDS = (
+        "颜色", "什么色", "包装", "防伪", "瓶身", "外观",
+        "图案", "样子", "长什么样", "什么样", "盒子", "礼盒",
+        "标志", "商标", "logo", "设计", "标签", "酒标",
+        "瓶盖", "瓶型", "字体", "好看吗", "图片", "照片",
+        "长啥样", "啥样",
+    )
+
+    async def _vision_product_qa(
+            self, text: str, page_context: dict | None,
+            session: dict) -> dict | None:
+        """产品页视觉问答: 主图 glm-4v 理解注入回复
+
+        触发条件(全满足): page_context.page=='product-detail'
+        + productId + 文本命中视觉词表 + 商品主图存在 +
+        glm-4v 理解成功; 任一失败返回 None(回退 chat 原轨,
+        fail-soft 零回归)。输出与 chat 轨同规: ≤80 字 +
+        local_guardrail 合规过滤。
+        """
+        try:
+            if not page_context:
+                return None
+            if str(page_context.get("page") or "") \
+                    != "product-detail":
+                return None
+            pid = str(page_context.get("productId")
+                      or "").strip()
+            if not pid:
+                return None
+            if not any(w in (text or "")
+                       for w in self._VISION_TRIGGER_WORDS):
+                return None
+            from repositories.product_repository import (
+                ProductRepository,
+            )
+            product = await ProductRepository() \
+                .get_by_id(pid)
+            if not product:
+                return None
+            image = ((product.get("images") or {})
+                     .get("main") or "").strip()
+            if not image:
+                return None
+            from services.llm_client import provider_client
+            prompt = (
+                "你是酒类电商导购小竹。这是一款名为「{}」"
+                "的商品主图。请根据图片如实回答用户问题: {}。"
+                "要求: 只描述图中真实可见的内容(颜色/瓶型/"
+                "包装/标签文字等), 看不清的一律不猜不编, "
+                "口语化, 不超过70字, 不报价格数字。"
+            ).format(str(product.get("name") or "这款产品"),
+                     str(text or "").strip()[:60])
+            vision_reply = provider_client.vision(prompt, image)
+            if not vision_reply:
+                return None
+            reply = str(vision_reply).strip()[:80]
+            # 同 chat 轨合规管道(广告法绝对化等替换)
+            from services.local_guardrail_service import (
+                get_guardrail,
+            )
+            reply = get_guardrail().filter_output(
+                reply,
+                {"sessionId": session.get("sessionId", ""),
+                 "memberId": session.get("memberId", 0)})
+            if not reply.strip():
+                return None
+            return {"reply": reply, "card": None}
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("vision48_product_qa_skip: %s", exc)
+            return None
 
     async def _voice50_turn_hook(self, session: dict,
                                   channel: str,
@@ -4891,6 +4996,9 @@ class XiaozhuService:
             # evolution 影子信号 executedCount 恒 0, reward 上限
             # 被压到 0.2, positive 恒 False, 影子永不达标)
             "executed": bool(result.get("executed", False)),
+            # G3 商品图理解: 视觉轨留痕(vision_dialog 轮 True)
+            "visionUsed": bool(extras.get("visionUsed",
+                                          False)),
             "latencyMs": extras.get("latencyMs") or 0.0,
             "wakeScore": round(_ws, 3),
             # 48号 P3-2: EMA 轨留痕(rule 默认/emaPass/emaBlock/

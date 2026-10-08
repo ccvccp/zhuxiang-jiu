@@ -246,7 +246,12 @@ async def voice_turn(session_id: int, body: dict,
             wakeup_free=(str(body.get("mode") or "")
                          == "tap"),
             transcript=transcript or None,
-            stream_bytes=int(body.get("streamBytes") or 0))
+            stream_bytes=int(body.get("streamBytes") or 0),
+            # G3 商品图理解: 页面语境随轮透传(仅 dict)
+            page_context=(
+                body.get("pageContext")
+                if isinstance(body.get("pageContext"),
+                              dict) else None))
         # 82号 P3: 节奏参数注入(fail-soft——异常时响应不带
         # voice82 字段, 前端走内置默认, 对话零影响)
         from services.voice82_evolution_service import wire_params
@@ -266,7 +271,12 @@ async def text_turn(session_id: int, body: dict):
     try:
         from services.xiaozhu_service import XiaozhuService
         return await XiaozhuService().handle_text(
-            session_id, str(body.get("text") or ""))
+            session_id, str(body.get("text") or ""),
+            # G3 商品图理解: 页面语境随轮透传(仅 dict)
+            page_context=(
+                body.get("pageContext")
+                if isinstance(body.get("pageContext"),
+                              dict) else None))
     except Exception as e:
         raise _handle(e) from e
 
