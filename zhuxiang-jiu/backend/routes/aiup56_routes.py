@@ -15,7 +15,8 @@
     POST /api/aiup56/proposals/{id}/audit 审计Agent(admin, P3)
     GET  /api/aiup56/proposals/{id}/panel  审批面板视图(admin, 观测面, P3)
     POST /api/aiup56/proposals/{id}/review 人类审批(admin, P3)
-    POST /api/aiup56/proposals/{id}/deliver  资产包交付(admin, P4)
+    POST /api/aiup56/proposals/{id}/auto-review 受控自治智能判断(admin, 需 AIUP56_AUTO_REVIEW=on)
+    POST /api/aiup56/proposals/{id}/deliver  资产包交付(admin, P4——含交付前验证)
     POST /api/aiup56/proposals/{id}/rollback 语义回滚(admin, P4)
     POST /api/aiup56/feedback/collect     决策回流补标(admin, P4)
     GET  /api/aiup56/feedback/stats        回流统计(admin, 观测面, P4)
@@ -321,13 +322,36 @@ async def review_proposal(
                             detail=str(exc))
 
 
+@router.post("/proposals/{proposal_id}/auto-review")
+async def auto_review_proposal(
+        proposal_id: int,
+        x_role: str | None = Header(default=None,
+                                    alias="X-Role")):
+    """受控自治·智能判断自主审批(低风险升级免人工
+    干预——五判据全绿自主批准, 任一红灯/escalate 级
+    转人工面板; 需 AIUP56_AUTO_REVIEW=on)"""
+    _require_admin(x_role)
+    from services.aiup56_review_service import (
+        Aiup56ReviewService,
+    )
+    try:
+        return await Aiup56ReviewService().auto_review(
+            int(proposal_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc))
+
+
 @router.post("/proposals/{proposal_id}/deliver")
 async def deliver_proposal(
         proposal_id: int,
         x_role: str | None = Header(default=None,
                                     alias="X-Role")):
     """资产包交付(versioned 出口——人工下载后走
-    既有 CI; 无审批不可交付铁律)"""
+    既有 CI; 无审批不可交付铁律+交付前验证)"""
     _require_admin(x_role)
     from services.aiup56_deliver_service import (
         Aiup56DeliverService,

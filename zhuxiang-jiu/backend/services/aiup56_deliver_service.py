@@ -58,6 +58,23 @@ class Aiup56DeliverService:
                 f"(需 approved 方可交付——无审批"
                 f"不可交付铁律)")
 
+        # 交付前验证(升级/修改后先验证无瑕疵——受控自治
+        # 配套: 交付出口复核沙箱/审计/资产三面, 任一瑕疵
+        # 阻断交付留痕, 人工检查后重试)
+        verify = await self._verify_before_deliver(
+            proposal)
+        if not verify["passed"]:
+            await self._track(proposal_id,
+                              "deliver_verify_failed",
+                              verify)
+            raise ValueError(
+                "交付前验证未通过(瑕疵项: "
+                + "; ".join(
+                    f"{c['key']}({c['detail']})"
+                    for c in verify["checks"]
+                    if not c["passed"])
+                + ")——交付阻断, 详情见事件流水")
+
         # 资产包组装(versioned)
         assets = await self.repo.list_assets(
             proposal_id=int(proposal_id))
@@ -127,6 +144,78 @@ class Aiup56DeliverService:
             "note": "资产包交付(versioned 出口)——"
                     "灰度跟踪窗口开启, 回流 P4 接管",
             "deliveredAt": ts(),
+        }
+
+    # ============================================================
+    # 交付前验证(先验证无瑕疵再交付)
+    # ============================================================
+
+    async def _verify_before_deliver(self,
+                                     proposal: dict
+                                     ) -> dict:
+        """交付前验证(沙箱/审计/资产三面复核)
+
+        三判据(对齐 auto_review 智能判断口径):
+            ① 沙箱三关全绿(gates 全 passed)
+            ② 审计通过(auditVerdict=passed)
+            ③ 资产完整(drafts 非空+回滚预案齐备)
+        """
+        proposal_id = int(proposal.get("proposalId")
+                          or 0)
+        checks = []
+
+        # ① 沙箱三关(重读实证——平铺三关字段)
+        sandboxes = await self.repo.list_sandboxes(
+            proposal_id=proposal_id)
+        sb = sandboxes[0] if sandboxes else {}
+        gates = [
+            sb.get("staticGate") or {},
+            sb.get("budgetGate") or {},
+            sb.get("valueGate") or {},
+        ]
+        gates = [g for g in gates if g]
+        gates_all_pass = bool(gates) and all(
+            g.get("passed") for g in gates)
+        checks.append({
+            "key": "sandboxGreen",
+            "passed": gates_all_pass,
+            "detail": "verdict={} 三关 {}/{}".format(
+                sb.get("verdict") or "-",
+                sum(1 for g in gates
+                    if g.get("passed")),
+                len(gates))})
+
+        # ② 审计结论
+        audit_ok = (proposal.get("auditVerdict")
+                    == "passed")
+        checks.append({
+            "key": "auditPassed",
+            "passed": audit_ok,
+            "detail": f"verdict="
+                      f"{proposal.get('auditVerdict')}"})
+
+        # ③ 资产完整(drafts+回滚预案)
+        assets = await self.repo.list_assets(
+            proposal_id=proposal_id)
+        asset = assets[0] if assets else {}
+        drafts = asset.get("drafts") or []
+        rollback_plans = [
+            t.get("rollbackPlan")
+            for t in proposal.get("tasks") or []]
+        rollback_ok = bool(drafts) and all(
+            rollback_plans)
+        checks.append({
+            "key": "assetComplete",
+            "passed": rollback_ok,
+            "detail": f"drafts={len(drafts)} "
+                      f"回滚预案 "
+                      f"{sum(1 for p in rollback_plans if p)}"
+                      f"/{len(rollback_plans)}"})
+
+        return {
+            "passed": all(c["passed"] for c in checks),
+            "checks": checks,
+            "verifiedAt": ts(),
         }
 
     # ============================================================

@@ -19,9 +19,17 @@ QC(计划 §九 P3): 无审批不可交付(架构断言
         ④ 知悉预算消耗
     - escalate 级: 双人复核(reviewer + second)
       ——两人均批准方可 approved
+
+受控自治(P5 后续方向③落地——auto_review):
+    智能判断五判据全绿的低风险升级, Agent 自主
+    批准(reviewer=aiup56-auto-agent, 确认清单由
+    实证判据支撑); 任一判据红灯/escalate 级 →
+    转人工面板(铁律不破)。开关 AIUP56_AUTO_REVIEW
+    (默认 off——off 时零行为变化)。
 """
 
 import logging
+import os
 
 from core.helpers import ts
 
@@ -32,6 +40,16 @@ from repositories.aiup56_repository import (
 logger = logging.getLogger("aiup56_review_service")
 
 MODEL_VERSION = "v1-aiup56-review"
+
+# 受控自治开关(AIUP56_AUTO_REVIEW=on 时智能判断
+# 自主审批可用; 默认 off 保持终审人工铁律)
+AUTO_REVIEWER = "aiup56-auto-agent"
+
+
+def auto_review_enabled() -> bool:
+    """受控自治开关(AIUP56_AUTO_REVIEW)"""
+    return os.environ.get(
+        "AIUP56_AUTO_REVIEW", "off") == "on"
 
 # 强制确认清单(关键项——全勾选方可受理)
 REQUIRED_CONFIRMATIONS = (
@@ -230,6 +248,150 @@ class Aiup56ReviewService:
                     "(deliver 端点)",
         })
         return result
+
+    # ============================================================
+    # 受控自治: 智能判断自主审批(P5 后续方向③)
+    # ============================================================
+
+    async def auto_review(self, proposal_id: int) -> dict:
+        """智能判断自主审批(低风险升级免人工干预)
+
+        五判据(全绿才自主通过——Agent 侧实证, 非形式勾选):
+            ① 非 escalate 级(dualReview=False——
+               高风险双人复核提案永不自主)
+            ② 沙箱三关全绿(testVerdict=passed)
+            ③ 审计通过(auditVerdict=passed 无否决)
+            ④ 预算封顶内(budgetSpent<=budgetCap)
+            ⑤ 资产就绪(drafts 非空)
+
+        通过 → 复用 review() 管道落 approved(留痕
+        reviewer=aiup56-auto-agent+判据快照);
+        任一红灯 → needsManual=True 转人工面板。
+
+        Raises:
+            KeyError: 提案不存在
+            ValueError: 开关关闭/状态机非法(非 audited)
+        """
+        if not auto_review_enabled():
+            raise ValueError(
+                "受控自治未开启(AIUP56_AUTO_REVIEW=off)"
+                "——终审人工铁律, 请走人工审批面板")
+
+        proposal = await self.repo.get_proposal(
+            int(proposal_id))
+        if proposal is None:
+            raise KeyError(f"提案 {proposal_id} 不存在")
+        if proposal.get("status") != "audited":
+            raise ValueError(
+                f"提案状态 {proposal.get('status')}"
+                f"(需 audited 方可审批)")
+
+        # ---- 智能判断五判据(实证复核——非信任落库值) ----
+        checks = []
+
+        # ① escalate 级判定
+        dual = bool(proposal.get("dualReview"))
+        checks.append({
+            "key": "notEscalated", "passed": not dual,
+            "detail": ("escalate 级双人复核提案——"
+                       "永不自主审批" if dual
+                       else "常规风险档")})
+
+        # ② 沙箱三关结论(重读沙箱记录实证——
+        # 记录为平铺三关 staticGate/budgetGate/valueGate)
+        sandboxes = await self.repo.list_sandboxes(
+            proposal_id=int(proposal_id))
+        sb = sandboxes[0] if sandboxes else {}
+        gates = [
+            sb.get("staticGate") or {},
+            sb.get("budgetGate") or {},
+            sb.get("valueGate") or {},
+        ]
+        gates = [g for g in gates if g]
+        gates_all_pass = bool(gates) and all(
+            g.get("passed") for g in gates)
+        checks.append({
+            "key": "sandboxGreen",
+            "passed": (gates_all_pass
+                       and proposal.get("testVerdict")
+                       == "passed"),
+            "detail": "沙箱 verdict={}/三关 {}/{}".format(
+                sb.get("verdict") or "-",
+                sum(1 for g in gates
+                    if g.get("passed")),
+                len(gates))})
+
+        # ③ 审计结论(重读审计层记录实证)
+        layers = proposal.get("auditLayers") or {}
+        critical = any(
+            l.get("critical") for l
+            in (layers.values() if isinstance(
+                layers, dict) else layers)
+            if isinstance(l, dict))
+        checks.append({
+            "key": "auditPassed",
+            "passed": (proposal.get("auditVerdict")
+                       == "passed" and not critical),
+            "detail": f"审计 verdict="
+                      f"{proposal.get('auditVerdict')}/"
+                      f"critical={critical}"})
+
+        # ④ 预算封顶
+        spent = float(proposal.get("budgetSpent") or 0)
+        cap = float(proposal.get("budgetCap") or 0)
+        checks.append({
+            "key": "budgetWithinCap",
+            "passed": spent <= cap,
+            "detail": f"预算 {spent}/{cap}"})
+
+        # ⑤ 资产就绪(编码产物存在)
+        assets = await self.repo.list_assets(
+            proposal_id=int(proposal_id))
+        asset = assets[0] if assets else {}
+        drafts = asset.get("drafts") or []
+        checks.append({
+            "key": "assetReady",
+            "passed": bool(drafts),
+            "detail": f"资产 drafts={len(drafts)}"})
+
+        all_green = all(c["passed"] for c in checks)
+
+        # ---- 自主批准: 复用 review 管道(同款留痕) ----
+        if all_green:
+            review = await self.review(
+                int(proposal_id),
+                reviewer=AUTO_REVIEWER,
+                approved=True,
+                confirmations=list(
+                    REQUIRED_CONFIRMATIONS),
+                note="受控自治·智能判断五判据全绿自主批准: "
+                     + "; ".join(
+                         f"{c['key']}({c['detail']})"
+                         for c in checks),
+            )
+            review.update({
+                "autoApproved": True,
+                "needsManual": False,
+                "checks": checks,
+            })
+            return review
+
+        # ---- 转人工(任一红灯) ----
+        await self._track(proposal_id, "auto_review", {
+            "autoApproved": False,
+            "needsManual": True,
+            "checks": checks,
+        })
+        return {
+            "success": True,
+            "proposalId": int(proposal_id),
+            "autoApproved": False,
+            "needsManual": True,
+            "status": proposal.get("status"),
+            "checks": checks,
+            "note": "智能判断存在红灯——转人工审批面板"
+                    "(终审人工铁律)",
+        }
 
     # --------------------------------------------------------
     # 审批记录仓储(reviews 表)
