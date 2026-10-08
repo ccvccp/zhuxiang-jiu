@@ -100,8 +100,13 @@ _ROLES = _ASSET_IP / "roles"
 DH_IMAGES = {
     "zhuxiaomei": (_ASSET_IP / "zhuxiaomei_front.jpg",
                    "/root/assets/ip/zhuxiaomei_front.jpg"),
+    "zhuxiaomei_spring": (_ASSET_IP / "zhuxiaomei_spring.jpg",
+                          "/root/assets/ip/zhuxiaomei_spring.jpg"),
     "xiaozhushuaige": (_ASSET_IP / "xiaozhushuaige_front.jpg",
                        "/root/assets/ip/xiaozhushuaige_front.jpg"),
+    "xiaozhushuaige_spring": (_ASSET_IP / "xiaozhushuaige_spring.jpg",
+                              "/root/assets/ip/"
+                              "xiaozhushuaige_spring.jpg"),
     "role_zhongnian_f": (_ROLES / "role_zhongnian_f.jpg",
                          "/root/assets/ip/roles/role_zhongnian_f.jpg"),
     "role_zhongnian_m": (_ROLES / "role_zhongnian_m.jpg",
@@ -116,9 +121,24 @@ DH_IMAGE_LOCAL = DH_IMAGES["zhuxiaomei"][0]
 DH_IMAGE_REMOTE = DH_IMAGES["zhuxiaomei"][1]
 
 
-def dh_image_for(persona: str) -> str:
-    """storyboard persona → 远端基准图路径(未注册人设回落竹小妹)"""
+def dh_image_for(persona: str,
+                 outfit: str = "default") -> str:
+    """storyboard persona(+outfit) → 远端基准图路径
+
+    outfit="spring" 等装束档 → "{persona}_{outfit}" 键(2026-10-09
+    IP 双主角春节装入列); 档位未注册回落该人设常装, 人设未注册
+    回落竹小妹(fail-soft 双层)。
+    """
+    if outfit and outfit != "default":
+        key = f"{persona}_{outfit}"
+        if key in DH_IMAGES:
+            return DH_IMAGES[key][1]
     return DH_IMAGES.get(persona, DH_IMAGES["zhuxiaomei"])[1]
+
+
+# 装束档全局(--outfit 注入; "default"=常装, "spring"=春节装——
+# 2026-10-09 IP 双主角春节照入列)
+OUTFIT = "default"
 # 远端布局(2026-10-01 Pro 迁移: SadTalker 挪入系统盘随镜像, 数据盘
 # /root/autodl-tmp 不再依赖——Pro create 全新实例无数据盘)
 DH_SADTALKER_DIR = "/root/SadTalker"
@@ -348,7 +368,7 @@ def build_one(ssh, sid: str, token: str, key: str) -> bool:
 import importlib.util, json, os
 from pathlib import Path
 os.environ['SV73_VIDEO_DIR'] = '{REMOTE_ROOT}'
-os.environ['SV73_DH_IMAGE'] = '{dh_image_for(sb.get("persona") or "zhuxiaomei")}'
+os.environ['SV73_DH_IMAGE'] = '{dh_image_for(sb.get("persona") or "zhuxiaomei", OUTFIT)}'
 os.environ['SV73_DH_MODE'] = 'real'
 os.environ['SV73_SADTALKER_DIR'] = '{DH_SADTALKER_DIR}'
 spec = importlib.util.spec_from_file_location("dh", "{REMOTE_SVC}")
@@ -440,12 +460,19 @@ def main() -> int:
                     help="容器实例Pro uuid(缺省读 ADH_INSTANCE_UUID env——"
                          "create 成功时 setx 自动持久化)——snapshot 动态"
                          "取 SSH 连接, 跑批后 API power_off")
+    ap.add_argument("--outfit", default="default",
+                    help="装束档(default=常装, spring=春节装——IP 双主角"
+                         "2026-10-09 入列; 档位未注册回落常装)")
     args = ap.parse_args()
     sids = [s.strip() for s in
             (args.sids or args.sid or "").split(",") if s.strip()]
     if not sids:
         print(__doc__)
         return 2
+    global OUTFIT
+    OUTFIT = (args.outfit or "default").strip()
+    if OUTFIT != "default":
+        print(f"[装束] {OUTFIT}")
 
     # 余额止损(2026-10-01 实证 wallet/balance; Token 未配则跳过)
     bal = wallet_balance()

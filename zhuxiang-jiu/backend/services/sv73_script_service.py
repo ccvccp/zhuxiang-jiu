@@ -281,6 +281,11 @@ IP_PERSONAS = {
             "知识; 从不劝酒, 不做功效宣称, 不引用权威背书与研究数据, "
             "始终强调理性饮酒"),
         "voice": "tongtong",
+        # 2026-10-09 春节装束(素材 D:\网站素材图\竹小妹\竹小妹春节
+        # 节日服装照入库; dh_batch --outfit spring 选档出片)
+        "outfits": {
+            "default": "assets/ip/zhuxiaomei_front.jpg",
+            "spring": "assets/ip/zhuxiaomei_spring.jpg"},
     },
     # 小竹帅哥(2026-10-05 第二人设): 基准图 assets/ip/
     # xiaozhushuaige_front.jpg(竹林帅哥解说竹奕酒定版图); TTS 音色
@@ -295,6 +300,10 @@ IP_PERSONAS = {
             "酒的品饮心得; 从不劝酒, 不做功效宣称, 不引用权威背书与"
             "研究数据, 始终强调理性饮酒"),
         "voice": "xiaochen",
+        # 2026-10-09 春节装束(同竹小妹批次)
+        "outfits": {
+            "default": "assets/ip/xiaozhushuaige_front.jpg",
+            "spring": "assets/ip/xiaozhushuaige_spring.jpg"},
     },
     # 网站角色数字人形象库(2026-10-06 P0, 素材 D:\网站角色 12 图入库
     # assets/ip/roles/): 6 角色×2 装扮(常装+春节御寒装 outfits 变体,
