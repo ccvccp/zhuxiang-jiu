@@ -32,7 +32,9 @@ from services.sv73_script_service import IP_PERSONAS
 
 logger = logging.getLogger(__name__)
 
-SERIES_DIR = Path(__file__).resolve().parent / "series84"
+# 落盘根(backend/series84 → 容器 /app/series84——与 73号
+# storyboards 同级; compose 绑定挂载防 rebuild 清空)
+SERIES_DIR = Path(__file__).resolve().parent.parent / "series84"
 DEFAULT_EPISODES = 6
 MIN_EPISODES, MAX_EPISODES = 4, 80
 # 口播节奏上限(对话剧单句; 73号独白 25 字更严)
