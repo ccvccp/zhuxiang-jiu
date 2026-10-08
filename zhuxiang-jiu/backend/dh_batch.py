@@ -100,10 +100,15 @@ _ROLES = _ASSET_IP / "roles"
 DH_IMAGES = {
     "zhuxiaomei": (_ASSET_IP / "zhuxiaomei_front.jpg",
                    "/root/assets/ip/zhuxiaomei_front.jpg"),
+    "zhuxiaomei_autumn": (_ASSET_IP / "zhuxiaomei_autumn.jpg",
+                          "/root/assets/ip/zhuxiaomei_autumn.jpg"),
     "zhuxiaomei_spring": (_ASSET_IP / "zhuxiaomei_spring.jpg",
                           "/root/assets/ip/zhuxiaomei_spring.jpg"),
     "xiaozhushuaige": (_ASSET_IP / "xiaozhushuaige_front.jpg",
                        "/root/assets/ip/xiaozhushuaige_front.jpg"),
+    "xiaozhushuaige_autumn": (_ASSET_IP / "xiaozhushuaige_autumn.jpg",
+                              "/root/assets/ip/"
+                              "xiaozhushuaige_autumn.jpg"),
     "xiaozhushuaige_spring": (_ASSET_IP / "xiaozhushuaige_spring.jpg",
                               "/root/assets/ip/"
                               "xiaozhushuaige_spring.jpg"),
