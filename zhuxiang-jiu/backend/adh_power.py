@@ -65,11 +65,20 @@ def _opt(argv: list, flag: str) -> str:
 
 
 def call(method: str, path: str, body=None) -> dict:
-    data = json.dumps(body).encode() if body is not None else None
+    url = API_HOST + path
+    data = None
+    if body is not None:
+        # AutoDL 实测: 全端点仅认 query 参数(GET/POST+json body
+        # 均报 RequestParameterIsWrong——2026-10-08 Pro API 实证)
+        from urllib.parse import urlencode
+        url += "?" + urlencode(body)
     req = urllib.request.Request(
-        API_HOST + path, data=data, method=method,
+        url, data=data, method=method,
         headers={"Authorization": _token(),
-                 "Content-Type": "application/json"})
+                 # 仅 body 存在时声明 json(空 body+json 头会被
+                 # AutoDL 网关解析报 RequestParameterIsWrong)
+                 **({"Content-Type": "application/json"}
+                    if data is not None else {})})
     try:
         r = urllib.request.urlopen(req, timeout=30)
         return json.loads(r.read())

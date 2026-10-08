@@ -216,6 +216,10 @@ def push(ssh, local: Path, remote: str, chunk=60000):
     data = local.read_bytes()
     md5 = hashlib.md5(data).hexdigest()
     b64 = base64.b64encode(data).decode()
+    # 远端父目录确保(2026-10-08 角色族 roles/ 子目录实证缺失坑)
+    rdir = remote.rsplit("/", 1)[0] if "/" in remote else "."
+    ssh.exec_command(
+        f"mkdir -p '{rdir}'")[1].channel.recv_exit_status()
     ssh.exec_command(f"rm -f '{remote}'")[1].channel.recv_exit_status()
     for i in range(0, len(b64), chunk):
         code, _, err = run(ssh, f"printf '%s' '{b64[i:i+chunk]}'"
