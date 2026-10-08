@@ -109,12 +109,24 @@ DH_IMAGES = {
                               "xiaozhushuaige_spring.jpg"),
     "role_zhongnian_f": (_ROLES / "role_zhongnian_f.jpg",
                          "/root/assets/ip/roles/role_zhongnian_f.jpg"),
+    "role_zhongnian_f_spring": (
+        _ROLES / "role_zhongnian_f_spring.jpg",
+        "/root/assets/ip/roles/role_zhongnian_f_spring.jpg"),
     "role_zhongnian_m": (_ROLES / "role_zhongnian_m.jpg",
                          "/root/assets/ip/roles/role_zhongnian_m.jpg"),
+    "role_zhongnian_m_spring": (
+        _ROLES / "role_zhongnian_m_spring.jpg",
+        "/root/assets/ip/roles/role_zhongnian_m_spring.jpg"),
     "role_laonian_f": (_ROLES / "role_laonian_f.jpg",
                        "/root/assets/ip/roles/role_laonian_f.jpg"),
+    "role_laonian_f_spring": (
+        _ROLES / "role_laonian_f_spring.jpg",
+        "/root/assets/ip/roles/role_laonian_f_spring.jpg"),
     "role_laonian_m": (_ROLES / "role_laonian_m.jpg",
                        "/root/assets/ip/roles/role_laonian_m.jpg"),
+    "role_laonian_m_spring": (
+        _ROLES / "role_laonian_m_spring.jpg",
+        "/root/assets/ip/roles/role_laonian_m_spring.jpg"),
 }
 # 兼容旧引用(缺省人设)
 DH_IMAGE_LOCAL = DH_IMAGES["zhuxiaomei"][0]
