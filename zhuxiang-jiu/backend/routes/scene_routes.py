@@ -53,6 +53,34 @@ async def get_scene_context(
                             content={"success": False, "error": str(e)})
 
 
+@router.get("/api/scene/geo", tags=["时空情景感知模块"])
+async def get_scene_geo(
+    request: Request,
+    lng: float = Query(..., ge=-180, le=180,
+                       description="经度(前端 H5 Geolocation)"),
+    lat: float = Query(..., ge=-90, le=90,
+                       description="纬度(前端 H5 Geolocation)"),
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
+):
+    """坐标精确定位 → 完整情景聚合(高德逆地理修正运营商 IP 池偏差)
+
+    移动 CGNAT 池修正: 前端 Geolocation 静默取坐标调本端点,
+    located=True 时按精确城市聚合(城市/天气/代理/问候)。"""
+    try:
+        geo = await _service.resolve_geo(lng, lat)
+        if not geo.get("located"):
+            return {"success": True, "data": {"located": False}}
+        result = await _service.get_context(
+            ip=_client_ip(request),
+            city_code=geo.get("cityCode") or "",
+            member_id=_member_id(x_member_id))
+        result["location"]["located"] = True
+        return {"success": True, "data": result}
+    except Exception as e:
+        return JSONResponse(status_code=500,
+                            content={"success": False, "error": str(e)})
+
+
 @router.get("/api/scene/weather", tags=["时空情景感知模块"])
 async def get_scene_weather(
     city_code: str = Query(..., max_length=6,

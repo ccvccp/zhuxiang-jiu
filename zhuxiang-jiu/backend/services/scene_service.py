@@ -76,6 +76,65 @@ class SceneService:
             "matched": matched,
         }
 
+    async def resolve_geo(self, lng: float, lat: float) -> dict:
+        """坐标 → 城市上下文(高德逆地理 regeo + 区划册)
+
+        移动 CGNAT 池修正(2026-10-09 丽水景宁显示衢州实证): 运营商
+        出口 IP 按 注册地 归属(如 223.104.x 浙江移动池→衢州), 与用户
+        物理位置天然不符——前端 H5 Geolocation 静默取坐标后经本端点
+        覆盖 IP 归属(浏览器权限授权过的用户后续访问即精确)。
+
+        Returns:
+            与 resolve_city 同构 + located=True 精确标记;
+            regeo 失败/未配 Key → located=False(前端保持 IP 归属)
+        """
+        import os
+        import urllib.parse
+        import urllib.request
+
+        key = os.environ.get("GAODE_WEATHER_KEY") or ""
+        empty = {"located": False, "cityCode": "",
+                 "province": "", "city": ""}
+        if not key:
+            return empty
+        url = ("https://restapi.amap.com/v3/geocode/regeo?"
+               + urllib.parse.urlencode({
+                   "location": f"{lng:.6f},{lat:.6f}",
+                   "extensions": "base", "key": key}))
+        try:
+            def _get() -> dict:
+                with urllib.request.urlopen(url, timeout=6) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+
+            payload = await asyncio.to_thread(_get)
+        except (OSError, ValueError) as exc:
+            logger.warning("[情景逆地理] 高德查询失败 %s,%s: %s",
+                           lng, lat, exc)
+            return empty
+        comp = (((payload or {}).get("regeocode") or {})
+                .get("addressComponent") or {})
+        if (payload or {}).get("status") != "1" or not comp:
+            logger.warning("[情景逆地理] 高德业务失败: %s",
+                           str(payload)[:200])
+            return empty
+        # 高德城市字段可能是数组(部分地区)——取字符串形态
+        city = comp.get("city") or ""
+        if isinstance(city, list):
+            city = str(city[0]) if city else ""
+        province = comp.get("province") or ""
+        if isinstance(province, list):
+            province = str(province[0]) if province else ""
+        ref = _CITY_NAME_INDEX.get(city) \
+            or _CITY_NAME_INDEX.get(province)
+        if ref is None:
+            return empty
+        return {
+            "located": True,
+            "province": ref["provinceName"],
+            "city": ref["cityName"],
+            "cityCode": ref["cityCode"],
+        }
+
     # ============================================================
     # 天气感知
     # ============================================================
