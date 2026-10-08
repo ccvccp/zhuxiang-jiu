@@ -315,21 +315,28 @@ class LLMProviderClient:
             base_url = os.environ.get(
                 "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
             ).rstrip("/")
-            model = model or os.environ.get("LLM_MODEL", "glm-4-flash")
+            model = (model or "").strip()
             # 小竹独立档(2026-10-04 延迟优化): profile="xiaozhu"
             # 时切快速模型(如 DashScope qwen-turbo
             # compatible-mode); 未配置回退全局档——模型分层路由
+            # G2 推理强度分级: 显式 model 优先(profile 档让位
+            # ——复杂问句由调用方传深度档 XIAOZHU_LLM_MODEL_DEEP);
+            # 全局默认档填充后置(防提前填空压制 profile 档)
             if profile == "xiaozhu":
                 xz_base = os.environ.get(
                     "XIAOZHU_LLM_BASE_URL", "").strip()
                 if xz_base:
                     base_url = xz_base.rstrip("/")
-                    model = (os.environ.get(
-                        "XIAOZHU_LLM_MODEL", "").strip()
-                        or model)
+                    model = (model
+                             or os.environ.get(
+                                 "XIAOZHU_LLM_MODEL",
+                                 "").strip())
                     api_key = (os.environ.get(
                         "XIAOZHU_LLM_API_KEY", "").strip()
                         or api_key)
+            model = (model
+                     or os.environ.get("LLM_MODEL",
+                                       "glm-4-flash"))
             payload = json.dumps({
                 "model": model,
                 "messages": [
@@ -361,7 +368,8 @@ class LLMProviderClient:
     def classify_dialog_intent(
             self, user_text: str,
             context_desc: str,
-            command_actions: str = "") -> dict | None:
+            command_actions: str = "",
+            model: str = "") -> dict | None:
         """LLM 对话意图分类(智能应答轨——规则 miss 时兜底)
 
         输入: 用户话语 + 最近对话上下文描述(商品语境/反问)
@@ -376,6 +384,9 @@ class LLMProviderClient:
         2026-10-04 延迟优化合并: command_actions 传入全量
         指令白名单(替代前置 _llm_match 独立 LLM 路由调用
         ——双串行减单次); 走 profile="xiaozhu" 快速档。
+
+        G2 推理强度分级: model 传深度档(如 glm-4-plus,
+        XIAOZHU_LLM_MODEL_DEEP——复杂问句用); 空串=快速档。
         """
         actions_line = (command_actions.strip()
                         or "product.new|order.query|"
@@ -428,7 +439,7 @@ class LLMProviderClient:
         user = (str(context_desc or "").strip()
                 + "\n用户说: " + str(user_text or "").strip())
         raw = self.chat(system, user, temperature=0.1,
-                        profile="xiaozhu")
+                        profile="xiaozhu", model=model)
         if not raw:
             return None
         try:

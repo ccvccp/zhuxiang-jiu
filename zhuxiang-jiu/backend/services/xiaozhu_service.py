@@ -63,6 +63,27 @@ def _vision_mode_enabled() -> bool:
         "XIAOZHU_VISION_MODE", "on").lower() in ("on", "1",
                                                  "true")
 
+
+# G2 推理强度分级·复杂问句信号(小竹Agent方案真缺口 G2):
+# 比较类/推荐理由类/长文本走深度档 XIAOZHU_LLM_MODEL_DEEP
+# (未配该 env 时全走快速档, 零影响); 简单 FAQ 保持快速档
+# 省成本省延迟
+_DEEP_SIGNALS = ("对比", "区别", "哪个好", "哪个更好", "还是",
+                 "为什么", "理由", "分析", "怎么选", "怎么挑",
+                 "适合", "送礼", "宴请", "收藏")
+
+
+def _deep_model_for(text: str) -> str:
+    """复杂问句返回深度档模型名(简单问句/未配深档返回空)"""
+    deep = os.environ.get(
+        "XIAOZHU_LLM_MODEL_DEEP", "").strip()
+    if not deep:
+        return ""
+    if len(text or "") > 40 or any(
+            w in (text or "") for w in _DEEP_SIGNALS):
+        return deep
+    return ""
+
 # 唤醒词与近似音容错(ASR 常见误听映射——mock 确定性)
 WAKE_WORDS = ("小竹", "小朱", "小珠", "小猪", "小竹竹",
               "小主", "晓竹")
@@ -1796,9 +1817,12 @@ class XiaozhuService:
                 return None
         try:
             # 2026-10-04 延迟优化②: 意图缓存(command/chat 类
-            # 上下文无关结果 Redis 300s——高频同文本(FAQ 式
+            # 上下文无关结果 Redis——高频同文本(FAQ 式
             # "你能干什么")命中跳过整段 LLM 往返; affirm/
             # negate/next/setqty 上下文敏感不缓存)
+            # G1(小竹Agent方案)强化: ①key 归一化(标点/空白
+            # 差异合并——"你是谁?"与"你是谁"同 key 提升命中);
+            # ②hit/miss 计数观测(redis-cli 直读)
             _cache_key = None
             try:
                 import hashlib as _hl
@@ -1808,16 +1832,31 @@ class XiaozhuService:
                 )
                 if _is_rm():
                     _rc = await _get_rc()
+                    _norm = re.sub(
+                        r"[，。？！、,.?!~～\s]+", "",
+                        command_text or "").lower()
                     _cache_key = ("zhuxiang:xiaozhu:intent:"
-                                  + _hl.sha256(command_text
+                                  + _hl.sha256(_norm
                                                .encode("utf-8")
                                                ).hexdigest()[:24])
                     _cached = await _rc.get(_cache_key)
                     if _cached:
                         import json as _cjson
+                        try:
+                            await _rc.incr(
+                                "zhuxiang:xiaozhu:"
+                                "intent:hits")
+                        except Exception:  # noqa: BLE001
+                            pass
                         logger.info(
                             "voice48_llm_intent_cache_hit")
                         return _cjson.loads(_cached)
+                    try:
+                        await _rc.incr(
+                            "zhuxiang:xiaozhu:"
+                            "intent:misses")
+                    except Exception:  # noqa: BLE001
+                        pass
             except Exception:  # noqa: BLE001
                 _cache_key = None
             turns = await self.repo.list_turns(
@@ -1993,6 +2032,9 @@ class XiaozhuService:
             # 3.27s——慢化超出语音体感预算, 超时快失败回
             # 规则轨兜底, 好过 3s 白等)
             import asyncio as _aio
+            # G2 推理强度分级: 复杂问句切深度档(未配
+            # XIAOZHU_LLM_MODEL_DEEP 返回空串=快速档)
+            _deep_model = _deep_model_for(command_text)
             try:
                 result = await _aio.wait_for(
                     _aio.to_thread(
@@ -2001,20 +2043,26 @@ class XiaozhuService:
                         # 2026-10-04 合并优化: 全量指令白名单
                         # 注入(command:<action> 承接原 _llm_match
                         # 路由职能——单次 LLM 完成路由+分类)
-                        "|".join(COMMAND_ACTIONS)),
-                    timeout=2.5)
+                        "|".join(COMMAND_ACTIONS),
+                        model=_deep_model),
+                    timeout=(6.0 if _deep_model else 2.5))
             except _aio.TimeoutError:
                 logger.info(
                     "voice48_llm_dialog_timeout "
-                    "trace=%s", _trace)
+                    "trace=%s%s", _trace,
+                    " deep=1" if _deep_model else "")
                 return None
             logger.info("voice48_timing llm_dialog_ms=%d "
-                        "trace=%s",
+                        "trace=%s%s",
                         round((_t.monotonic() - _llm_t0)
-                              * 1000), _trace)
+                              * 1000), _trace,
+                        " deep=1" if _deep_model else "")
             # 2026-10-04 延迟优化②: 上下文无关意图写缓存
-            # (command/chat/unknown——同文本 300s 内秒回;
+            # (command/chat/unknown——同文本窗口内秒回;
             # affirm/negate/next/setqty 依赖对话状态不缓存)
+            # G1 TTL 分层: chat 纯话术稳定性高 3600s(FAQ
+            # 秒回窗口拉满); command 涉商品/清单实态 300s
+            # (防"加购后仍说未加"类过期态错回)
             if _cache_key and result:
                 _intent = str(result.get("intent") or "")
                 if _intent.startswith("command:") \
@@ -2026,7 +2074,8 @@ class XiaozhuService:
                             _wjson.dumps(
                                 result,
                                 ensure_ascii=False),
-                            ex=300)
+                            ex=(3600 if _intent == "chat"
+                                else 300))
                     except Exception:  # noqa: BLE001
                         pass
             return result
