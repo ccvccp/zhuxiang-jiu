@@ -417,6 +417,11 @@ register_agent75_routes(app)
 from routes.drama76_routes import register_drama76_routes
 register_drama76_routes(app)
 
+# 短剧智能生产工厂(84号 P0 连续剧本引擎——外部方案甄别后
+# 真缺口: 多集 bible+节拍表+多角色分镜, 供 76号消费端引流)
+from routes.drama84_routes import register_drama84_routes
+register_drama84_routes(app)
+
 # NexusFlow智枢·流 AI智能全域发布大模型(74号 P1 规则中枢)
 from routes.nexus74_routes import register_nexus74_routes
 register_nexus74_routes(app)
