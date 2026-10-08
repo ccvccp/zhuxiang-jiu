@@ -101,6 +101,23 @@ async def main():
            and "什么颜色" in (_seen.get("prompt") or ""))
     record("card 恒 None(纯对话)", (r or {}).get("card") is None)
 
+    print("[02b 主图 URL 中文编码(生产 400 实证修复)]")
+    async def _fake_get_cn(self, pid):
+        return {"id": pid, "name": "竹香液",
+                "images": {"main":
+                           "https://img.host/a.jpg"
+                           "?prompt=竹香尊享 52°"}}
+
+    ProductRepository.get_by_id = _fake_get_cn
+    r = await svc._vision_product_qa(
+        "这酒什么颜色",
+        {"page": "product-detail", "productId": "68"},
+        {"sessionId": 1})
+    record("中文 URL 编码后传 vision",
+           "%E7%AB%B9%E9%A6%99" in str(_seen.get("url")),
+           str(_seen.get("url")))
+    ProductRepository.get_by_id = _fake_get
+
     print("[03 视觉轨 80 字上限 + 空回退]")
     def _long_vision(prompt, url, media_type="image", force=False):
         return "瓶" * 200

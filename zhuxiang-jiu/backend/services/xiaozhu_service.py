@@ -2334,6 +2334,14 @@ class XiaozhuService:
                      .get("main") or "").strip()
             if not image:
                 return None
+            # URL 规范化(生产实证: 主图 URL query 含未编码中文
+            # → glm-4v 拉图 HTTP 400; 非 ASCII 百分号编码, 结构
+            # 字符保留)
+            from urllib.parse import quote as _urlquote
+            image = _urlquote(image, safe=":/?&=%+#@!,;'()*$")
+            if not image.lower().startswith(("http://",
+                                             "https://")):
+                return None
             from services.llm_client import provider_client
             prompt = (
                 "你是酒类电商导购小竹。这是一款名为「{}」"
