@@ -152,12 +152,34 @@ class DramaSeriesService:
         self._ensure_table()
         return await self.repo._get(self.TABLE, drama_id)
 
+    @staticmethod
+    def is_alcohol_drama(drama: dict) -> bool:
+        """酒类品牌剧判定(确定性, LLM 禁入): 剧名/简介/标签任一
+        含「酒」字 → 品牌向酒剧——免注册无障碍观看(2026-10-09
+        用户定案); 不扫剧集正文防剧情台词误伤"""
+        fields = [str(drama.get("title") or ""),
+                  str(drama.get("description") or "")]
+        fields += [str(t) for t in (drama.get("tags") or [])]
+        return any("酒" in f for f in fields)
+
     def episode_states(self, drama: dict, is_member: bool = False,
                        unlocked_dramas: set | None = None
                        ) -> list[dict[str, Any]]:
         """分集+解锁状态:
-        编号<=free → free; 会员 → member_only; 用户已解锁本剧
+        酒类品牌剧(2026-10-09 定案)——全集免注册无障碍观看;
+        其余剧: 编号<=free → free; 会员 → member_only; 用户已解锁本剧
         (unlocked_dramas 含 drama_id) → 全集 unlocked; 其余 locked"""
+        eps = drama.get("episodes") or []
+        if self.is_alcohol_drama(drama):
+            return [{
+                "episode_id": e.get("episode_id"),
+                "episode_number": int(e.get("episode_number") or 0),
+                "title": e.get("title"),
+                "video_url": e.get("video_url"),
+                "duration_seconds": e.get("duration_seconds"),
+                "status": "free", "is_unlocked": True,
+                "is_checkpoint": False, "unlock_methods": [],
+            } for e in eps]
         free_n = int(drama.get("free_episodes") or 0)
         drama_unlocked = bool(unlocked_dramas
                               and drama.get("drama_id") in unlocked_dramas)

@@ -1756,3 +1756,76 @@ def test_t40_dp4_skillization(_skill_dirs, _dp4_dirs, monkeypatch):
         DramaSeriesService._skill_rt = None
 
     asyncio.run(run())
+
+
+def test_t41_alcohol_drama_free(monkeypatch):
+    """76号(2026-10-09 定案): 酒类品牌剧(title/description/tags 含
+    「酒」)全集免注册无障碍观看; 其他娱乐剧维持 free+卡点不变;
+    酒剧 checkpoint 409 防护。"""
+    import asyncio
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from repositories.promo_repository import PromoRepository
+    from routes.drama76_routes import register_drama76_routes
+    from services.drama76_series_service import DramaSeriesService
+
+    shared = PromoRepository()
+    svc = DramaSeriesService(repo=shared)
+
+    async def run():
+        await svc.create({
+            "drama_id": "drama_t_alc", "title": "竹香酒馆",
+            "description": "非遗热点品牌短剧", "free_episodes": 2,
+            "status": "online",
+            "episodes": [
+                {"episode_id": "301", "video_url": "/v/a.mp4"},
+                {"episode_id": "302", "video_url": "/v/b.mp4"},
+                {"episode_id": "303", "video_url": "/v/c.mp4"},
+                {"episode_id": "304", "video_url": "/v/d.mp4"}]})
+        await svc.create({
+            "drama_id": "drama_t_fun", "title": "逆袭之王",
+            "free_episodes": 2, "status": "online",
+            "episodes": [
+                {"episode_id": "401", "video_url": "/v/a.mp4"},
+                {"episode_id": "402", "video_url": "/v/b.mp4"},
+                {"episode_id": "403", "video_url": "/v/c.mp4"}]})
+
+    asyncio.run(run())
+
+    # ① 判定: title 含「酒」/ tags 含「酒」/ 纯娱乐不含
+    assert svc.is_alcohol_drama({"title": "竹香酒馆"}) is True
+    assert svc.is_alcohol_drama({"title": "逆袭之王",
+                                 "tags": ["都市"]}) is False
+    assert svc.is_alcohol_drama({"title": "逆袭之王",
+                                 "tags": ["白酒品鉴"]}) is True
+
+    # ② 酒剧全集免登录 free(游客视角, 无卡点, 地址全暴露)
+    got = asyncio.run(svc.get("drama_t_alc"))
+    eps = svc.episode_states(got)
+    assert len(eps) == 4
+    assert all(e["status"] == "free" and e["is_unlocked"] is True
+               and e["is_checkpoint"] is False for e in eps)
+    assert eps[3]["video_url"].endswith("d.mp4")
+    assert eps[3]["unlock_methods"] == []
+
+    # ③ 娱乐剧维持现状(免费2+卡点)
+    fun = asyncio.run(svc.get("drama_t_fun"))
+    feps = svc.episode_states(fun)
+    assert [e["status"] for e in feps] == [
+        "free", "free", "locked"]
+    assert feps[2]["is_checkpoint"] is True
+
+    # ④ 路由: 酒剧公开 episodes 全 free + checkpoint 409
+    monkeypatch.setattr(
+        "routes.drama76_routes._svc", DramaSeriesService(repo=shared))
+    app = FastAPI()
+    register_drama76_routes(app)
+    client = TestClient(app)
+    r = client.get("/api/v1/dramas/drama_t_alc/episodes")
+    body = r.json()["data"]
+    assert r.status_code == 200
+    assert all(e["is_unlocked"] for e in body["episodes"])
+    rc = client.get(
+        "/api/v1/dramas/drama_t_alc/episodes/304/checkpoint")
+    assert rc.status_code == 409
+    assert "酒类剧" in rc.json()["detail"]

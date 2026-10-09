@@ -140,6 +140,9 @@ async def episode_checkpoint(drama_id: str, episode_id: str,
         raise HTTPException(status_code=404, detail="episode not found")
     free_n = int(d.get("free_episodes") or 0)
     n = int(ep.get("episode_number") or 0)
+    if _svc.is_alcohol_drama(d):
+        # 酒类品牌剧全集免登录(2026-10-09 定案)——无卡点
+        raise HTTPException(status_code=409, detail="酒类剧全集免费无卡点")
     if n <= free_n:
         raise HTTPException(status_code=409, detail="该集免费无卡点")
     methods = [
