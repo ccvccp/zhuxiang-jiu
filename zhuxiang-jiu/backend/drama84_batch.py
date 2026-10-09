@@ -58,18 +58,26 @@ def load_series(sid: str) -> dict:
 
 
 def tts_line(persona: str, text: str, tag: str) -> Path:
-    """单句分角色 TTS(音色=IP_VOICE[persona] 自动路由)"""
+    """单句分角色 TTS(音色=IP_VOICE[persona] 自动路由;
+    网络抖动重试 2 次——单句超时实证 ep2_l4)"""
     mini = {"scriptId": tag, "persona": persona,
             "template": {"name": "dh_oral"},
             "totalDuration": 8,
+            "bgm": {"mood": "warm"},
             "scenes": [{"index": 0, "role": "drama_oral",
                         "text": "", "voiceover": text,
                         "highlightWords": [], "duration": 8}]}
     from services.sv73_render_service import Sv73RenderService
-    wav = Sv73RenderService()._tts_audio(mini)
-    if wav is None or not Path(wav).is_file():
-        raise RuntimeError(f"TTS 失败: {tag}")
-    return Path(wav)
+    last = None
+    for attempt in range(3):
+        wav = Sv73RenderService()._tts_audio(mini)
+        if wav is not None and Path(wav).is_file() \
+                and Path(wav).stat().st_size > 10000:
+            return Path(wav)
+        last = wav
+        print(f"    [tts-retry] {tag} 第{attempt + 1}次失败")
+        time.sleep(3)
+    raise RuntimeError(f"TTS 失败: {tag} last={last}")
 
 
 def card_png(text: str, sub: str, out: Path,
@@ -94,14 +102,22 @@ def card_png(text: str, sub: str, out: Path,
     return out
 
 
-def remote_batch(ssh, manifest: list[dict]) -> bool:
-    """远端顺序批推理(manifest: [{tag, image, wav}])"""
+def remote_batch(ssh, manifest: list[dict],
+                 overrides: dict = None) -> bool:
+    """远端顺序批推理(manifest: [{tag, image, wav}])——
+    manifest 走 push 通道(分块+md5; shell echo 大 b64 实证
+    paramiko channel 读超时); push 大量文件后 SSH 会话 channel
+    层劣化(25 文件后短命令也超时实证)——启动前断开重连"""
     run(ssh, f"mkdir -p {REMOTE_ROOT}")
     for m in manifest:
         push(ssh, Path(m["wav"]),
              f"{REMOTE_ROOT}/{m['tag']}.wav")
-    mf = json.dumps(manifest, ensure_ascii=False)
-    b64mf = base64.b64encode(mf.encode()).decode()
+    mf_local = Path("sv73_videos") / "_mf_d84.json"
+    mf_local.parent.mkdir(exist_ok=True)
+    mf_local.write_text(
+        json.dumps(manifest, ensure_ascii=False),
+        encoding="utf-8")
+    push(ssh, mf_local, f"{REMOTE_ROOT}/_mf.json")
     script = f"""
 import importlib.util, json, os
 from pathlib import Path
@@ -111,47 +127,71 @@ os.environ['SV73_VIDEO_DIR'] = '{REMOTE_ROOT}'
 spec = importlib.util.spec_from_file_location("dh", "{REMOTE_SVC}")
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
-mf = json.loads(__import__('base64').b64decode('{b64mf}'))
+mf = json.loads(Path('{REMOTE_ROOT}/_mf.json').read_text())
 for i, m in enumerate(mf, 1):
     os.environ['SV73_DH_IMAGE'] = m['image']
+    wav_remote = '{REMOTE_ROOT}/' + m['tag'] + '.wav'
     sb = {{'scriptId': m['tag'], 'template': {{'name': 'dh_oral'}},
           'totalDuration': 8,
           'scenes': [{{'index': 0, 'role': 'drama_oral',
                       'voiceover': '', 'duration': 8}}]}}
     r = mod.Sv73DigitalHumanService().build(
-        sb, Path(m['wav'].replace('\\\\', '/')))
+        sb, Path(wav_remote))
     print(f"LINEDONE {{i}}/{{len(mf)}} {{m['tag']}} "
           f"{{r['sizeBytes']}}", flush=True)
 print('BATCH PASS')
 """
     b64 = base64.b64encode(script.encode()).decode()
-    run(ssh, f"echo {b64mf} | base64 -d > {REMOTE_ROOT}/_mf.json"
-             f" && echo {b64} | base64 -d > /tmp/_batch84.py"
-             f" && rm -f /tmp/_batch84.log"
-             f" && nohup /root/miniconda3/envs/py312/bin/python"
-             f" /tmp/_batch84.py > /tmp/_batch84.log 2>&1"
-             f" & echo started")
-    total = len(manifest)
-    # 每句 ~90-150s(加载+推理); 上界 = 句数×200s + 300
-    deadline = time.time() + total * 200 + 300
-    while time.time() < deadline:
-        time.sleep(60)
-        _, out, _ = run(ssh, "ps aux | grep '[_]batch84.py'"
-                              " >/dev/null && echo R || echo E;"
-                              " tail -2 /tmp/_batch84.log")
-        print("  ...", out.strip().splitlines()[-1][:90]
-              if out.strip() else "")
-        if out.startswith("E"):
-            return "BATCH PASS" in out
-    return False
+    # script 走 push 通道(分块+md5)——shell echo b64 实证
+    # paramiko channel 读超时(同量级 dh_batch 原版凌晨过/
+    # 早间超时, 网络窗口不稳; push 通道 25 文件全稳)
+    py_local = Path("sv73_videos") / "_batch84.py"
+    py_local.write_text(script, encoding="utf-8")
+    push(ssh, py_local, "/tmp/_batch84.py")
+    # 会话劣化规避: 断开重连(全新 channel 池)
+    try:
+        ssh.close()
+    except Exception:  # noqa: BLE001
+        pass
+    from dh_batch import ssh_connect as _reconn
+    ssh = _reconn(overrides=overrides)
+    # 前台直跑整批(nohup 后台实证 channel 读超时——三种形态
+    # 均 290s 无响应; 前台模式 LINEDONE 流式输出维持 channel
+    # 活性, 单次 recv 上界=3600s >> 句间隔 150s)
+    print("[gpu] 批推理前台直跑(约 40-60 分钟, 每句一条进度)...")
+    code, out, err = run(
+        ssh, "/root/miniconda3/envs/py312/bin/python"
+             " /tmp/_batch84.py", timeout=3600)
+    tail = (out or "").strip().splitlines()
+    for line in tail[-6:]:
+        print("  |", line[:100])
+    return code == 0 and "BATCH PASS" in (out or "")
+
+
+def card_seg(ffmpeg: str, png: Path, t: float,
+             out: Path) -> Path:
+    """卡段预生成(图+静音轨——PNG 输入无 a 流, concat 需 v+a)"""
+    import subprocess as sp
+    r = sp.run(
+        [ffmpeg, "-y", "-loop", "1", "-t", str(t), "-i", str(png),
+         "-f", "lavfi", "-t", str(t),
+         "-i", "anullsrc=r=44100:cl=stereo",
+         "-vf", "scale=1080:1920,format=yuv420p",
+         "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+         "-c:a", "aac", "-shortest", str(out)],
+        capture_output=True, timeout=120)
+    if r.returncode != 0 or not out.is_file():
+        raise RuntimeError("卡段失败: "
+                           + r.stderr.decode("utf-8", "ignore")[-200:])
+    return out
 
 
 def build_episode(sid: str, series: dict, ep: dict,
                   lines_meta: list[dict], token: str) -> Path:
     """拼装一集: 片头卡+逐句配音+尾卡 → concat"""
-    from dh_batch import _h264ize
+    from dh_batch import _h264ize, _ffmpeg_bin
     import subprocess as sp
-    ffmpeg = "ffmpeg"
+    ffmpeg = _ffmpeg_bin()
     ep_no = ep["ep"]
     voiced = []
     for m in lines_meta:
@@ -165,39 +205,30 @@ def build_episode(sid: str, series: dict, ep: dict,
         if r.returncode != 0:
             raise RuntimeError("配音失败: " + m["tag"])
         voiced.append(v)
-    head = card_png(f"第{ep_no}集", ep.get("title") or "",
-                    OUT_DIR / f"d84_{sid}_ep{ep_no}_head.png")
-    tail = card_png("未完待续", series["title"],
-                    OUT_DIR / f"d84_{sid}_ep{ep_no}_tail.png")
-    seg = OUT_DIR / f"d84_{sid}_ep{ep_no}_seg.txt"
-    seg.write_text(
-        f"file '{head}'\n".replace("\\", "/") +
-        "".join(f"file '{v}'\n" for v in voiced) +
-        f"file '{tail}'\n".replace("\\", "/"),
-        encoding="utf-8")
-    final = OUT_DIR / f"d84_{sid}_ep{ep_no}.mp4"
-    # 卡段补齐流(loop 图+静音), 统一重编码拼接
+    head_png = card_png(f"第{ep_no}集", ep.get("title") or "",
+                        OUT_DIR / f"d84_{sid}_ep{ep_no}_head.png")
+    tail_png = card_png("未完待续", series["title"],
+                        OUT_DIR / f"d84_{sid}_ep{ep_no}_tail.png")
+    head = card_seg(ffmpeg, head_png, 2.2,
+                    OUT_DIR / f"d84_{sid}_ep{ep_no}_headseg.mp4")
+    tail = card_seg(ffmpeg, tail_png, 1.8,
+                    OUT_DIR / f"d84_{sid}_ep{ep_no}_tailseg.mp4")
+    final = OUT_DIR / f"{sid}_ep{ep_no}.mp4"
+    inputs = (["-i", str(head)]
+              + sum([["-i", str(v)] for v in voiced], [])
+              + ["-i", str(tail)])
+    n = len(voiced) + 2
+    fc = ("".join(
+        f"[{i}:v]scale=1080:1920,format=yuv420p[s{i}];"
+        f"[{i}:a]aresample=44100[a{i}];"
+        for i in range(n))
+        + "".join(f"[s{i}][a{i}]" for i in range(n))
+        + f"concat=n={n}:v=1:a=1[cv][ca];"
+          "[ca]loudnorm=I=-14:TP=-1.5:LRA=11,"
+          "alimiter=limit=0.75:level=false[aout]")
     r = sp.run(
-        [ffmpeg, "-y", "-loop", "1", "-t", "2.2", "-i", str(head),
-         *sum([["-i", str(v)] for v in voiced], []),
-         "-loop", "1", "-t", "1.8", "-i", str(tail),
-         "-filter_complex",
-         f"[0:v]scale=1080:1920,format=yuv420p[h];"
-         + "".join(f"[{i + 1}:v]scale=1080:1920,"
-                   f"format=yuv420p[v{i}];"
-                   for i in range(len(voiced)))
-         + f"[{len(voiced) + 1}:v]scale=1080:1920,"
-           f"format=yuv420p[t];"
-         + "".join(f"[{i + 1}:a]anull[a{i}];"
-                   for i in range(len(voiced)))
-         + "[0:a]anull[ah];"
-           f"[{len(voiced) + 1}:a]anull[at];"
-           f"[h][ah][v0][a0]"
-         + "".join(f"[v{i}][a{i}]" for i in range(len(voiced)))
-         + f"[t][at]concat=n={len(voiced) + 2}:v=1:a=1[out]",
-         "-map", "[out]",
-         "-af", "loudnorm=I=-14:TP=-1.5:LRA=11,"
-                "alimiter=limit=0.75:level=false",
+        [ffmpeg, "-y", *inputs, "-filter_complex", fc,
+         "-map", "[cv]", "-map", "[aout]",
          "-c:v", "libx264", "-preset", "fast", "-crf", "20",
          "-c:a", "aac", "-movflags", "+faststart", str(final)],
         capture_output=True, timeout=600)
@@ -208,14 +239,19 @@ def build_episode(sid: str, series: dict, ep: dict,
 
 
 def probe_duration(mp4: Path) -> float:
+    """成片时长(ffmpeg -i 解析 Duration——本机无 ffprobe)"""
+    import re as _re
+    from dh_batch import _ffmpeg_bin
     r = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-show_entries",
-         "format=duration", "-of", "csv=p=0", str(mp4)],
+        [_ffmpeg_bin(), "-i", str(mp4)],
         capture_output=True, text=True, timeout=60)
-    try:
-        return round(float(r.stdout.strip()), 1)
-    except ValueError:
+    m = _re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)",
+                   r.stderr or "")
+    if not m:
         return 75.0
+    return round(int(m.group(1)) * 3600
+                 + int(m.group(2)) * 60
+                 + float(m.group(3)), 1)
 
 
 def main() -> int:
@@ -295,7 +331,7 @@ def main() -> int:
         if local.is_file():
             push(ssh, local, remote)
     push(ssh, DH_SVC_LOCAL, REMOTE_SVC)
-    ok = remote_batch(ssh, manifest)
+    ok = remote_batch(ssh, manifest, overrides=overrides)
     if not ok:
         _, out, _ = run(ssh, "tail -12 /tmp/_batch84.log")
         print("[fail] 批推理未过:", out.strip()[-400:])
