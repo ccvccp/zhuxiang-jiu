@@ -55,8 +55,10 @@ FUN_BODY = {
 
 @pytest.fixture()
 def env():
-    """双剧内存环境: (svc, shared_repo)"""
-    shared = PromoRepository()
+    """双剧内存环境: (svc, shared_repo)
+    独立 store 注入(不落全局 get_in_memory_store)——零污染
+    同进程其他套件(T34 阶梯发奖依赖干净 drama76_series 表)"""
+    shared = PromoRepository(store={})
     svc = DramaSeriesService(repo=shared)
 
     async def seed():
@@ -71,7 +73,8 @@ def env():
 def client(env, monkeypatch):
     svc, shared = env
     monkeypatch.setattr(
-        "routes.drama76_routes._svc", DramaSeriesService(repo=shared))
+        "routes.drama76_routes._svc",
+        DramaSeriesService(repo=shared))
     app = FastAPI()
     register_drama76_routes(app)
     return TestClient(app)
