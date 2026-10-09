@@ -159,8 +159,96 @@ async def main():
            "role_tong_f" not in ALLOWED_CAST
            and len(ALLOWED_CAST) == 6)
 
+    print("[07 P2-D 评分器注册(44号)]")
+    from services.ai_learning_service import (
+        SCORER_REGISTRY, GOVERNANCE_ONLY_SCORERS, default_weights,
+    )
+    from services.drama84_script_service import (
+        D84_WEIGHTS, SERIES_DIR,
+    )
+    record("入册 SCORER_REGISTRY batch 55",
+           SCORER_REGISTRY.get("drama84_series", {})
+           .get("batch") == 55)
+    record("治理档案型(不入 Hedge)",
+           "drama84_series" in GOVERNANCE_ONLY_SCORERS)
+    record("default_weights=D84_WEIGHTS 单一事实源",
+           default_weights("drama84_series")
+           == D84_WEIGHTS)
+    record("五因子权重合计 100",
+           sum(D84_WEIGHTS.values()) == 100.0)
+
+    print("[08 P2-D score_series 五因子]")
+    snap = await svc.score_series(s["seriesId"], unlocks=3,
+                                  online_days=2.0)
+    fn = {f["name"]: f for f in snap["factors"]}
+    record("五因子齐(名称=权重键)",
+           set(fn) == set(D84_WEIGHTS))
+    record("theme_appeal=热点分 91",
+           fn["theme_appeal"]["score"] == 91.0)
+    record("cast_fit=IP 双主角满配 100",
+           fn["cast_fit"]["score"] == 100.0)
+    record("pacing=6/6 集达标 100",
+           fn["pacing"]["score"] == 100.0)
+    record("script_quality=lint0+LLM 轨 100",
+           fn["script_quality"]["score"] == 100.0,
+           str(fn["script_quality"]))
+    record("traffic_value=3 解锁/2 天=30",
+           fn["traffic_value"]["score"] == 30.0)
+    expect = round(sum(f["score"] * f["weight"] / 100.0
+                       for f in snap["factors"]), 1)
+    record("总分=因子加权和", snap["score"] == expect,
+           f"{snap['score']} vs {expect}")
+    record("44号回流已记录(治理档案)",
+           await _feedback_recorded(s["seriesId"]))
+    score_file = SERIES_DIR / f"{s['seriesId']}_score.json"
+    record("快照落盘可回读",
+           score_file.exists()
+           and json.loads(
+               score_file.read_text(encoding="utf-8")
+           ).get("score") == snap["score"])
+    try:
+        await svc.score_series("d84_nonexistent")
+        record("未知剧本 KeyError", False)
+    except KeyError as e:
+        record("未知剧本 KeyError", True)
+
+    print("[09 P2-A derive_topics fail-soft]")
+    from repositories.promo_repository import PromoRepository
+    repo = PromoRepository()
+    await repo.save_hotspot({
+        "hotspotId": await repo.next_id("hotspot"),
+        "title": "国庆家宴竹香酒热榜", "platform": "douyin",
+        "score": 88, "status": "active", "fingerprint": "t84a",
+        "createdAt": "2026-10-09T00:00:00+00:00"})
+    out = await svc.derive_topics(limit=3)
+    record("选题包落盘 d84_topics.json",
+           (SERIES_DIR / "d84_topics.json").exists())
+    record("热点直通占位(LLM off fail-soft)",
+           out["count"] >= 1
+           and out["topics"][0]["theme"] == "品牌向剧情"
+           and out["topics"][0]["score"] == 88.0)
+    record("占位包 cast 白名单",
+           set(out["topics"][0]["cast"]) <= set(ALLOWED_CAST))
+    topics = json.loads((SERIES_DIR / "d84_topics.json")
+                        .read_text(encoding="utf-8"))["topics"]
+    record("落盘=返回(count 一致)", len(topics) == out["count"])
+
     print(f"\n结果: {PASS} 通过, {FAIL} 失败")
     sys.exit(1 if FAIL else 0)
+
+
+async def _feedback_recorded(sid: str) -> bool:
+    """44号 ai_learning_feedback 档案含本剧评分回流(note 带 sid)"""
+    try:
+        from repositories.ai_learning_repository import (
+            AiLearningRepository,
+        )
+        rows = await AiLearningRepository().list_feedback(
+            "drama84_series", limit=0)
+        return any(sid in str(r.get("note") or "")
+                   for r in rows or [])
+    except Exception:  # noqa: BLE001
+        return False
 
 
 if __name__ == "__main__":

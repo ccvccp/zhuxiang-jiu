@@ -181,6 +181,8 @@ SCORER_REGISTRY = {
     "sv73_storyboard": {"label": "智能分镜风格评分", "module": "73号sv短视频智能模型", "batch": 53},
     # ---- 第五十四批(82号·小竹语音对话逻辑学习进化 P2: 对话策略评分) ----
     "voice82_strategy": {"label": "小竹对话策略评分", "module": "82小竹对话逻辑学习进化", "batch": 54},
+    # ---- 第五十五批(84号·短剧智能生产工厂 P2: 剧集质量评分——数据回流) ----
+    "drama84_series": {"label": "短剧生产工厂剧集评分", "module": "84短剧智能生产工厂", "batch": 55},
 }
 
 # 治理档案型评分器(46号审批总线档案, 不参与 Hedge 学习周期)。
@@ -197,6 +199,7 @@ GOVERNANCE_ONLY_SCORERS = frozenset({
     "growth_budget",              # 72号 P3 预算系数(batch 46)
     "nexus_publishing",           # 74号 P4 全域发布(batch 47)
     "growth_experiment",          # 72号 P6 实验沙箱(batch 48)
+    "drama84_series",             # 84号 P2 剧集评分(batch 55)
 })
 
 
@@ -427,6 +430,11 @@ def default_weights(scorer_id: str) -> dict:
             Voice82StrategyScorer,
         )
         return dict(Voice82StrategyScorer.WEIGHTS)
+    if scorer_id == "drama84_series":
+        # 84号 P2: 剧集五因子(题材/人设/节奏/质量/引流),
+        # 单一事实源在 drama84_script_service(治理档案型)
+        from services.drama84_script_service import D84_WEIGHTS
+        return dict(D84_WEIGHTS)
     if scorer_id == "blogger_work_gate":
         # 40号博主引流: 作品跟随价值五因子, 单一事实源在评分器类
         from services.ai_scoring_service import BloggerWorkScorer

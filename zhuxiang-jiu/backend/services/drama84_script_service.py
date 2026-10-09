@@ -46,9 +46,24 @@ ALLOWED_CAST = ("zhuxiaomei", "xiaozhushuaige",
                 "role_zhongnian_f", "role_zhongnian_m",
                 "role_laonian_f", "role_laonian_m")
 
+# P2 剧集评分五因子(44号治理档案型, batch 55——单一事实源)
+D84_WEIGHTS = {
+    "theme_appeal": 25.0,   # 题材吸引力(热点分值归一)
+    "cast_fit": 20.0,       # 人设匹配(IP 主角满配/角色数)
+    "pacing": 20.0,         # 节奏(单集时长 45-120s 达标率)
+    "script_quality": 15.0, # 剧本质量(lint 零瑕疵+LLM 轨)
+    "traffic_value": 20.0,  # 引流值(76号解锁转化, 累计观测)
+}
+
 
 def _clip(s, n):
     return str(s or "").strip()[:n]
+
+
+def _now_iso() -> str:
+    import datetime as _dt
+    return _dt.datetime.now(
+        _dt.timezone.utc).isoformat()
 
 
 def drama84_mode() -> str:
@@ -385,6 +400,169 @@ class Drama84ScriptService:
             },
         }
         return await repo.save_content(content)
+
+    # ---------- P2-A: 题材研判(热点→选题包) ----------
+
+    async def derive_topics(self, limit: int = 8) -> dict:
+        """36号雷达热点 → 短剧题材化选题包(LLM 研判+落盘)
+
+        选题包: 每热点 {题材/人群/爽点结构/风险标签/适配人设/
+        建议集数}; fail-soft——LLM 失败给热点直通占位包。
+        """
+        from repositories.promo_repository import PromoRepository
+        rows = await PromoRepository().list_hotspots(limit=limit) \
+            or []
+        picks = [h for h in rows
+                 if _clip(h.get("title"), 4)][:limit]
+        topics = self._llm_topics(picks) or [
+            {"hotspotId": int(h.get("hotspotId") or 0),
+             "hotspot": _clip(h.get("title"), 60),
+             "theme": "品牌向剧情",
+             "audience": "25-45 白酒兴趣人群",
+             "hookPattern": "热点开场+竹香酒转机",
+             "risk": "无",
+             "cast": list(DEFAULT_CAST),
+             "episodes": DEFAULT_EPISODES,
+             "score": float(h.get("score") or 0)}
+            for h in picks]
+        out = {"generatedAt": _now_iso(),
+               "count": len(topics), "topics": topics}
+        SERIES_DIR.mkdir(parents=True, exist_ok=True)
+        (SERIES_DIR / "d84_topics.json").write_text(
+            json.dumps(out, ensure_ascii=False, indent=1),
+            encoding="utf-8")
+        return out
+
+    def _llm_topics(self, picks: list) -> list | None:
+        if not picks:
+            return []
+        try:
+            from services.llm_client import provider_client
+            hs_lines = "\n".join(
+                f"- id={int(h.get('hotspotId') or 0)} "
+                f"[{h.get('platform')}] {_clip(h.get('title'), 40)}"
+                f" (分值{h.get('score') or 0})"
+                for h in picks)
+            system = (
+                "你是短剧选题策划。对每个热点输出一个 JSON 数组"
+                "(仅数组, 无其他文字), 每元素: "
+                '{"hotspotId": <原id>, "hotspot": "<原题>", '
+                '"theme": "<题材≤8字>", "audience": "<人群≤16字>", '
+                '"hookPattern": "<爽点结构≤20字>", "risk": '
+                '"<风险标签, 无则填无>", "cast": '
+                '["zhuxiaomei", "xiaozhushuaige"]子集, '
+                '"episodes": <6-12>, "score": <原分值>}\n'
+                "铁律: cast 只能从 ['zhuxiaomei', "
+                "'xiaozhushuaige', 'role_zhongnian_f', "
+                "'role_zhongnian_m', 'role_laonian_f', "
+                "'role_laonian_m'] 选; 剧情须能自然融入竹香酒"
+                "品牌; 题材积极无违规。\n热点清单:\n" + hs_lines
+            )
+            raw = provider_client.chat(
+                system, "开始研判", temperature=0.4,
+                timeout=60)
+            m = re.search(r"\[[\s\S]*\]", raw or "")
+            if not m:
+                return None
+            topics = json.loads(m.group(0))
+            ok = all(
+                isinstance(t.get("cast"), list)
+                and set(t["cast"]) <= set(ALLOWED_CAST)
+                for t in topics)
+            return topics if ok else None
+        except Exception as exc:  # noqa: BLE001
+            logger.info("drama84_topics_llm_skip: %s", exc)
+            return None
+
+    # ---------- P2-D: 评分回流(76号解锁漏斗→44号) ----------
+
+    async def score_series(self, sid: str,
+                           unlocks: int = 0,
+                           online_days: float = 1.0) -> dict:
+        """剧集五因子评分 → 44号治理档案回流+快照落盘
+
+        unlocks/online_days: 76号 drama76_unlocks 计数与上线
+        天数(调用方路由侧聚合); 评分=决策时快照, actualAction
+        固定 released(治理档案型不参与 Hedge 周期)。
+        """
+        series = self.get_series(sid)
+        if series is None:
+            raise KeyError(f"剧本不存在({sid})")
+        eps = series.get("episodes") or []
+        flaws = lint_series(series)
+        hs_score = float(
+            (series.get("hotspot") or {}).get("score") or 0)
+        cast = {c.get("persona") for c in
+                (series.get("cast") or [])}
+        ip_full = bool(cast & set(DEFAULT_CAST))
+        cast_n = len(cast)
+        pacing_ok = sum(
+            1 for e in eps
+            if 45 <= int(e.get("duration") or 0) <= 120)
+        factors = [
+            {"name": "theme_appeal",
+             "score": round(min(100.0, hs_score), 1),
+             "weight": D84_WEIGHTS["theme_appeal"],
+             "detail": f"热点分值 {hs_score}"},
+            {"name": "cast_fit",
+             "score": round(
+                 (100 if ip_full else 60)
+                 * min(1.0, cast_n / 2), 1),
+             "weight": D84_WEIGHTS["cast_fit"],
+             "detail": f"角色 {cast_n} 个/IP 主角 "
+                       f"{'在列' if ip_full else '缺位'}"},
+            {"name": "pacing",
+             "score": round(
+                 100 * pacing_ok / max(1, len(eps)), 1),
+             "weight": D84_WEIGHTS["pacing"],
+             "detail": f"{pacing_ok}/{len(eps)} 集达标"
+                       f"(45-120s)"},
+            {"name": "script_quality",
+             "score": (100.0 if not flaws and
+                       (series.get("track") or "")
+                       .startswith(("main", "glm")) else
+                       (70.0 if not flaws else 40.0)),
+             "weight": D84_WEIGHTS["script_quality"],
+             "detail": f"track={series.get('track')} "
+                       f"lint={len(flaws)} 瑕疵"},
+            {"name": "traffic_value",
+             "score": round(min(100.0,
+                                unlocks * 20.0
+                                / max(1.0, online_days)), 1),
+             "weight": D84_WEIGHTS["traffic_value"],
+             "detail": f"{unlocks} 解锁/上线 "
+                       f"{online_days:.1f} 天"},
+        ]
+        total = round(sum(
+            f["score"] * f["weight"] / 100.0
+            for f in factors), 1)
+        snapshot = {"seriesId": sid,
+                    "title": series.get("title"),
+                    "score": total, "factors": factors,
+                    "unlocks": unlocks,
+                    "onlineDays": online_days,
+                    "scoredAt": _now_iso()}
+        # 44号治理档案回流(best-effort——管道不可用时快照
+        # 仍落盘, 评分不因回流失败而丢)
+        try:
+            from services.ai_learning_service import (
+                submit_feedback,
+            )
+            await submit_feedback({
+                "scorerId": "drama84_series",
+                "factors": factors,
+                "scoreAtDecision": total,
+                "actualAction": "released",
+                "correct": True,
+                "note": f"84号剧集评分 {sid} "
+                        f"{series.get('title')}"})
+        except Exception as exc:  # noqa: BLE001
+            logger.info("drama84_feedback_skip: %s", exc)
+        SERIES_DIR.mkdir(parents=True, exist_ok=True)
+        (SERIES_DIR / f"{sid}_score.json").write_text(
+            json.dumps(snapshot, ensure_ascii=False,
+                       indent=1), encoding="utf-8")
+        return snapshot
 
     # ---------- schema fail-hard(73号 assert 同款纪律) ----------
 
