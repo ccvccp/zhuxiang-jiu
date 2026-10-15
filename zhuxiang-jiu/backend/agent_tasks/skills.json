@@ -1,0 +1,1075 @@
+{
+ "intent_classify": {
+  "skill_id": "intent_classify",
+  "name": "意图识别",
+  "version": "1.0.0",
+  "status": "active",
+  "kind": "prompt_tool",
+  "slot": "classify",
+  "intent": null,
+  "spec": {
+   "model_id": "glm-flash",
+   "prompt_template": "你是任务意图分类器。将用户输入分为以下之一, 只输出一个词:\nchat(闲聊/咨询) summary(要求总结/归纳) draft(要求写作/起草) unknown(无法判断)"
+  },
+  "metrics": {
+   "invocations": 344,
+   "successes": 344,
+   "recent": [
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791789394
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791789394
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791801966
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791801966
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791801966
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791801967
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791801967
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791801967
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791801967
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791801967
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791804351
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791804351
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791804352
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791804352
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791804352
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791804352
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791804352
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791804352
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791810147
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791810147
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791810147
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791810147
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791810147
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791810148
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791810148
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791810148
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791816351
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791816351
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791816351
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791816351
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791816352
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791816352
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791816352
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791816352
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791835617
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791835617
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791835617
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791835617
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791835617
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791835617
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791835617
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791835618
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1791836803
+    }
+   ],
+   "avg_latency_ms": 3
+  },
+  "source": "builtin",
+  "created_at": "",
+  "updated_at": ""
+ },
+ "answer_chat": {
+  "skill_id": "answer_chat",
+  "name": "通用回答·chat",
+  "version": "1.0.0",
+  "status": "active",
+  "kind": "prompt_tool",
+  "slot": "generate",
+  "intent": "chat",
+  "spec": {
+   "model_id": "glm-reason",
+   "prompt_template": "你是竹香酒品牌网站 zxjiu.com 的站内助手, 用中文简洁友好地回答用户, 涉及产品时自然提及竹香型白酒特点, 不夸大功效、不劝酒。"
+  },
+  "metrics": {
+   "invocations": 43,
+   "successes": 43,
+   "recent": [
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791209773
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791209799
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791209827
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791210258
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791210315
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791210373
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791210625
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791210952
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791212404
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791212886
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791213809
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791214830
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791214866
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791215816
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791216376
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791216428
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791217132
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791217168
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791217196
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791218301
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791218817
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791224790
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791224828
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791235680
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791240667
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791361848
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791545490
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791548348
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791759237
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791762765
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791765067
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791767480
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791771611
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791775147
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791777198
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791788308
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791789394
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791801966
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791804351
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791810147
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791816351
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791835617
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791836803
+    }
+   ],
+   "avg_latency_ms": 5
+  },
+  "source": "builtin",
+  "created_at": "",
+  "updated_at": ""
+ },
+ "answer_summary": {
+  "skill_id": "answer_summary",
+  "name": "摘要回答·summary",
+  "version": "1.0.0",
+  "status": "active",
+  "kind": "prompt_tool",
+  "slot": "generate",
+  "intent": "summary",
+  "spec": {
+   "model_id": "glm-reason",
+   "prompt_template": "你是站内摘要助手, 将用户给出的内容压缩为要点清晰的中文简报, 保留关键数字与结论。"
+  },
+  "metrics": {
+   "invocations": 301,
+   "successes": 301,
+   "recent": [
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791788309
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791789394
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791789394
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791789394
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791789394
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791789394
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791789394
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791789394
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791801966
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791801966
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791801967
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791801967
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791801967
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791801967
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791801967
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791804351
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791804352
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791804352
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791804352
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791804352
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791804352
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791804352
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791810147
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791810147
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791810147
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791810148
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791810148
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791810148
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791810148
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791816351
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791816351
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791816351
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791816352
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791816352
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791816352
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791816352
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791835617
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791835617
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791835617
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791835617
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791835617
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791835617
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791835618
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1791836803
+    }
+   ],
+   "avg_latency_ms": 5
+  },
+  "source": "builtin",
+  "created_at": "",
+  "updated_at": ""
+ },
+ "draft_copy": {
+  "skill_id": "draft_copy",
+  "name": "品牌文案起草·draft",
+  "version": "1.0.0",
+  "status": "active",
+  "kind": "prompt_tool",
+  "slot": "generate",
+  "intent": "draft",
+  "spec": {
+   "model_id": "glm-reason",
+   "prompt_template": "你是站内文案助手, 按用户要求起草中文文案, 语气贴合竹香酒品牌调性(沉稳、有故事感), 不作功效宣称。"
+  },
+  "metrics": {
+   "invocations": 0,
+   "successes": 0,
+   "recent": [],
+   "avg_latency_ms": 0
+  },
+  "source": "builtin",
+  "created_at": "",
+  "updated_at": ""
+ },
+ "critic_review": {
+  "skill_id": "critic_review",
+  "name": "回答质量复核",
+  "version": "1.0.0",
+  "status": "active",
+  "kind": "builtin_fn",
+  "slot": "review",
+  "intent": null,
+  "spec": {
+   "fn": "critic"
+  },
+  "metrics": {
+   "invocations": 0,
+   "successes": 0,
+   "recent": [],
+   "avg_latency_ms": 0
+  },
+  "source": "builtin",
+  "created_at": "",
+  "updated_at": ""
+ },
+ "drama76_checkpoint_order": {
+  "skill_id": "drama76_checkpoint_order",
+  "name": "76号卡点排序策略·共鸣三档权重",
+  "version": "1.0.0",
+  "status": "testing",
+  "kind": "builtin_fn",
+  "slot": "generate",
+  "intent": null,
+  "spec": {
+   "fn": "checkpoint_order",
+   "group_order": {
+    "hesitant": [
+     "invite",
+     "register",
+     "member"
+    ],
+    "eager": [
+     "register",
+     "member",
+     "invite"
+    ],
+    "sticky": [
+     "member",
+     "register",
+     "invite"
+    ],
+    "default": [
+     "register",
+     "invite",
+     "member"
+    ]
+   }
+  },
+  "metrics": {
+   "invocations": 0,
+   "successes": 0,
+   "recent": [],
+   "avg_latency_ms": 0,
+   "shadow_runs": 327,
+   "shadow_recent": [
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": false,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": false,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": false,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": false,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": false,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": false,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": false,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": false,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 5
+    },
+    {
+     "ok": false,
+     "latency_ms": 5
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    }
+   ]
+  },
+  "source": "drama76_dp4",
+  "created_at": "",
+  "updated_at": ""
+ }
+}

@@ -1,0 +1,278 @@
+{
+ "title": "竹香酒馆",
+ "theme": "非遗文化体验",
+ "world": "一座融合非遗文化的酒馆，吸引年轻人打卡体验。",
+ "goldenFinger": "神秘酒谱，酒香四溢，解锁非遗传承。",
+ "arc": [
+  "酒馆初探",
+  "非遗传承",
+  "神秘酒谱",
+  "竹林寻踪",
+  "酒香四溢",
+  "传承之光"
+ ],
+ "cast": [
+  {
+   "persona": "zhuxiaomei",
+   "character": "竹小妹",
+   "role": "主角",
+   "traits": "活泼亲切"
+  },
+  {
+   "persona": "xiaozhushuaige",
+   "character": "小竹帅哥",
+   "role": "长辈",
+   "traits": "沉稳幽默"
+  }
+ ],
+ "episodes": [
+  {
+   "ep": 1,
+   "title": "酒馆初探",
+   "duration": 90,
+   "beats": {
+    "hook": "竹香酒馆热闹非凡，竹小妹和小竹帅哥来了！",
+    "twist": "酒馆老板透露，这里藏着非遗传承的秘密。",
+    "cliffhanger": "神秘的酒谱，竟与竹林有关？"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "好奇",
+     "scene": "酒馆内",
+     "text": "哇，这酒馆好热闹啊！"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "沉稳",
+     "scene": "酒馆内",
+     "text": "别急，慢慢看，这里大有来头。"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "兴奋",
+     "scene": "酒馆内",
+     "text": "真的吗？好期待！"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "神秘",
+     "scene": "酒馆内",
+     "text": "老板，这酒馆有什么特别之处吗？"
+    }
+   ]
+  },
+  {
+   "ep": 2,
+   "title": "非遗传承",
+   "duration": 90,
+   "beats": {
+    "hook": "老板讲述酒馆背后的非遗传承故事。",
+    "twist": "竹小妹和小竹帅哥发现，酒香与竹林有关。",
+    "cliffhanger": "神秘的酒谱，竟然是竹林秘方？"
+   },
+   "lines": [
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "专注",
+     "scene": "酒馆内",
+     "text": "老板，这酒馆的酒有什么特别之处？"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "惊讶",
+     "scene": "酒馆内",
+     "text": "哇，这酒香好独特，好像有竹子的味道！"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "好奇",
+     "scene": "酒馆内",
+     "text": "老板，这酒香与竹林有关吗？"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "惊喜",
+     "scene": "酒馆内",
+     "text": "是的，这酒正是用竹林秘方酿造的。"
+    }
+   ]
+  },
+  {
+   "ep": 3,
+   "title": "神秘酒谱",
+   "duration": 90,
+   "beats": {
+    "hook": "竹小妹和小竹帅哥寻找神秘的酒谱。",
+    "twist": "他们发现，酒谱上的字迹竟然是竹叶形状。",
+    "cliffhanger": "竹叶上的字，隐藏着什么秘密？"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "兴奋",
+     "scene": "竹林中",
+     "text": "小竹帅哥，你看这竹叶上的字，好像是我们酒馆的酒谱！"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "专注",
+     "scene": "竹林中",
+     "text": "没错，这些字迹是竹叶形状，非常特别。"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "好奇",
+     "scene": "竹林中",
+     "text": "那这些字，会不会是酒谱上的秘密呢？"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "神秘",
+     "scene": "竹林中",
+     "text": "也许吧，我们需要仔细研究。"
+    }
+   ]
+  },
+  {
+   "ep": 4,
+   "title": "竹林寻踪",
+   "duration": 90,
+   "beats": {
+    "hook": "竹小妹和小竹帅哥深入竹林，寻找酒谱的线索。",
+    "twist": "他们发现了一处古老的酒窖。",
+    "cliffhanger": "酒窖中，竟然藏着传说中的竹香酒！"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "好奇",
+     "scene": "竹林中",
+     "text": "小竹帅哥，你看这竹林深处，好像有什么东西！"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "专注",
+     "scene": "竹林中",
+     "text": "没错，这处酒窖，应该是酒谱上提到的。"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "兴奋",
+     "scene": "酒窖中",
+     "text": "哇，这里竟然藏着传说中的竹香酒！"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "惊喜",
+     "scene": "酒窖中",
+     "text": "是的，这酒就是用竹林秘方酿造的。"
+    }
+   ]
+  },
+  {
+   "ep": 5,
+   "title": "酒香四溢",
+   "duration": 90,
+   "beats": {
+    "hook": "竹小妹和小竹帅哥品尝竹香酒，感受非遗文化的魅力。",
+    "twist": "他们发现，酒香能激发人的潜能。",
+    "cliffhanger": "竹香酒，竟然能激发出竹小妹的潜在才艺？"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "陶醉",
+     "scene": "酒馆内",
+     "text": "这酒香真特别，好像能让我心情愉悦。"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "惊喜",
+     "scene": "酒馆内",
+     "text": "没错，这酒香能激发人的潜能。"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "兴奋",
+     "scene": "酒馆内",
+     "text": "哇，我好像找到了新的才艺！"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "惊喜",
+     "scene": "酒馆内",
+     "text": "太棒了，竹小妹，你发现了自己的潜能！"
+    }
+   ]
+  },
+  {
+   "ep": 6,
+   "title": "传承之光",
+   "duration": 90,
+   "beats": {
+    "hook": "竹小妹和小竹帅哥决定将非遗文化传承下去。",
+    "twist": "他们计划开设自己的竹香酒馆。",
+    "cliffhanger": "竹香酒馆，即将成为新的非遗文化体验地！"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "坚定",
+     "scene": "酒馆内",
+     "text": "小竹帅哥，我们要把非遗文化传承下去！"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "支持",
+     "scene": "酒馆内",
+     "text": "是的，我们要开设自己的竹香酒馆。"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "期待",
+     "scene": "酒馆内",
+     "text": "我一定把竹香酒馆经营好，让更多人了解非遗文化。"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "鼓励",
+     "scene": "酒馆内",
+     "text": "我相信你，竹小妹，竹香酒馆一定会成功的！"
+    }
+   ]
+  }
+ ],
+ "hotspot": {
+  "title": "非遗文化体验馆走红, 年轻人打卡新宠",
+  "platform": "baidu",
+  "score": 86
+ },
+ "track": "glm-4-flash",
+ "seriesId": "d84_4c2d8186ccee",
+ "lintFlaws": []
+}

@@ -1,0 +1,278 @@
+{
+ "title": "竹香酒馆",
+ "theme": "逆袭",
+ "world": "江南竹镇竹香酒馆守住家业的故事",
+ "goldenFinger": "祖传竹香老酒味觉记忆",
+ "arc": [
+  "困境",
+  "转机",
+  "前行",
+  "考验",
+  "翻盘",
+  "圆梦"
+ ],
+ "cast": [
+  {
+   "persona": "zhuxiaomei",
+   "character": "竹小妹",
+   "role": "女主",
+   "traits": "活泼坚韧"
+  },
+  {
+   "persona": "xiaozhushuaige",
+   "character": "小竹帅哥",
+   "role": "男主",
+   "traits": "沉稳担当"
+  }
+ ],
+ "episodes": [
+  {
+   "ep": 1,
+   "title": "第1回",
+   "duration": 75,
+   "beats": {
+    "hook": "风波又起",
+    "twist": "酒里藏转机",
+    "cliffhanger": "考验将至"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "急",
+     "scene": "酒馆",
+     "text": "这回真难办了"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "稳",
+     "scene": "酒馆",
+     "text": "别慌有竹香酒"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "疑",
+     "scene": "酒馆",
+     "text": "就凭这杯酒"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "定",
+     "scene": "酒馆",
+     "text": "且看下回分解"
+    }
+   ]
+  },
+  {
+   "ep": 2,
+   "title": "第2回",
+   "duration": 75,
+   "beats": {
+    "hook": "风波又起",
+    "twist": "酒里藏转机",
+    "cliffhanger": "考验将至"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "急",
+     "scene": "酒馆",
+     "text": "这回真难办了"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "稳",
+     "scene": "酒馆",
+     "text": "别慌有竹香酒"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "疑",
+     "scene": "酒馆",
+     "text": "就凭这杯酒"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "定",
+     "scene": "酒馆",
+     "text": "且看下回分解"
+    }
+   ]
+  },
+  {
+   "ep": 3,
+   "title": "第3回",
+   "duration": 75,
+   "beats": {
+    "hook": "风波又起",
+    "twist": "酒里藏转机",
+    "cliffhanger": "考验将至"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "急",
+     "scene": "酒馆",
+     "text": "这回真难办了"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "稳",
+     "scene": "酒馆",
+     "text": "别慌有竹香酒"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "疑",
+     "scene": "酒馆",
+     "text": "就凭这杯酒"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "定",
+     "scene": "酒馆",
+     "text": "且看下回分解"
+    }
+   ]
+  },
+  {
+   "ep": 4,
+   "title": "第4回",
+   "duration": 75,
+   "beats": {
+    "hook": "风波又起",
+    "twist": "酒里藏转机",
+    "cliffhanger": "考验将至"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "急",
+     "scene": "酒馆",
+     "text": "这回真难办了"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "稳",
+     "scene": "酒馆",
+     "text": "别慌有竹香酒"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "疑",
+     "scene": "酒馆",
+     "text": "就凭这杯酒"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "定",
+     "scene": "酒馆",
+     "text": "且看下回分解"
+    }
+   ]
+  },
+  {
+   "ep": 5,
+   "title": "第5回",
+   "duration": 75,
+   "beats": {
+    "hook": "风波又起",
+    "twist": "酒里藏转机",
+    "cliffhanger": "考验将至"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "急",
+     "scene": "酒馆",
+     "text": "这回真难办了"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "稳",
+     "scene": "酒馆",
+     "text": "别慌有竹香酒"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "疑",
+     "scene": "酒馆",
+     "text": "就凭这杯酒"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "定",
+     "scene": "酒馆",
+     "text": "且看下回分解"
+    }
+   ]
+  },
+  {
+   "ep": 6,
+   "title": "第6回",
+   "duration": 75,
+   "beats": {
+    "hook": "风波又起",
+    "twist": "酒里藏转机",
+    "cliffhanger": "考验将至"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "急",
+     "scene": "酒馆",
+     "text": "这回真难办了"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "稳",
+     "scene": "酒馆",
+     "text": "别慌有竹香酒"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "疑",
+     "scene": "酒馆",
+     "text": "就凭这杯酒"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "定",
+     "scene": "酒馆",
+     "text": "且看下回分解"
+    }
+   ]
+  }
+ ],
+ "hotspot": {
+  "title": "中秋团圆宴白酒清单火了",
+  "platform": "xiaohongshu",
+  "score": 91
+ },
+ "track": "main",
+ "seriesId": "d84_94a71e2cd064",
+ "lintFlaws": []
+}

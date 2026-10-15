@@ -1,0 +1,278 @@
+{
+ "title": "竹香酒馆·另一个热点",
+ "theme": "逆袭成长",
+ "world": "江南竹镇上一家传承三代的竹香酒馆, 年轻一代用真诚与手艺守住家业",
+ "goldenFinger": "一坛祖传竹香老酒的味觉记忆",
+ "arc": [
+  "困境",
+  "转机",
+  "前行",
+  "考验",
+  "翻盘",
+  "圆梦"
+ ],
+ "cast": [
+  {
+   "persona": "zhuxiaomei",
+   "character": "竹小妹",
+   "role": "主角",
+   "traits": "竹香酒品牌 IP · 活"
+  },
+  {
+   "persona": "xiaozhushuaige",
+   "character": "小竹帅哥",
+   "role": "搭档",
+   "traits": "竹香酒品牌 IP · 沉"
+  }
+ ],
+ "episodes": [
+  {
+   "ep": 1,
+   "title": "另一个热点·困境",
+   "duration": 75,
+   "beats": {
+    "hook": "第1集: 另一个热点风波又起",
+    "twist": "竹小妹发现转机藏在竹香酒里",
+    "cliffhanger": "更大的考验正在靠近"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "焦急",
+     "scene": "竹林小院",
+     "text": "这事比想象中难办"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "沉稳",
+     "scene": "竹林小院",
+     "text": "别慌, 我有一坛竹香老酒"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "委屈",
+     "scene": "竹林小院",
+     "text": "难道就这样认输了"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "笃定",
+     "scene": "竹林小院",
+     "text": "竹香入喉, 办法就有了, 且看下回"
+    }
+   ]
+  },
+  {
+   "ep": 2,
+   "title": "另一个热点·转机",
+   "duration": 75,
+   "beats": {
+    "hook": "第2集: 另一个热点风波又起",
+    "twist": "竹小妹发现转机藏在竹香酒里",
+    "cliffhanger": "更大的考验正在靠近"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "惊喜",
+     "scene": "竹林小院",
+     "text": "原来转机就在眼前"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "沉稳",
+     "scene": "竹林小院",
+     "text": "别慌, 我有一坛竹香老酒"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "振奋",
+     "scene": "竹林小院",
+     "text": "这一步走对了"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "笃定",
+     "scene": "竹林小院",
+     "text": "竹香入喉, 办法就有了, 且看下回"
+    }
+   ]
+  },
+  {
+   "ep": 3,
+   "title": "另一个热点·前行",
+   "duration": 75,
+   "beats": {
+    "hook": "第3集: 另一个热点风波又起",
+    "twist": "竹小妹发现转机藏在竹香酒里",
+    "cliffhanger": "更大的考验正在靠近"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "坚定",
+     "scene": "竹林小院",
+     "text": "认准的路就走下去"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "沉稳",
+     "scene": "竹林小院",
+     "text": "别慌, 我有一坛竹香老酒"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "感概",
+     "scene": "竹林小院",
+     "text": "一路走来真不容易"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "笃定",
+     "scene": "竹林小院",
+     "text": "竹香入喉, 办法就有了, 且看下回"
+    }
+   ]
+  },
+  {
+   "ep": 4,
+   "title": "另一个热点·考验",
+   "duration": 75,
+   "beats": {
+    "hook": "第4集: 另一个热点风波又起",
+    "twist": "竹小妹发现转机藏在竹香酒里",
+    "cliffhanger": "更大的考验正在靠近"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "紧张",
+     "scene": "竹林小院",
+     "text": "这次的难关不简单"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "沉稳",
+     "scene": "竹林小院",
+     "text": "别慌, 我有一坛竹香老酒"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "沉着",
+     "scene": "竹林小院",
+     "text": "越乱越要稳得住"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "笃定",
+     "scene": "竹林小院",
+     "text": "竹香入喉, 办法就有了, 且看下回"
+    }
+   ]
+  },
+  {
+   "ep": 5,
+   "title": "另一个热点·翻盘",
+   "duration": 75,
+   "beats": {
+    "hook": "第5集: 另一个热点风波又起",
+    "twist": "竹小妹发现转机藏在竹香酒里",
+    "cliffhanger": "更大的考验正在靠近"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "扬眉",
+     "scene": "竹林小院",
+     "text": "终于等到这一天"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "沉稳",
+     "scene": "竹林小院",
+     "text": "别慌, 我有一坛竹香老酒"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "欣喜",
+     "scene": "竹林小院",
+     "text": "苦日子熬出头了"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "笃定",
+     "scene": "竹林小院",
+     "text": "竹香入喉, 办法就有了, 且看下回"
+    }
+   ]
+  },
+  {
+   "ep": 6,
+   "title": "另一个热点·圆梦",
+   "duration": 75,
+   "beats": {
+    "hook": "第6集: 另一个热点风波又起",
+    "twist": "竹小妹发现转机藏在竹香酒里",
+    "cliffhanger": "更大的考验正在靠近"
+   },
+   "lines": [
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "欣慰",
+     "scene": "竹林小院",
+     "text": "竹香酒馆守住了"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "沉稳",
+     "scene": "竹林小院",
+     "text": "别慌, 我有一坛竹香老酒"
+    },
+    {
+     "persona": "zhuxiaomei",
+     "character": "竹小妹",
+     "emotion": "感恩",
+     "scene": "竹林小院",
+     "text": "谢谢一路撑住的人"
+    },
+    {
+     "persona": "xiaozhushuaige",
+     "character": "小竹帅哥",
+     "emotion": "笃定",
+     "scene": "竹林小院",
+     "text": "竹香入喉, 办法就有了, 且看下回"
+    }
+   ]
+  }
+ ],
+ "hotspot": {
+  "title": "另一个热点",
+  "platform": "douyin",
+  "score": 70
+ },
+ "track": "rule",
+ "seriesId": "d84_6bf7bdd3b04d",
+ "lintFlaws": []
+}

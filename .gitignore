@@ -185,6 +185,17 @@ ffmpeg/
 tmp_upload/
 
 # ============================================================
+# 媒体产物目录(视频/图集/分镜, 本地生成不入库; series84 剧集
+# JSON 数据与 agent_tasks 任务定义除外)
+# ============================================================
+zhuxiang-jiu/backend/sv73_videos/
+zhuxiang-jiu/backend/storyboards/
+zhuxiang-jiu/backend/xhs_packs/
+zhuxiang-jiu/backend/promo_videos/
+zhuxiang-jiu/deploy/staging/
+zhuxiang-jiu/deploy/dist_index.work.html
+
+# ============================================================
 # 语音/OCR/图像调试残留(排障一次性产物)
 # ============================================================
 *.wav

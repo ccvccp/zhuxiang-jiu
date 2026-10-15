@@ -1,0 +1,40 @@
+{
+ "seriesId": "d84_94a71e2cd064",
+ "title": "竹香酒馆",
+ "score": 83.8,
+ "factors": [
+  {
+   "name": "theme_appeal",
+   "score": 91.0,
+   "weight": 25.0,
+   "detail": "热点分值 91.0"
+  },
+  {
+   "name": "cast_fit",
+   "score": 100.0,
+   "weight": 20.0,
+   "detail": "角色 2 个/IP 主角 在列"
+  },
+  {
+   "name": "pacing",
+   "score": 100.0,
+   "weight": 20.0,
+   "detail": "6/6 集达标(45-120s)"
+  },
+  {
+   "name": "script_quality",
+   "score": 100.0,
+   "weight": 15.0,
+   "detail": "track=main lint=0 瑕疵"
+  },
+  {
+   "name": "traffic_value",
+   "score": 30.0,
+   "weight": 20.0,
+   "detail": "3 解锁/上线 2.0 天"
+  }
+ ],
+ "unlocks": 3,
+ "onlineDays": 2.0,
+ "scoredAt": "2026-10-12T20:06:10.145535+00:00"
+}

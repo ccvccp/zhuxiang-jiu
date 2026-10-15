@@ -1,0 +1,20 @@
+{
+ "generatedAt": "2026-10-12T20:06:10.159595+00:00",
+ "count": 1,
+ "topics": [
+  {
+   "hotspotId": 1,
+   "hotspot": "国庆家宴竹香酒热榜",
+   "theme": "品牌向剧情",
+   "audience": "25-45 白酒兴趣人群",
+   "hookPattern": "热点开场+竹香酒转机",
+   "risk": "无",
+   "cast": [
+    "zhuxiaomei",
+    "xiaozhushuaige"
+   ],
+   "episodes": 6,
+   "score": 88.0
+  }
+ ]
+}
