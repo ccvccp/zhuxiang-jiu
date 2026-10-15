@@ -10,6 +10,12 @@
 环境开关:
     GROWTH_ESCROW_AUTO=off|on     调度总开关(默认 off)
     GROWTH_ESCROW_INTERVAL=N      扫描周期秒(默认 3600, 下限 300)
+    GROWTH_ESCROW_MULTIPLIER=off|observe|enforce
+                                  IMTM 定价因子模式(默认 observe, 见
+                                  services/growth80_pricing.py):
+                                  off=bit 级 v2-E3 原行为 /
+                                  observe=因子快照留痕不改分值 /
+                                  enforce=M_game 三档乘数生效(1.2/1.0/0.8)
 
 结算规则(实施方案 §3.3):
     到期 pending escrow → 达标判定(被引进人注册后回访登录 /
@@ -57,6 +63,10 @@ async def run_escrow_settlement(force: bool = False) -> dict:
                 "skipped": 0, "fuseTriggered": False}
 
     from core.locks import get_lock
+    from services.growth80_pricing import (
+        classify_retention, compute_factors, log_snapshot, multiplier_mode,
+    )
+    mode = multiplier_mode()
     pending = await repo.list_escrows(state="pending", limit=10000)
     now = datetime.now(UTC)
     scanned = unlocked = forfeited = 0
@@ -72,17 +82,33 @@ async def run_escrow_settlement(force: bool = False) -> dict:
                 fresh = await repo.get_escrow(escrow["escrowId"])
                 if not fresh or fresh.get("state") != "pending":
                     continue   # 并发已结算(幂等)
-                eligible, why = await _invitee_active(
-                    fresh, settings)
+                factors = None
+                if mode == "off":
+                    eligible, why = await _invitee_active(
+                        fresh, settings)
+                else:
+                    # IMTM 定价因子路径(observe/enforce):
+                    # observe 达标口径与 v2-E3 三信号完全等价;
+                    # enforce 下 weak 档(login 1-2)由没收转 80% 解冻
+                    cls = await classify_retention(fresh, settings)
+                    eligible = (cls["eligible_enforced"] if mode == "enforce"
+                                else cls["eligible_now"])
+                    why = cls["signal"]
+                    factors = await compute_factors(repo, fresh, cls)
+                    log_snapshot(fresh["escrowId"], factors)
                 if eligible:
-                    await _unlock(repo, fresh, why)
+                    await _unlock(repo, fresh, why,
+                                 factors=factors, mode=mode)
                     unlocked += 1
                 else:
-                    await repo.update_escrow(fresh["escrowId"], {
+                    fields = {
                         "state": "forfeited",
                         "settledAt": _now_iso(),
                         "reason": "观察期满未活跃",
-                    })
+                    }
+                    if factors:
+                        fields["factors"] = factors
+                    await repo.update_escrow(fresh["escrowId"], fields)
                     forfeited += 1
                     # 45号 P6-D3: 作废信号入分(推荐人 platform_conduct,
                     # shadow 留痕不改分; fail-soft)
@@ -151,20 +177,32 @@ async def _invitee_active(escrow: dict, settings: dict) -> tuple[bool, str]:
     return False, ""
 
 
-async def _unlock(repo, escrow: dict, why: str) -> None:
-    """达标发放: earn_points(幂等 refId 同源) + 状态 + 站内信"""
+async def _unlock(repo, escrow: dict, why: str,
+                  factors: dict | None = None, mode: str = "off") -> None:
+    """达标发放: earn_points(幂等 refId 同源) + 状态 + 站内信
+
+    IMTM enforce 模式: 发放分值 = factors.unlockPoints(M_game 乘数后),
+    settledPoints 字段留痕实发值; observe 模式分值不变(factors 仅快照)。
+    """
     from services.points_service import PointsService
     user_id = int(escrow["userId"])
+    pts = int(escrow.get("points", 0))
+    if factors and mode == "enforce":
+        pts = int(factors.get("unlockPoints") or pts)
     await PointsService().earn_points(
-        user_id, int(escrow.get("points", 0)),
+        user_id, pts,
         source=str(escrow.get("source") or "traffic79"),
         ref_id=str(escrow.get("refId") or ""),
         ref_desc=f"引进积分观察期达标解冻({why}, v2-E3)")
-    await repo.update_escrow(escrow["escrowId"], {
+    fields = {
         "state": "unlocked",
         "settledAt": _now_iso(),
         "reason": why,
-    })
+    }
+    if factors:
+        fields["factors"] = factors
+        fields["settledPoints"] = pts
+    await repo.update_escrow(escrow["escrowId"], fields)
     try:
         from repositories.message_repository import (
             CHANNEL_INMAIL, CATEGORY_MEMBER,
@@ -173,7 +211,7 @@ async def _unlock(repo, escrow: dict, why: str) -> None:
         await MessageService().send_message(
             user_id=user_id, channel=CHANNEL_INMAIL,
             title="推荐奖励已到账",
-            content=(f"您推荐的会员已活跃，+{escrow.get('points', 0)} "
+            content=(f"您推荐的会员已活跃，+{pts} "
                      f"积分已到账（观察期达标）。"),
             category=CATEGORY_MEMBER,
         )
