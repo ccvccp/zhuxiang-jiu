@@ -128,6 +128,79 @@ class AuthRepository:
         jtis = registry.pop(str(member_id), [])
         return len(jtis)
 
+    # ---------- 会员登录失败锁定(G1: 防暴力破解, 2026-10-15) ----------
+    #
+    # 语义: 计数窗口(15min)内密码错误累计 5 次 → 锁定 15 分钟(TTL 自然过期
+    # 自动解锁, 无需人工干预); 锁定期内即使密码正确也拒绝登录;
+    # 成功登录仅清零计数, 不清除锁定键(锁定只能等过期)。
+    # 双模式:
+    #   - Redis: zhuxiang:auth:login_fail:{id}(计数, TTL=窗口) /
+    #            zhuxiang:auth:login_lock:{id}(锁定, TTL=锁定时长)
+    #   - 内存:  store["auth_login_fail"] {id: {count, start}} /
+    #            store["auth_login_lock"]  {id: {until}}
+
+    LOGIN_FAIL_LIMIT = 5        # 窗口内失败达 5 次 → 锁定
+    LOGIN_WINDOW_SECONDS = 900  # 计数窗口 15 分钟
+    LOGIN_LOCK_SECONDS = 900    # 锁定时长 15 分钟
+
+    async def get_login_lock_remain(self, member_id) -> int:
+        """登录锁定剩余秒数(0=未锁定; 过期条目惰性清理)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            ttl = await client.ttl(_k("auth", "login_lock", member_id))
+            return max(0, ttl or 0)
+        rec = self.store.get("auth_login_lock", {}).get(str(member_id))
+        if not rec:
+            return 0
+        remain = rec.get("until", 0) - time.time()
+        if remain <= 0:
+            self.store["auth_login_lock"].pop(str(member_id), None)
+            return 0
+        return int(remain)
+
+    async def login_fail_incr(self, member_id) -> tuple[int, bool]:
+        """登录失败计数+1; 达阈值置锁定键并清计数
+
+        Returns:
+            (本次窗口累计失败次数, 是否刚触发锁定)
+        """
+        key_id = str(member_id)
+        if is_redis_mode():
+            client = await get_redis_client()
+            ckey = _k("auth", "login_fail", member_id)
+            count = await client.incr(ckey)
+            if count == 1:
+                await client.expire(ckey, self.LOGIN_WINDOW_SECONDS)
+            if count >= self.LOGIN_FAIL_LIMIT:
+                await client.set(_k("auth", "login_lock", member_id), 1,
+                                 ex=self.LOGIN_LOCK_SECONDS)
+                await client.delete(ckey)
+                return count, True
+            return count, False
+        registry = self.store.setdefault("auth_login_fail", {})
+        now = time.time()
+        rec = registry.get(key_id)
+        if rec and now - rec["start"] > self.LOGIN_WINDOW_SECONDS:
+            rec = None   # 窗口已过, 重新计数
+        if rec is None:
+            rec = {"count": 0, "start": now}
+            registry[key_id] = rec
+        rec["count"] += 1
+        if rec["count"] >= self.LOGIN_FAIL_LIMIT:
+            self.store.setdefault("auth_login_lock", {})[key_id] = {
+                "until": now + self.LOGIN_LOCK_SECONDS}
+            registry.pop(key_id, None)
+            return rec["count"], True
+        return rec["count"], False
+
+    async def login_fail_reset(self, member_id) -> None:
+        """登录成功清零失败计数(锁定键由 TTL 自然过期, 此处不清除)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.delete(_k("auth", "login_fail", member_id))
+            return
+        self.store.get("auth_login_fail", {}).pop(str(member_id), None)
+
     # ---------- 短信验证码(P1-1, 设计文档 2.2 短信验证码规则) ----------
 
     async def save_sms_code(self, phone: str, code: str, ttl: int = 300) -> None:

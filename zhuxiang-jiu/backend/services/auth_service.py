@@ -196,10 +196,24 @@ class AuthService:
         if member.get("status", 1) == 0:
             raise ValueError("账号已被禁用,请联系客服")
 
+        # G1(2026-10-15): 登录失败锁定——锁定期内直接拒绝(正确密码也不放行)
+        lock_remain = await self.auth_repo.get_login_lock_remain(member["id"])
+        if lock_remain > 0:
+            raise ValueError(
+                f"登录失败次数过多, 请{max(1, lock_remain // 60)}分钟后再试")
+
         if not verify_password(password, member.get("password", "")):
             # 43号 P3-4: 登录失败留痕(撞库计数, best-effort)
             await self._record_auth_event(member["id"], success=False)
-            raise ValueError("密码错误")
+            fail_count, just_locked = await self.auth_repo.login_fail_incr(
+                member["id"])
+            if just_locked:
+                raise ValueError(
+                    f"密码错误已达{self.auth_repo.LOGIN_FAIL_LIMIT}次, "
+                    f"账号锁定{self.auth_repo.LOGIN_LOCK_SECONDS // 60}分钟")
+            raise ValueError(
+                f"密码错误(失败{fail_count}/"
+                f"{self.auth_repo.LOGIN_FAIL_LIMIT})")
 
         # 存量弱哈希自动升级为 PBKDF2(透明迁移)
         if is_legacy_password_hash(member.get("password", "")):
@@ -214,6 +228,8 @@ class AuthService:
                            "login_count":
                                int(member.get("login_count", 0) or 0) + 1}
         )
+        # G1(2026-10-15): 成功登录清零失败计数(锁定键不受影响, 只能等过期)
+        await self.auth_repo.login_fail_reset(member["id"])
         tokens = create_token_pair(member["id"], role)
         await self._record_jtis(member["id"], tokens)
         # 43号 P3-4: 登录成功留痕 + 开启会话序列(best-effort)
