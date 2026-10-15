@@ -149,3 +149,46 @@ taro-app/zxjiu-deploy.tar.gz
 
 # 部署打包临时 staging 目录(verify:deploy 预演等 Docker 构建残留)
 deploy-tmp/
+
+# ============================================================
+# 凭证与浏览器会话(channels-bot RPA 运行时, 绝不入库)
+# .skill/.tools/.weibo-home 为本地工具缓存; channels-bot 下的
+# 发布配置/事件探针/profile 均含登录态或 cookies
+# ============================================================
+.skill/
+.tools/
+.weibo-home/
+channels-bot/config_*.json
+channels-bot/evtspy_*.json
+channels-bot/*_dump.json
+channels-bot/login_dom_dump*.json
+channels-bot/rsprops.json
+channels-bot/*-profile/
+channels-bot/*.flag
+channels-bot/channels_stats*.txt
+channels-bot/compare_*.txt
+channels-bot/*.txt
+channels-bot/publish_result.json
+channels-bot/tools/
+
+# ============================================================
+# 下划线前缀一次性诊断脚本(本地排障用, 不入库)
+# ============================================================
+zhuxiang-jiu/backend/_*.py
+
+# ============================================================
+# 构建产物与外部二进制工具(本地部署包, 不入库)
+# ============================================================
+*.tar
+*.tar.gz
+ffmpeg/
+tmp_upload/
+
+# ============================================================
+# 语音/OCR/图像调试残留(排障一次性产物)
+# ============================================================
+*.wav
+/ocr_out.txt
+/drama-eps.txt
+/drama-eps-full.json
+/mp_avatar.png
