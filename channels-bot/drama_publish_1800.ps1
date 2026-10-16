@@ -1,4 +1,4 @@
-﻿# 短剧首批(drama_monologue) 18:00 黄金档发布编排——68 抖音 / 69 视频号
+﻿﻿﻿﻿﻿﻿﻿﻿# 短剧首批(drama_monologue) 18:00 黄金档发布编排——68 抖音 / 69 视频号
 # 时序: 18:01 计划任务(zxjiu-sv73-publish-process)自动转态 queued→rpa_pending
 #       → 本脚本 18:02+ 启动: ①核态(未转则补转) ②douyin-bot→68 ③bot.js→69(串行)
 # 回执: 发布成功后跑 manage 核验拿作品 URL → drama_receipt.py(stdin)登记(半值守)

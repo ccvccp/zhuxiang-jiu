@@ -4,9 +4,10 @@
 import asyncio
 
 # (contentId, 作品URL, publishId/作品号)——URL 从各平台 manage 核验取
+# 10-07 00:16/00:18 深夜补发双成功(manage 已核验已发布), 口径对齐 68(页面级 URL)
 RECEIPTS = [
-    (68, "https://www.douyin.com/video/TODO_68", "TODO_68"),
-    (69, "https://channels.weixin.qq.com/web/pages/feed/TODO_69", "TODO_69"),
+    (70, "https://creator.douyin.com/creator-micro/content/manage", "drama-cctv-gala-soliloquy"),
+    (77, "https://creator.douyin.com/creator-micro/content/manage", "drama-heritage-museum-soliloquy"),
 ]
 
 

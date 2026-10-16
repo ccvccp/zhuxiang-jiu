@@ -1,5 +1,6 @@
-﻿# 明日凌晨自动队列(2026-10-06 00:05 计划任务触发):
-#   ① publish_content(70) 入队 18:00 黄金档(日限 0 点重置)
+﻿﻿﻿﻿﻿﻿﻿﻿﻿# 明日凌晨自动队列(2026-10-06 00:05 计划任务触发):
+#   ① publish_content(70/77) 入队 18:00/18:30 黄金档(日限 0 点重置;
+#      77=小竹帅哥首秀·非遗独白 10-05 晚补)
 #   ② 快手补排产 1 条(vertical 零 GPU) + 本地渲染 + 三审 approve
 #   ③ 落盘新条目信息 -> tomorrow_queue_result.log(agent 次日消费生成 bot 配置)
 $log = 'd:\网站架构设计\channels-bot\tomorrow_queue_result.log'
@@ -17,6 +18,19 @@ asyncio.run(m())
 '@
 "[$(Get-Date -Format HH:mm:ss)] ① 70 入队 ..." | Out-File $log -Append -Encoding utf8
 ($pipe | ssh -o ConnectTimeout=20 root@47.236.61.117 "docker exec -i zhuxiang-backend-1 python -") | Out-File $log -Append -Encoding utf8
+
+# ①b 77 入队(小竹帅哥首秀·非遗独白, 错峰 18:30 防同平台同分钟互搏)
+$pipe77 = @'
+import asyncio
+async def m():
+    from services.promo_service import PromoService
+    r = await PromoService().publish_content(
+        77, publish_at="2026-10-06T18:30:00+08:00")
+    print("publish 77 ->", r.get("status"))
+asyncio.run(m())
+'@
+"[$(Get-Date -Format HH:mm:ss)] ①b 77 入队(小竹帅哥首秀 18:30) ..." | Out-File $log -Append -Encoding utf8
+($pipe77 | ssh -o ConnectTimeout=20 root@47.236.61.117 "docker exec -i zhuxiang-backend-1 python -") | Out-File $log -Append -Encoding utf8
 
 # ② 快手排产 vertical 1 条
 "[$(Get-Date -Format HH:mm:ss)] ② 快手排产 vertical ..." | Out-File $log -Append -Encoding utf8
