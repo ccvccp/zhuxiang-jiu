@@ -32,12 +32,15 @@ const Cart = {
         showToast(`已添加 "${product.name}" 到购物车`);
     },
     remove(productId) {
-        const items = this.get().filter(i => i.id !== productId);
+        // T1.3 宽松匹配: 入参字符串化(与 add 同口径, mock 数字 id 与 live SKU 双态)
+        const sid = String(productId);
+        const items = this.get().filter(i => String(i.id) !== sid);
         this.save(items);
     },
     updateQty(productId, qty) {
+        const sid = String(productId);
         const items = this.get();
-        const item = items.find(i => i.id === productId);
+        const item = items.find(i => String(i.id) === sid);
         if (item) {
             item.qty = Math.max(1, qty);
             this.save(items);

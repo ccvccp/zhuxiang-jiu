@@ -33,10 +33,17 @@
     <div id="footer"></div>
 
     <script src="js/data.js"></script>
+    <script src="js/auth.js"></script>
     <script src="js/order-pricing.js"></script>
     <script src="js/main.js"></script>
     <script>
         initPage('shop');
+
+        // T1.3 计价预览 live 化: 登录走后端 POST /api/order/price/preview(真实会员价明细),
+        // 游客/未登录走本地引擎(calculateOrderPrice 预估口径不变); 401/失败静默回落本地。
+        // 后端契约(实测 2026-10-16):
+        //   请求 {items:[{productId,quantity,unitPrice}],usePoints} + Authorization Bearer + X-Member-Id
+        //   响应 priceDetail{goodsTotal,memberDiscount(负),couponDiscount,pointsDiscount,shippingFee,actualAmount,discountRate}
 
         function renderCart() {
             const items = Cart.get();
@@ -66,32 +73,17 @@
                     <div class="cart-price">¥${item.price}</div>
                     <div>
                         <div class="cart-qty">
-                            <button onclick="updateItemQty(${item.id}, ${item.qty - 1})">−</button>
+                            <button onclick="updateItemQty('${item.id}', ${item.qty - 1})">−</button>
                             <input type="text" value="${item.qty}" readonly>
-                            <button onclick="updateItemQty(${item.id}, ${item.qty + 1})">+</button>
+                            <button onclick="updateItemQty('${item.id}', ${item.qty + 1})">+</button>
                         </div>
                     </div>
                     <div class="cart-price">¥${item.price * item.qty}</div>
-                    <div class="cart-remove" onclick="removeItem(${item.id})" title="删除">✕</div>
+                    <div class="cart-remove" onclick="removeItem('${item.id}')" title="删除">✕</div>
                 </div>`).join('');
 
             const totalQty = Cart.count();
             const totalPrice = Cart.total();
-
-            // 预估优惠（SVIP L5 + 5000积分）
-            const mainProduct = items.length > 0
-                ? { name: items[0].name, price: items[0].price }
-                : { name: '竹香经典', price: 268 };
-            const estResult = calculateOrderPrice({
-                product: mainProduct,
-                quantity: totalQty,
-                orderType: 'retail',
-                memberLevel: 'L5',
-                points: 5000,
-                couponValue: 0,
-            });
-            const estDiscount = estResult.totalDiscount;
-            const estFinal = estResult.finalAmount;
 
             layout.innerHTML = `
                 <div class="cart-table">
@@ -110,18 +102,83 @@
                         <a href="products.html" style="color:var(--color-primary);font-size:14px;">← 继续购物</a>
                         <span style="margin-left:20px;color:var(--color-text-light);font-size:13px;cursor:pointer;" onclick="clearCart()">🗑 清空购物车</span>
                     </div>
-                    <div class="cart-summary">
-                        <div style="font-size:13px;color:var(--color-text-light);text-decoration:line-through;margin-bottom:4px;">
-                            原价：¥${totalPrice.toFixed(2)}
-                        </div>
-                        <div style="font-size:13px;color:var(--color-primary);margin-bottom:4px;">
-                            SVIP预估优惠：-¥${estDiscount.toFixed(2)}
-                        </div>
-                        <div class="total">共 <strong style="color:var(--color-primary);">${totalQty}</strong> 件，预估实付：</div>
-                        <div class="total-price">¥${estFinal.toFixed(2)}</div>
-                        <a href="checkout.html" class="btn btn-primary btn-lg">去结算 →</a>
+                    <div class="cart-summary" id="cartSummary">
+                        ${summaryLocalHtml(totalQty, totalPrice)}
                     </div>
                 </div>`;
+
+            // 登录态: 后端真实计价替换本地预估(失败静默保持)
+            loadLivePricing(items, totalQty);
+        }
+
+        // ---------- 本地引擎(游客/回落, 预估口径与原实现一致) ----------
+        function summaryLocalHtml(totalQty, totalPrice) {
+            const mainProduct = Cart.get().length > 0
+                ? { name: Cart.get()[0].name, price: Cart.get()[0].price }
+                : { name: '竹香经典', price: 268 };
+            const est = calculateOrderPrice({
+                product: mainProduct,
+                quantity: totalQty,
+                orderType: 'retail',
+                memberLevel: 'L5',
+                points: 5000,
+                couponValue: 0,
+            });
+            return `
+                <div style="font-size:13px;color:var(--color-text-light);text-decoration:line-through;margin-bottom:4px;">
+                    原价：¥${totalPrice.toFixed(2)}
+                </div>
+                <div style="font-size:13px;color:var(--color-primary);margin-bottom:4px;">
+                    SVIP预估优惠：-¥${est.totalDiscount.toFixed(2)}
+                </div>
+                <div class="total">共 <strong style="color:var(--color-primary);">${totalQty}</strong> 件，预估实付：</div>
+                <div class="total-price">¥${est.finalAmount.toFixed(2)}</div>
+                <a href="checkout.html" class="btn btn-primary btn-lg">去结算 →</a>`;
+        }
+
+        // ---------- 后端真实计价(登录) ----------
+        function summaryLiveHtml(pd, memberLevel, totalQty) {
+            const amt = function (v) { return Math.abs(Number(v) || 0).toFixed(2); };
+            return `
+                <div style="font-size:13px;color:var(--color-text-light);margin-bottom:4px;">
+                    商品合计：¥${Number(pd.goodsTotal || 0).toFixed(2)}
+                </div>
+                <div style="font-size:13px;color:var(--color-primary);margin-bottom:4px;">
+                    会员优惠(Lv${memberLevel})：-¥${amt(pd.memberDiscount)}
+                </div>
+                <div style="font-size:13px;color:var(--color-primary);margin-bottom:4px;">
+                    券抵扣：-¥${amt(pd.couponDiscount)} · 积分抵扣：-¥${amt(pd.pointsDiscount)}
+                </div>
+                <div style="font-size:13px;color:var(--color-text-light);margin-bottom:4px;">
+                    运费：¥${Number(pd.shippingFee || 0).toFixed(2)}
+                </div>
+                <div class="total">共 <strong style="color:var(--color-primary);">${totalQty}</strong> 件，预估实付：</div>
+                <div class="total-price">¥${Number(pd.actualAmount || 0).toFixed(2)}</div>
+                <a href="checkout.html" class="btn btn-primary btn-lg">去结算 →</a>`;
+        }
+
+        function loadLivePricing(items, totalQty) {
+            if (!(window.Auth && Auth.isLoggedIn())) return; // 游客: 保持本地预估
+            const info = Auth.getInfo() || {};
+            const token = Auth.getToken();
+            if (!token || !info.memberId) return;
+            fetch('/api/order/price/preview', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token,
+                    'X-Member-Id': String(info.memberId)
+                },
+                body: JSON.stringify({
+                    items: items.map(i => ({ productId: String(i.id), quantity: i.qty, unitPrice: i.price })),
+                    usePoints: 0
+                })
+            }).then(r => r.ok ? r.json() : null).then(j => {
+                if (!j || j.success !== true || !j.priceDetail) return; // 形态异常: 静默保持本地
+                document.body.setAttribute('data-pricing-mode', 'live');
+                const box = document.getElementById('cartSummary');
+                if (box) box.innerHTML = summaryLiveHtml(j.priceDetail, j.memberLevel, totalQty);
+            }).catch(err => console.warn('[CartPricing] live 计价失败, 保持本地预估:', err && err.message));
         }
 
         function updateItemQty(id, qty) {

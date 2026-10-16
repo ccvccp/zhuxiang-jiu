@@ -308,7 +308,7 @@ authBadge: 页头登录态 UI(昵称+管理员标识+退出); requireLogin() 未
 | index | 6 | 同盟37号 · auth |
 | products | 1 | **产品管理（live ✅ T1.1）** `/api/product/list` |
 | product-detail | 2 | **产品管理（live ✅ T1.2）** `/api/product/{id}`(主信息+related 4 条)；竹韵智衡75号 |
-| cart | 1 | （mock 侧待 live） |
+| cart | 1 | **订单交易（计价 live ✅ T1.3）** `POST /api/order/price/preview`(登录态会员价明细)；游客走本地引擎 |
 | checkout | 4 | 供应链事务 |
 | news | 2 | 内容社区 |
 | news-detail | 1 | （mock 侧待 live） |
