@@ -65,6 +65,43 @@ window.ProductsLive = (function () {
         });
     }
 
+    // ---------- T1.2 详情适配(detail 全字段 → 详情页模板字段) ----------
+    // 页面模板消费: name/desc/category/series/alcohol/volume/origin/price/originalPrice/id
+    function adaptDetail(p) {
+        var attrs = p.attributes || {};
+        return {
+            id: esc(p.product_id),
+            name: esc(p.name),
+            category: esc(attrs.aroma) || '竹香型',
+            series: esc(p.series),
+            alcohol: p.alcohol !== null && p.alcohol !== undefined ? esc(p.alcohol) + '度' : esc(attrs.alcohol),
+            volume: esc(p.volume),
+            origin: esc(p.origin),
+            price: Number(p.price) || 0,
+            originalPrice: Number(p.original_price) || 0,
+            desc: esc(p.description || p.subtitle),
+            tag: (Array.isArray(p.tags) && p.tags.length) ? esc(p.tags[0]) : (p.featured ? '主打' : ''),
+            isNew: Array.isArray(p.tags) && p.tags.indexOf('新品') >= 0
+        };
+    }
+
+    // ---------- T1.2 详情拉取: GET /api/product/{id} → {product, related[]} ----------
+    function fetchDetail(id) {
+        return fetch('/api/product/' + encodeURIComponent(id), {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        }).then(function (r) {
+            if (!r.ok) throw new Error('http_' + r.status);
+            return r.json();
+        }).then(function (j) {
+            if (!j || j.success !== true || !j.product || !j.product.product_id) {
+                throw new Error('shape');
+            }
+            var related = Array.isArray(j.related) ? j.related.map(adapt) : [];
+            return { product: adaptDetail(j.product), related: related };
+        });
+    }
+
     // ---------- 对外 API ----------
     return {
         /** 异步加载; 成功后 mode=live 并回调 onReady(由页面重渲染), 失败静默留 mock */
@@ -89,6 +126,17 @@ window.ProductsLive = (function () {
                 if (state.products[i].id === id) return state.products[i];
             }
             return null;
+        },
+        /** T1.2 详情拉取; Promise<{product, related[]}>; 失败 reject 由页面回落 mock */
+        loadDetail: function (id) {
+            return fetchDetail(id).then(function (res) {
+                // 详情产品注册进 live 池: 供 Cart.add 回退 findById 查找(详情页未走列表 load)
+                if (!state.products.some(function (x) { return x.id === res.product.id; })) {
+                    state.products.push(res.product);
+                }
+                document.body.setAttribute('data-products-mode', 'live');
+                return res;
+            });
         }
     };
 })();

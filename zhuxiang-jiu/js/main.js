@@ -17,11 +17,12 @@ const Cart = {
     },
     add(productId, qty = 1) {
         const items = this.get();
-        // T1.1 live 兼容: mock 池(data.js)查不到时回退 live 池(ProductsLive, 字符串 SKU id)
-        const product = PRODUCTS.find(p => p.id === productId)
-            || (window.ProductsLive && ProductsLive.findById(productId));
+        // T1.2 宽松匹配: 入参统一字符串化比对(mock 数字 id 与 live SKU id 两种形态)
+        const sid = String(productId);
+        const product = PRODUCTS.find(p => String(p.id) === sid)
+            || (window.ProductsLive && ProductsLive.findById(sid));
         if (!product) return;
-        const existing = items.find(i => i.id === productId);
+        const existing = items.find(i => String(i.id) === sid);
         if (existing) {
             existing.qty += qty;
         } else {
@@ -245,7 +246,7 @@ function renderProductCard(p) {
             <div class="product-desc">${p.desc}</div>
             <div class="product-bottom">
                 <div class="product-price">¥${p.price}<small> / ${p.volume}</small></div>
-                <button class="btn-add-cart" onclick="event.stopPropagation(); Cart.add(${p.id})">加入购物车</button>
+                <button class="btn-add-cart" onclick="event.stopPropagation(); Cart.add('${p.id}')">加入购物车</button>
             </div>
         </div>
     </div>`;

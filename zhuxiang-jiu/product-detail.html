@@ -66,18 +66,23 @@
     <div id="footer"></div>
 
     <script src="js/data.js"></script>
+    <script src="js/products-live.js"></script>
     <script src="js/main.js"></script>
     <script>
         initPage('products');
 
-        const productId = parseInt(getQueryParam('id')) || 1;
-        const product = PRODUCTS.find(p => p.id === productId) || PRODUCTS[0];
+        // T1.2 双轨 id: 非纯数字 = live SKU(如 ZX42-2026B01) → 异步详情替换; 纯数字/空 = mock(data.js)
+        const rawId = getQueryParam('id');
+        const liveSku = rawId && !/^\d+$/.test(rawId) ? rawId : null;
+        let product = PRODUCTS.find(p => p.id === (parseInt(rawId) || 1)) || PRODUCTS[0];
 
-        document.getElementById('crumbName').textContent = product.name;
-        document.title = `${product.name} - 竹香酒`;
+        // 渲染主入口(mock 与 live 共用同一模板, 版式同构)
+        function renderAll(p, relatedArr) {
+            document.getElementById('crumbName').textContent = p.name;
+            document.title = `${p.name} - 竹香酒`;
 
-        // 渲染产品详情
-        document.getElementById('productDetail').innerHTML = `
+            // 渲染产品详情
+            document.getElementById('productDetail').innerHTML = `
             <div>
                 <div class="product-gallery">
                     <div class="bottle"></div>
@@ -90,23 +95,23 @@
                 </div>
             </div>
             <div class="product-info-detail">
-                <h1>${product.name}</h1>
-                <p class="product-subtitle">${product.desc}</p>
+                <h1>${p.name}</h1>
+                <p class="product-subtitle">${p.desc}</p>
                 <div class="product-meta">
-                    <div class="product-meta-row"><label>香型：</label><span>${product.category}</span></div>
-                    <div class="product-meta-row"><label>系列：</label><span>${product.series}</span></div>
-                    <div class="product-meta-row"><label>酒精度：</label><span>${product.alcohol}</span></div>
-                    <div class="product-meta-row"><label>净含量：</label><span>${product.volume}</span></div>
-                    <div class="product-meta-row"><label>产地：</label><span>${product.origin}</span></div>
+                    <div class="product-meta-row"><label>香型：</label><span>${p.category}</span></div>
+                    <div class="product-meta-row"><label>系列：</label><span>${p.series}</span></div>
+                    <div class="product-meta-row"><label>酒精度：</label><span>${p.alcohol}</span></div>
+                    <div class="product-meta-row"><label>净含量：</label><span>${p.volume}</span></div>
+                    <div class="product-meta-row"><label>产地：</label><span>${p.origin}</span></div>
                 </div>
                 <div class="product-price-box">
-                    <span class="price-now">¥${product.price}</span>
-                    <span class="price-original">原价 ¥${product.originalPrice}</span>
+                    <span class="price-now">¥${p.price}</span>
+                    <span class="price-original">原价 ¥${p.originalPrice}</span>
                 </div>
                 <div class="spec-selector">
                     <h4>规格选择</h4>
                     <div class="spec-options">
-                        <div class="spec active">${product.volume}</div>
+                        <div class="spec active">${p.volume}</div>
                         <div class="spec">竹编礼盒装</div>
                         <div class="spec">整箱6瓶</div>
                     </div>
@@ -120,8 +125,8 @@
                     </div>
                 </div>
                 <div class="product-actions">
-                    <button class="btn btn-outline" onclick="Cart.add(${product.id}, parseInt(document.getElementById('qtyInput').value))">加入购物车</button>
-                    <button class="btn btn-primary" onclick="buyNow(${product.id})">立即购买</button>
+                    <button class="btn btn-outline" onclick="Cart.add('${p.id}', parseInt(document.getElementById('qtyInput').value))">加入购物车</button>
+                    <button class="btn btn-primary" onclick="buyNow('${p.id}')">立即购买</button>
                 </div>
                 <div class="product-services">
                     <span>正品保证</span>
@@ -132,12 +137,12 @@
                 </div>
             </div>`;
 
-        // 渲染产品描述
-        document.getElementById('productDesc').innerHTML = `
+            // 渲染产品描述(品牌固定文案 + 数据变量位)
+            document.getElementById('productDesc').innerHTML = `
             <h3 style="text-align:center;margin-bottom:8px;color:var(--color-primary-dark);">🌿 全竹发酵 · 匠心之作</h3>
             <p style="text-align:center;margin-bottom:24px;color:var(--color-accent);font-size:18px;font-weight:bold;letter-spacing:1px;">福来就喝竹奕酒，天赐鸿运随心走！</p>
-            <p><strong>${product.name}</strong>，源自${product.origin}，是${product.series}中的精品之作。由山东瑞麒酒业有限公司出品，首创全竹发酵工艺，创新定义中国竹香酒。</p>
-            <p>${product.desc}</p>
+            <p><strong>${p.name}</strong>，源自${p.origin}，是${p.series}中的精品之作。由山东瑞麒酒业有限公司出品，首创全竹发酵工艺，创新定义中国竹香酒。</p>
+            <p>${p.desc}</p>
             <p>取武夷山新鲜楠竹笋及全竹为原料，汲取徂徕山"竹溪六逸"富硒泉水，联合十余家科研机构独创生物发酵技术，将竹材转化为葡萄糖、木糖、甘露糖及多种多糖，再由专用酿酒酵母转化，最终成就竹奕酒。</p>
             <h4 style="margin:24px 0 12px;color:var(--color-primary-dark);">【健康密码】</h4>
             <p>🌿 <strong>竹叶黄酮(AOB)：</strong>药食同源天然提取物，已被国家批准为新食品原料，融入酒体。</p>
@@ -161,9 +166,20 @@
                 ⚠️ 过量饮酒有害健康 · 未成年人禁止饮酒 · 饮酒后请勿驾车 · 孕妇请勿饮酒
             </p>`;
 
-        // 相关推荐（同系列的其他产品）
-        const related = PRODUCTS.filter(p => p.id !== product.id && (p.series === product.series || p.category === product.category)).slice(0, 4);
-        document.getElementById('relatedProducts').innerHTML = related.map(renderProductCard).join('');
+            // 相关推荐(mock: 同系列过滤; live: 后端 related 4 条)
+            document.getElementById('relatedProducts').innerHTML = (relatedArr || []).map(renderProductCard).join('');
+        }
+
+        // 初始渲染(mock 数据, 不白屏) + live SKU 异步替换(失败静默保持 mock)
+        const mockRelated = PRODUCTS.filter(p => p.id !== product.id && (p.series === product.series || p.category === product.category)).slice(0, 4);
+        renderAll(product, mockRelated);
+
+        if (liveSku && window.ProductsLive) {
+            ProductsLive.loadDetail(liveSku)
+                .then(res => renderAll(res.product, res.related))
+                .catch(err => console.warn('[ProductsLive] 详情 live 拉取失败, 保持 mock 渲染:', err && err.message));
+        }
+
 
         // 75号·竹韵·智衡 知识内核联动(游客白名单 GET /api/zyh/knowledge)
         // 取工艺宪法 + 竹香香型两条事实锚点渲染; 后端不可达时静默降级(不阻断页面)
