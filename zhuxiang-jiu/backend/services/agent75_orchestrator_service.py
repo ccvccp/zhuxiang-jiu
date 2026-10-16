@@ -46,6 +46,58 @@ def is_kill() -> bool:
     return os.environ.get("AGENT75_KILL", "").strip().lower() in ("on", "1", "true")
 
 
+# ---------- P3-①: 四角色 Sub-Agent 拓扑(角色轴+独立 kill) ----------
+
+AGENT_ROLES = ("member", "merchant", "ops", "cs")
+
+# 角色身份行(单行确定性模板——execute 侧 system prompt 前缀拼入)
+ROLE_PROMPTS = {
+    "member": "角色定位:面向C端会员的导购与售后助手, 语气亲切易懂。",
+    "merchant": "角色定位:面向B端商家的经营分析助手, 输出侧重数据与经营建议。",
+    "ops": "角色定位:面向内部运营的配置巡检助手, 输出侧重检查项与风险提示。",
+    "cs": "角色定位:面向客服的话术与工单辅助助手, 输出侧重可复用话术与工单步骤。",
+}
+
+
+def role_kill(role: str) -> bool:
+    """角色独立 kill-switch(AGENT75_ROLE_KILL_{ROLE大写}=on → 该角色
+    任务 409, 其余角色不受影响; 全局 AGENT75_KILL 仍优先——拦截均在
+    路由面, 服务层不查, 对齐 is_kill 形态)"""
+    env = f"AGENT75_ROLE_KILL_{str(role).strip().upper()}"
+    return os.environ.get(env, "").strip().lower() in ("on", "1", "true")
+
+
+# ---------- P3-②: 跨会话记忆注入开关(默认 observe 只留痕零行为变化) ----------
+
+
+def memory_mode() -> str:
+    """off=零痕迹 / observe=只落 TaskRecord.memoryLine / on=进 prompt"""
+    return os.environ.get("AGENT75_MEMORY_MODE", "observe").strip().lower()
+
+
+# ---------- P3-③: 多步编排+步数熔断开关(默认 off 零行为变化) ----------
+
+
+def workflow_enabled() -> bool:
+    return os.environ.get("AGENT75_WORKFLOW_MODE", "off"
+                          ).strip().lower() in ("on", "1", "true")
+
+
+def max_steps() -> int:
+    """AGENT75_MAX_STEPS 硬上限(默认 5; 非法/越界值回落 5)"""
+    try:
+        n = int(os.environ.get("AGENT75_MAX_STEPS", "5"))
+        return n if n >= 1 else 5
+    except (TypeError, ValueError):
+        return 5
+
+
+def max_steps_answer(limit: int) -> str:
+    """超限截断话术(确定性模板拼装——不经 LLM)"""
+    return (f"任务执行步数已达上限({limit}步), 已自动停止并转人工处理, "
+            "请稍后再试或联系客服。")
+
+
 # ---------- 数据结构(方案 pydantic P0 裁剪版) ----------
 
 class ModelType(str, Enum):
@@ -76,11 +128,14 @@ class TaskRecord(BaseModel):
     task_id: str
     user_id: Optional[str] = None
     query: str
+    role: str = "member"          # P3-① 任务角色(默认值兼容存量 JSON)
     intent: Optional[str] = None
     status: TaskStatus = TaskStatus.PENDING
     answer: str = ""
     execution_trace: list[dict[str, Any]] = Field(default_factory=list)
     evaluation: Optional[dict[str, Any]] = None
+    memoryLine: str = ""          # P3-② 会员画像单行(observe 留痕)
+    interrupted_reason: str = ""  # P3-③ 熔断截断原因(如 max_steps)
     created_at: str = ""
     updated_at: str = ""
 
@@ -233,6 +288,84 @@ _PROMPTS = {
 }
 
 
+# ---------- P3-③: 步数熔断转人工告警(security_alert/live_qa 同形态) ----------
+
+_STEPS_ALERT_DEDUPE: dict[str, float] = {}     # 进程级 24h 幂等去重窗
+_STEPS_ALERT_WINDOW_S = 24 * 3600
+
+
+def _claim_steps_alert() -> bool:
+    """进程级时间窗去重(复刻 security_alert _claim 的 SETNX 语义;
+    取进程 dict 时间窗——agent75 单进程部署, 无跨进程去重诉求)"""
+    now = time.time()
+    expiry = _STEPS_ALERT_DEDUPE.get("max_steps", 0.0)
+    if now < expiry:
+        return False
+    _STEPS_ALERT_DEDUPE["max_steps"] = now + _STEPS_ALERT_WINDOW_S
+    return True
+
+
+async def _notify_agent_steps_exceeded(task_id: str, intent: str,
+                                       steps: int) -> bool:
+    """超限转人工告警 → 管理员站内信(仿 live_qa _notify_admins_unsolved
+    调用面: MemberRepository role=admin → MessageService send_message
+    inmail CATEGORY_SECURITY/P1); 整体 fail-soft 绝不碰主链"""
+    try:
+        from repositories.member_repository import MemberRepository
+        admins = sorted(int(m["id"]) for m in
+                        await MemberRepository().list_all()
+                        if m.get("role") == "admin" and m.get("id"))
+        if not admins:
+            logger.warning("agent75_steps_alert_no_admin_recipient")
+            return False
+        from services.message_service import (
+            MessageService, CHANNEL_INMAIL, CATEGORY_SECURITY, PRIORITY_P1)
+        title = "[网站Agent] 任务步数超限熔断转人工告警"
+        content = (
+            f"75号 Agent 任务 {task_id}(意图 {intent or 'unknown'}, "
+            f"已执行 {steps} 步)超过 AGENT75_MAX_STEPS 上限"
+            f"({max_steps()}步), 已熔断截断并停止执行。\n"
+            "处置建议: 检查该意图 workflow 步数配置或技能链路"
+            "(GET /api/v1/agent/tasks 观测面)。\n"
+            "(本告警仅发管理员; 24 小时内不重复发送)")
+        svc = MessageService()
+        sent = 0
+        for admin_id in admins:
+            try:
+                await svc.send_message(
+                    admin_id, CHANNEL_INMAIL, title, content,
+                    category=CATEGORY_SECURITY, priority=PRIORITY_P1)
+                sent += 1
+            except Exception as exc:   # noqa: BLE001 单人失败不阻断其余
+                logger.warning("agent75_steps_alert_send_failed "
+                               "admin=%s: %s", admin_id, exc)
+        return sent > 0
+    except Exception as exc:   # noqa: BLE001 告警面异常不碰主链
+        logger.warning("agent75_steps_alert_skip: %s", exc)
+        return False
+
+
+def _spawn_steps_alert(task: "TaskRecord") -> None:
+    """daemon 线程外发告警(主链零延迟; _spawn_resonance 同形态)"""
+    try:
+        if not _claim_steps_alert():
+            return
+        threading.Thread(
+            target=_run_steps_alert,
+            args=(task.task_id, task.intent or "",
+                  len(task.execution_trace)), daemon=True).start()
+    except Exception:   # noqa: BLE001
+        pass
+
+
+def _run_steps_alert(task_id: str, intent: str, steps: int) -> None:
+    try:
+        import asyncio
+        asyncio.run(_notify_agent_steps_exceeded(task_id, intent, steps))
+    except Exception as exc:   # noqa: BLE001
+        logger.warning("agent75_steps_alert_thread_skip: %s", exc)
+
+
 class WebsiteAgentOrchestrator:
     """主脑 P0+P1+P2: 意图→路由→生成→评估→(进化提议)→轨迹落盘"""
 
@@ -253,6 +386,24 @@ class WebsiteAgentOrchestrator:
             pass
         return _PROMPTS[intent]
 
+    @staticmethod
+    def _role_prefix(role: str) -> str:
+        """P3-① 角色身份行前缀(确定性单行模板; 未知角色空串)"""
+        line = ROLE_PROMPTS.get(role)
+        return f"{line}\n" if line else ""
+
+    @staticmethod
+    def _compose_user_prompt(query: str, memory: str = "",
+                             step_ctx: str = "") -> str:
+        """P3-② on 态画像行 + P3-③ 步间上下文的前置拼装(确定性顺序)"""
+        parts: list[str] = []
+        if memory:
+            parts.append(memory[:200])
+        if step_ctx:
+            parts.append(step_ctx[:200])
+        parts.append(query)
+        return "\n".join(parts)
+
     # -- P3a: 技能层执行路径(SKILL_KILL=on 或技能面异常 → 回落直连) --
 
     @staticmethod
@@ -265,8 +416,9 @@ class WebsiteAgentOrchestrator:
         except Exception:   # noqa: BLE001
             return None
 
-    def _plan_via_skill(self, rt, query: str) -> tuple[str, dict[str, Any]]:
-        s = rt.resolve("classify")
+    def _plan_via_skill(self, rt, query: str, role: str = "member"
+                        ) -> tuple[str, dict[str, Any]]:
+        s = rt.resolve("classify", role=role)   # P3-① 角色面过滤
         if s is None or s.kind.value != "prompt_tool":
             return self._plan(query)
         model_id = s.spec.get("model_id", "glm-flash")
@@ -284,15 +436,18 @@ class WebsiteAgentOrchestrator:
                         "latency_ms": ms, "output": intent}
 
     def _execute_via_skill(self, rt, query: str, intent: str,
-                           user_id: str | None = None
+                           user_id: str | None = None,
+                           role: str = "member", memory: str = "",
+                           step_ctx: str = ""
                            ) -> tuple[str, dict[str, Any]]:
-        s = rt.resolve("generate", intent)
+        s = rt.resolve("generate", intent, role=role)   # P3-① 角色面
         if s is None:
-            return self._execute(query, intent)
+            return self._execute(query, intent, role=role, memory=memory)
         if s.kind.value == "code_tool":
-            return self._execute_code_tool(rt, s, query, intent)
+            return self._execute_code_tool(rt, s, query, intent,
+                                           role=role, memory=memory)
         if s.kind.value != "prompt_tool":
-            return self._execute(query, intent)
+            return self._execute(query, intent, role=role, memory=memory)
         model_id = s.spec.get("model_id", "glm-reason")
         # prompt 优先级: P2 意图覆盖(仅当命中内置技能时) > 技能自身
         # 模板 > 内置注册表——进化技能被选中即用其自带 prompt
@@ -301,6 +456,7 @@ class WebsiteAgentOrchestrator:
         else:
             prompt = (s.spec.get("prompt_template")
                       or _PROMPTS.get(intent, _PROMPTS["chat"]))
+        prompt = self._role_prefix(role) + prompt   # P3-① 角色身份行
         # RA-P2 挫败安抚: 上会话挫败的用户 → 暖心前缀(COMFORT=off 停)
         comfort = False
         try:
@@ -311,32 +467,53 @@ class WebsiteAgentOrchestrator:
                 comfort = True
         except Exception:   # noqa: BLE001 共鸣面异常不拖累主链
             pass
-        content, ok, ms = self.gateway.call(model_id, prompt, query)
+        user = self._compose_user_prompt(query, memory, step_ctx)
+        content, ok, ms = self.gateway.call(model_id, prompt, user)
         retries = 0
         if not ok:
             retries = 1
-            content, ok, ms2 = self.gateway.call(model_id, prompt, query)
+            content, ok, ms2 = self.gateway.call(model_id, prompt, user)
             ms += ms2
         self.router.record(model_id, "generation", ok, ms)
         rt.record_invocation(s.skill_id, ok, ms)
-        return content, {"step_id": "exec_answer", "skill_id": s.skill_id,
-                         "model_id": model_id, "retries": retries,
-                         "comfort": comfort,
-                         "status": "success" if ok else "failed",
-                         "latency_ms": ms}
+        trace = {"step_id": "exec_answer", "skill_id": s.skill_id,
+                 "model_id": model_id, "retries": retries,
+                 "comfort": comfort, "role": role,
+                 "status": "success" if ok else "failed",
+                 "latency_ms": ms}
+        m_mode = memory_mode()          # P3-② observe/on 留痕(off 无痕)
+        if m_mode != "off":
+            trace["memory_mode"] = m_mode
+        return content, trace
 
     # -- P3b: code_tool 沙箱执行路径(失败语义: 预检/超限/不可达
     #    → 同槽 prompt_tool 兜底 → 仍败回落直连——审计全程留痕) --
 
-    def _execute_code_tool(self, rt, s, query: str, intent: str
+    def _execute_code_tool(self, rt, s, query: str, intent: str,
+                           role: str = "member", memory: str = ""
                            ) -> tuple[str, dict[str, Any]]:
         from services import agent75_sandbox_service as sb
+        # P3-④ 避坑表(懒加载; 异常/off 视同无表, fail-soft)
+        guard = None
+        try:
+            from services.agent75_pitfall_service import (
+                get_guard, pitfall_enabled)
+            if pitfall_enabled():
+                guard = get_guard()
+        except Exception:   # noqa: BLE001
+            guard = None
         code = str(s.spec.get("code") or "")
         trace = {"step_id": "exec_answer", "skill_id": s.skill_id,
                  "model_id": "sandbox", "retries": 0,
                  "status": "failed", "latency_ms": 0}
         ok, answer = False, ""
-        if not sb.sandbox_kill():
+        skip = guard is not None and guard.should_skip_skill(s.skill_id)
+        if skip:
+            # P3-④ 同签名近期反复失败 → 跳过沙箱直落兜底链
+            # (不记 audit/invocation——沙箱未实际执行)
+            trace["status"] = "pitfall_shortcircuited"
+            trace["pitfall_shortcircuited"] = True
+        elif not sb.sandbox_kill():
             valid, err = sb.validate_code(code)
             if valid:
                 r = sb.exec_code(code, {"query": query, "intent": intent},
@@ -355,6 +532,16 @@ class WebsiteAgentOrchestrator:
                 trace["status"] = f"precheck_{err}"
             sb.audit_run(s.skill_id, ok, trace["latency_ms"], code)
             rt.record_invocation(s.skill_id, ok, trace["latency_ms"])
+            # P3-④ 失败记签名(成功复位 half-open; 自身异常不阻断主链)
+            try:
+                if guard is not None:
+                    if ok:
+                        guard.record_success_skill(s.skill_id)
+                    else:
+                        guard.record_failure(
+                            f"{s.skill_id}:{trace['status']}")
+            except Exception:   # noqa: BLE001
+                pass
         else:
             trace["status"] = "sandbox_killed"
         if ok:
@@ -367,24 +554,32 @@ class WebsiteAgentOrchestrator:
              and x.status.value == "active"
              and (x.intent in (None, intent))), None)
         if fallback is not None:
-            content, t2 = self._execute_via_skill_prompt(fallback, query)
+            content, t2 = self._execute_via_skill_prompt(
+                fallback, query, role=role, memory=memory)
             t2["fallback_from"] = s.skill_id
+            if skip:
+                t2["pitfall_shortcircuited"] = True
             return content, t2
-        content, t2 = self._execute(query, intent)
+        content, t2 = self._execute(query, intent, role=role, memory=memory)
         t2["fallback_from"] = s.skill_id
+        if skip:
+            t2["pitfall_shortcircuited"] = True
         return content, t2
 
-    def _execute_via_skill_prompt(self, s, query: str
+    def _execute_via_skill_prompt(self, s, query: str, role: str = "member",
+                                  memory: str = ""
                                   ) -> tuple[str, dict[str, Any]]:
         """指定 prompt_tool 技能直调(兜底路径复用)"""
         model_id = s.spec.get("model_id", "glm-reason")
         prompt = (s.spec.get("prompt_template")
                   or _PROMPTS.get(s.intent or "chat", _PROMPTS["chat"]))
-        content, ok, ms = self.gateway.call(model_id, prompt, query)
+        prompt = self._role_prefix(role) + prompt   # P3-① 角色身份行
+        user = self._compose_user_prompt(query, memory)
+        content, ok, ms = self.gateway.call(model_id, prompt, user)
         retries = 0
         if not ok:
             retries = 1
-            content, ok, ms2 = self.gateway.call(model_id, prompt, query)
+            content, ok, ms2 = self.gateway.call(model_id, prompt, user)
             ms += ms2
         self.router.record(model_id, "generation", ok, ms)
         return content, {"step_id": "exec_answer",
@@ -476,6 +671,141 @@ class WebsiteAgentOrchestrator:
         except Exception as exc:   # noqa: BLE001
             logger.warning("agent75_resonance_replay_skip: %s", exc)
 
+    # -- P3-②: 跨会话记忆行(voice82 画像三表只读消费, fail-soft) --
+
+    def _memory_line(self, user_id: str | None) -> str:
+        """组装单行会员画像(角色/主诉求/高频意图 top3);
+        off/游客/非数字 id/冷启动(<10 会话)/读取失败 → 空串"""
+        if memory_mode() == "off" or user_id is None:
+            return ""
+        try:
+            member_id = int(str(user_id).strip())
+        except (TypeError, ValueError):
+            return ""
+        try:
+            bundle = self._fetch_voice82_profile(member_id)
+            if not bundle:
+                return ""
+            p = bundle.get("profile") or {}
+            sessions = int((p.get("meta") or {}).get("sessions") or 0)
+            if sessions < 10:     # 冷启动阈值(voice82 COLD_START_SESSIONS)
+                return ""
+            role = (p.get("role") or {}).get("role") or ""
+            top_goal = str(p.get("topGoal") or "")
+            dist = bundle.get("intentDist") or {}
+            top3 = [str(k) for k, _ in sorted(
+                dist.items(), key=lambda kv: -float(kv[1] or 0))[:3]]
+            line = (f"会员画像:角色={role or '未知'},"
+                    f"主诉求={top_goal or '未知'},"
+                    f"高频意图={'/'.join(top3) if top3 else '未知'}")
+            return line[:200]
+        except Exception as exc:   # noqa: BLE001 画像面异常不拖累主链
+            logger.warning("agent75_memory_line_skip: %s", exc)
+            return ""
+
+    def _fetch_voice82_profile(self, member_id: int) -> dict | None:
+        """同步读 async 画像——决策: run() 常在 FastAPI 事件循环线程内被
+        同步调用(POST /tasks 为 async 路由), 直接 asyncio.run 会抛
+        "cannot be called from a running event loop"; 故在独立线程跑专属
+        事件循环 + 有界 join(2s)——同步可用/超时可控/fail-soft 三得。
+        红线: 只读消费 voice82 标签与统计(role/topGoal/intentDist),
+        不引入对话原文。"""
+        import asyncio
+        import concurrent.futures
+
+        async def _go():
+            from services.voice82_dialog_service import (
+                Voice82DialogService, profile_key)
+            svc = Voice82DialogService()
+            prof = await svc.get_profile(member_id)
+            if not prof.get("success"):
+                return None
+            intent_dist: dict = {}
+            try:   # intentDist 不在 get_profile 返回面 → 直读 biz 表
+                key = profile_key(member_id)
+                if key:
+                    row = await svc._hgetall(svc.TBL_BIZ, key)
+                    intent_dist = json.loads(row.get("intentDist") or "{}")
+            except Exception:   # noqa: BLE001
+                intent_dist = {}
+            return {"profile": prof.get("profile") or {},
+                    "intentDist": intent_dist}
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(
+                    max_workers=1) as ex:
+                return ex.submit(asyncio.run, _go()).result(timeout=2.0)
+        except Exception as exc:   # noqa: BLE001 读取失败回落空串
+            logger.warning("agent75_memory_profile_skip: %s", exc)
+            return None
+
+    # -- P3-③: 多步编排(激活 builtin_workflows 死骨架)+步数熔断 --
+
+    @staticmethod
+    def _workflow_for(rt, intent: str):
+        """按意图查工作流(异常/未命中 → None 回落单步现行为)"""
+        try:
+            return getattr(rt, "workflows", {}).get(intent)
+        except Exception:   # noqa: BLE001
+            return None
+
+    def _run_workflow(self, rt, task: TaskRecord, query: str, intent: str,
+                      wf, user_id: str | None, role: str, memory: str
+                      ) -> tuple[str, list[dict[str, Any]], bool]:
+        """按 steps 循环执行: classify 步已由规划阶段完成(计 1 步),
+        generate/review 依次执行; 前步输出摘要(≤200 字)进后步 user
+        prompt; 超 AGENT75_MAX_STEPS 立即截断(返回 interrupted=True)。
+        注: WorkflowStep.timeout_ms 现执行路径未消费(单步沿用既有
+        网关重试/沙箱超时机制), 本轮不强接。"""
+        limit = max_steps()
+        traces: list[dict[str, Any]] = []
+        answer = ""
+        executed = 1                      # 规划步(classify)已执行
+        carry = str(intent or "")         # 规划步输出=意图词
+        for step in wf.steps:
+            if step.slot == "classify":
+                continue
+            executed += 1
+            if executed > limit:
+                traces.append({"step_id": step.step_id,
+                               "skill_id": step.slot,
+                               "status": "interrupted",
+                               "interrupted_reason": "max_steps"})
+                task.answer = max_steps_answer(limit)
+                task.interrupted_reason = "max_steps"
+                task.status = TaskStatus.FAILED
+                return answer, traces, True
+            if step.slot == "generate":
+                step_ctx = (f"[上步输出] {carry[:200]}" if carry else "")
+                answer, t = self._execute_via_skill(
+                    rt, query, intent, user_id=user_id, role=role,
+                    memory=memory, step_ctx=step_ctx)
+                traces.append(t)
+                carry = str(answer or "")
+            elif step.slot == "review":
+                traces.append(self._run_review_step(
+                    rt, step, query, answer, role))
+            else:
+                traces.append({"step_id": step.step_id,
+                               "status": "skipped_unknown_slot"})
+        return answer, traces, False
+
+    def _run_review_step(self, rt, step, query: str, answer: str,
+                         role: str) -> dict[str, Any]:
+        """review 步消费 critic_review builtin_fn(fn=critic → Critic
+        基线评估, 确定性无 LLM); 非该形态留痕跳过不动作"""
+        s = rt.resolve("review", role=role)
+        if s is None:
+            return {"step_id": step.step_id, "skill_id": step.slot,
+                    "status": "skipped_no_active_skill"}
+        if s.kind.value != "builtin_fn" or s.spec.get("fn") != "critic":
+            return {"step_id": step.step_id, "skill_id": s.skill_id,
+                    "status": "skipped_unsupported_kind"}
+        issues = self._evaluate(query, answer or "")["issues"]
+        return {"step_id": step.step_id, "skill_id": s.skill_id,
+                "status": "success" if not issues else "review_issues",
+                "issues": issues}
+
     # -- Planner(意图识别走分类路由; 失败回落 chat) --
 
     def _plan(self, query: str) -> tuple[str, dict[str, Any]]:
@@ -493,22 +823,29 @@ class WebsiteAgentOrchestrator:
 
     # -- Executor(生成路由 + 失败重试一次, 方案 WorkflowStep.retry=1) --
 
-    def _execute(self, query: str, intent: str
+    def _execute(self, query: str, intent: str, role: str = "member",
+                 memory: str = ""
                  ) -> tuple[str, dict[str, Any]]:
         cfg = self.router.route("generation")
-        content, ok, ms = self.gateway.call(
-            cfg.model_id, self._prompt_for(intent), query)
+        prompt = self._role_prefix(role) + self._prompt_for(intent)  # ①
+        user = self._compose_user_prompt(query, memory)              # ②
+        content, ok, ms = self.gateway.call(cfg.model_id, prompt, user)
         retries = 0
         if not ok:                      # 重试一次(同档, 历史已记录失败)
             retries = 1
             content, ok, ms2 = self.gateway.call(
-                cfg.model_id, self._prompt_for(intent), query)
+                cfg.model_id, prompt, user)
             ms += ms2
         self.router.record(cfg.model_id, "generation", ok, ms)
-        return content, {"step_id": "exec_answer", "skill_id": "answer",
-                         "model_id": cfg.model_id, "retries": retries,
-                         "status": "success" if ok else "failed",
-                         "latency_ms": ms}
+        trace = {"step_id": "exec_answer", "skill_id": "answer",
+                 "model_id": cfg.model_id, "retries": retries,
+                 "role": role,
+                 "status": "success" if ok else "failed",
+                 "latency_ms": ms}
+        m_mode = memory_mode()          # P3-② observe/on 留痕(off 无痕)
+        if m_mode != "off":
+            trace["memory_mode"] = m_mode
+        return content, trace
 
     # -- Critic(P0 基线 + P2 进化触发位) --
 
@@ -562,31 +899,61 @@ class WebsiteAgentOrchestrator:
     # -- 主入口 --
 
     def run(self, query: str, user_id: str | None = None,
-            context: dict[str, Any] | None = None) -> TaskRecord:
+            context: dict[str, Any] | None = None,
+            role: str = "member") -> TaskRecord:
         task = TaskRecord(task_id=f"t_{uuid.uuid4().hex[:12]}",
                           user_id=user_id, query=query,
+                          role=role if role in AGENT_ROLES else "member",
                           status=TaskStatus.PLANNING,
                           created_at="", updated_at="")
         try:
             rt = self._skill_runtime()      # P3a: 技能层(可 None)
             if rt is not None:
-                intent, trace = self._plan_via_skill(rt, query)
+                intent, trace = self._plan_via_skill(rt, query, task.role)
             else:
                 intent, trace = self._plan(query)
             task.intent = intent
             task.execution_trace.append(trace)
+            # P3-②: 跨会话记忆行(off 零痕迹/observe 留痕/on 进 prompt)
+            task.memoryLine = self._memory_line(user_id)
             self._save(task)
 
             task.status = TaskStatus.EXECUTING
+            memory = (task.memoryLine if memory_mode() == "on" else "")
             if rt is not None:
-                answer, trace = self._execute_via_skill(
-                    rt, query, intent, user_id=task.user_id)
+                # P3-③: on 态查工作流(按 intent 匹配), 命中走多步编排,
+                # 未命中/off 回落单步现行为(逐字不变)
+                wf = (self._workflow_for(rt, intent)
+                      if workflow_enabled() else None)
+                if wf is not None:
+                    answer, wtraces, interrupted = self._run_workflow(
+                        rt, task, query, intent, wf,
+                        user_id=task.user_id, role=task.role,
+                        memory=memory)
+                    task.execution_trace.extend(wtraces)
+                    self._save(task)
+                    if interrupted:    # 熔断截断: 不再评估/进化/回放
+                        _spawn_steps_alert(task)   # 话术由熔断分支写入
+                        logger.info("agent75_task_interrupted id=%s "
+                                    "reason=max_steps", task.task_id)
+                        return task
+                    task.answer = answer
+                    self._save(task)
+                else:
+                    answer, trace = self._execute_via_skill(
+                        rt, query, intent, user_id=task.user_id,
+                        role=task.role, memory=memory)
+                    task.answer = answer
+                    task.execution_trace.append(trace)
+                    self._save(task)
                 self._spawn_shadows(rt, query, intent)   # P3c 影子
             else:
-                answer, trace = self._execute(query, intent)
-            task.answer = answer
-            task.execution_trace.append(trace)
-            self._save(task)
+                answer, trace = self._execute(query, intent,
+                                              role=task.role,
+                                              memory=memory)
+                task.answer = answer
+                task.execution_trace.append(trace)
+                self._save(task)
 
             task.status = TaskStatus.EVALUATING
             task.evaluation = self._evaluate(query, answer)

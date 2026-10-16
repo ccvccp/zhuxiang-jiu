@@ -10,11 +10,13 @@
 """
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from services.agent75_orchestrator_service import (
+    AGENT_ROLES,
     WebsiteAgentOrchestrator,
     is_kill,
+    role_kill,
 )
 
 router = APIRouter(
@@ -35,6 +37,16 @@ class TaskCreateRequest(BaseModel):
     user_id: str | None = Field(None, description="站点用户标识(可空)")
     context: dict | None = Field(
         None, description="页面/设备等上下文(可空)")
+    role: str = Field("member",
+                      description="任务角色 member/merchant/ops/cs")
+
+    @field_validator("role")
+    @classmethod
+    def _role_valid(cls, v: str) -> str:
+        """P3-① 非法角色 422(白名单封闭集合)"""
+        if v not in AGENT_ROLES:
+            raise ValueError(f"role 必须是 {AGENT_ROLES} 之一")
+        return v
 
 
 @router.post("/tasks")
@@ -43,10 +55,16 @@ async def create_task(body: TaskCreateRequest,
     _require_admin(x_role)
     if is_kill():
         raise HTTPException(status_code=409, detail="agent75 killed")
-    task = _orchestrator.run(body.query, body.user_id, body.context)
+    # P3-① 角色独立 kill(全局 AGENT75_KILL 仍优先; 拦截面在路由)
+    if role_kill(body.role):
+        raise HTTPException(
+            status_code=409, detail=f"agent75 role killed: {body.role}")
+    task = _orchestrator.run(body.query, body.user_id, body.context,
+                             body.role)
     return {"code": 0, "data": {
         "task_id": task.task_id, "status": task.status,
         "intent": task.intent, "answer": task.answer,
+        "role": task.role,
         "trace": task.execution_trace,
         "evaluation": task.evaluation}}
 

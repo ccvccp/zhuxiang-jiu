@@ -66,6 +66,8 @@ class SkillDefinition(BaseModel):
     kind: SkillKind
     slot: str                        # classify/generate/review
     intent: str | None = None        # classify 为 None(意图无关)
+    roles: list[str] | None = None   # P3-① 角色面(None=全角色可用,
+                                     # 存量 5 件与 skills.json 零迁移)
     spec: dict[str, Any] = {}        # prompt_tool: {model_id, prompt_template}
                                      # builtin_fn: {fn: "critic"}
     metrics: dict[str, Any] = {
@@ -178,12 +180,17 @@ class SkillRuntime:
                 if recs else 0.0)
         return 10.0 - 0.3 - 0.2 + 2.0 * rate
 
-    def resolve(self, slot: str, intent: str | None = None
+    def resolve(self, slot: str, intent: str | None = None,
+                role: str | None = None
                 ) -> SkillDefinition | None:
+        """P3-①: role 非 None 时按 skill.roles 过滤(None=全角色可用);
+        role=None 不过滤——既有调用向后兼容"""
         cands = [s for s in self.skills.values()
                  if s.slot == slot and s.status == SkillStatus.ACTIVE
                  and (s.intent is None or s.intent == intent
-                      or intent is None)]
+                      or intent is None)
+                 and (role is None or s.roles is None
+                      or role in s.roles)]
         if not cands:
             return None
         return sorted(cands, key=self._score, reverse=True)[0]
