@@ -1,0 +1,13 @@
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ram:ListAccessKeys",
+        "ram:UpdateAccessKey"
+      ],
+      "Resource": "acs:ram::*:user/<RAM用户名>"
+    }
+  ]
+}
