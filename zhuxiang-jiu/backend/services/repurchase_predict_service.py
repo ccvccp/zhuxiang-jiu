@@ -54,6 +54,9 @@ CV_REGULAR_LINE = 0.3
 CV_VOLATILE_LINE = 0.6
 QF_MIN_INTERVALS = 4   # 间隔样本 <4 跳过(小样本防抖)
 
+# qFactor 数值 → stats 分桶键(stats 口径, 数值不在此表 → "skipped")
+_QF_KEYS = {QF_REGULAR: "1.2", QF_NORMAL: "1.0", QF_VOLATILE: "0.8"}
+
 # 两类建议书阈值
 OVERDUE_LINE_DAYS = -7   # dueInDays < -7 视为已逾期(流失风险)
 
@@ -314,6 +317,57 @@ class RepurchasePredictService:
         rows = await self.store.list(SUGGESTION_TABLE)
         rows.sort(key=lambda r: int(r.get("suggestionId", 0)), reverse=True)
         return rows[:max(1, int(limit))]
+
+    async def stats(self) -> dict:
+        """建议书留痕聚合统计(R1 观察闭环, 纯读确定性, 无 LLM)
+
+        口径(与留痕字段一一对应, 供 enforce/调度稳定性复盘):
+            total        留痕建议书总数(=sent+pending, 留痕仅两态)
+            byTier       tier 分桶(upcoming 临近复购/overdue 已逾期)
+            byQFactor    qFactor 分桶——留痕里 cv 为 None 即「间隔样本
+                         <QF_MIN_INTERVALS 的小样本防抖跳过」(此时
+                         qFactor 记 QF_NORMAL=1.0 仅占位), 归入
+                         "skipped"; 其余按 qFactor 数值落 1.2/1.0/0.8
+                         三档, 数值异常/未知(fail-soft)亦归 "skipped"
+            last7dDaily  近 7 天(含今日, 旧→新)按 createdAt 前 10 位
+                         日期分桶的留痕产出数, 无留痕日补零
+            dispatchRate 派发转化率 = sent/(sent+pending)
+                         (分母即全部留痕建议书 total; 分母 0 → 0.0)
+            mode         当前 REPURCHASE_PUSH_MODE 快照
+        """
+        rows = await self.store.list(SUGGESTION_TABLE)
+        today = datetime.now(UTC).date()
+        days = [(today - timedelta(days=i)).isoformat()
+                for i in range(6, -1, -1)]     # 旧 → 新, 恒 7 天
+        daily = dict.fromkeys(days, 0)
+        by_tier = {"upcoming": 0, "overdue": 0}
+        by_qf = {"1.2": 0, "1.0": 0, "0.8": 0, "skipped": 0}
+        sent = 0
+        for r in rows:
+            tier = r.get("tier")
+            if tier in by_tier:
+                by_tier[tier] += 1
+            # skipped 判定字段: cv 为 None(小样本跳过); 数值容错归 skipped
+            try:
+                qf = float(r.get("qFactor", QF_NORMAL))
+                qf_key = (_QF_KEYS.get(qf, "skipped")
+                          if r.get("cv") is not None else "skipped")
+            except (TypeError, ValueError):
+                qf_key = "skipped"
+            by_qf[qf_key] += 1
+            if r.get("status") == "sent":
+                sent += 1
+            day = str(r.get("createdAt", ""))[:10]
+            if day in daily:
+                daily[day] += 1
+        return {
+            "total": len(rows),
+            "byTier": by_tier,
+            "byQFactor": by_qf,
+            "last7dDaily": [{"date": d, "count": daily[d]} for d in days],
+            "dispatchRate": _round2(sent / len(rows)) if rows else 0.0,
+            "mode": repurchase_push_mode(),
+        }
 
     # ============================================================
     # 人工确认派发(唯一发送闸: enforce + 显式 suggestion_id + operator)

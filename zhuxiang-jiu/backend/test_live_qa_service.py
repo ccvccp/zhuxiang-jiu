@@ -12,14 +12,23 @@
     T8 rag_answer 真实集成 smoke(asyncio 内存 store 可空构造:
        空库→unsolved 兜底; 种子发布→direct 直连命中)
     T9 main.py 挂载冒烟(两条路由注册进 FastAPI app)
+    T10 L1 小时分桶累计(3 direct+1 unsolved → 桶值/趋势正确)
+    T11 L1 连续 3 桶超阈值 → 管理员告警恰好一次(含 topQuestion)
+    T12 L1 armed 后仍超阈值不重复告警
+    T13 L1 跌回阈值解除 armed → 再连续 3 桶可再告警
+    T14 L2 gaps 按 live_qa 来源过滤(频次倒序/含最近时间)
+    T15 L2 to-draft 落 knowledge 待审 status=pending 且不 publish
 
 打桩说明: T1-T7 以桩对象替换 KnowledgeService(计数 rag_answer /
-record_gap 调用), 避免依赖真实知识库内容; T8 走真实链路。
+record_gap 调用), 避免依赖真实知识库内容; T8/T14/T15 走真实链路;
+T10-T13 注入假时钟(monkeypatch live_qa_module._now, 与留痕目录
+patch 同款方式)并打桩告警发送(_notify_admins_unsolved 计数)。
 
 运行: pytest test_live_qa_service.py
 """
 import asyncio
 import json
+from datetime import datetime
 
 import pytest
 
@@ -331,3 +340,236 @@ def test_t9_main_mounted():
     paths = {getattr(r, "path", None) for r in main.app.routes}
     assert "/api/live-qa/answer" in paths
     assert "/api/live-qa/stats" in paths
+
+
+# ---------- L1/L2 新增辅助(假时钟 + 告警发送桩) ----------
+
+_UNSOLVED_RESULT = {"answer": "", "mode": "unsolved",
+                    "citations": [], "confidence": 0.0}
+
+
+def _set_hour(monkeypatch, dt):
+    """注入假时钟(分桶/告警判定走 live_qa_module._now)"""
+    monkeypatch.setattr(live_qa_module, "_now", lambda: dt)
+
+
+class _AlertRecorder:
+    """管理员告警发送桩(计数调用并快照告警载荷)"""
+
+    def __init__(self):
+        self.calls = []
+
+    async def __call__(self, alert_buckets, top_question):
+        self.calls.append({
+            "buckets": [b["hour"] for b in alert_buckets],
+            "rates": [b["unsolvedRate"] for b in alert_buckets],
+            "top": dict(top_question),
+        })
+        return True
+
+
+def _unresolved_stub():
+    return _StubKnowledge(result=dict(_UNSOLVED_RESULT))
+
+
+# ---------- T10 L1 小时分桶累计 ----------
+
+def test_t10_hourly_bucket_accumulation(monkeypatch):
+    """同小时 3 direct + 1 unsolved → 桶计数/unsolvedRate/趋势正确"""
+
+    async def run():
+        _set_hour(monkeypatch, datetime(2026, 10, 16, 9, 30))
+        stub = _StubKnowledge()
+        svc = LiveQaService(knowledge=stub)
+        # 3 次 direct(不同问题避免去重缓存干扰)
+        for q in ("竹香酒多少钱", "竹香酒的度数", "竹香酒的产地"):
+            await svc.answer("room-1", q)
+        # 1 次 unsolved
+        stub.result = dict(_UNSOLVED_RESULT)
+        await svc.answer("room-1", "完全没见过的问题")
+        s = svc.stats()
+        assert len(s["hourlyBuckets"]) == 1
+        b = s["hourlyBuckets"][0]
+        assert b["hour"] == "2026-10-16 09"
+        assert b["total"] == 4 and b["unsolved"] == 1
+        assert b["filtered"] == 0 and b["cached"] == 0
+        assert b["unsolvedRate"] == 0.25
+        assert s["unsolvedRateTrend"] == [0.25]
+
+    asyncio.run(run())
+
+
+# ---------- T11 L1 连续 3 桶超阈值 → 告警恰好一次 ----------
+
+def test_t11_alert_once_after_three_high_buckets(monkeypatch):
+    """桶 08/09/10 率均 100% → 翻页后首条记录触发告警一次, 含 topQuestion"""
+
+    async def run():
+        recorder = _AlertRecorder()
+        monkeypatch.setattr(live_qa_module, "_notify_admins_unsolved",
+                            recorder)
+        stub = _unresolved_stub()
+        svc = LiveQaService(knowledge=stub)
+        base = datetime(2026, 10, 16, 8, 5)
+        # 桶 08: 同问×2(1 真实+1 缓存)+1 异问 → unsolved 3/3
+        _set_hour(monkeypatch, base)
+        await svc.answer("room-1", "多少钱一瓶")
+        await svc.answer("room-1", "多少钱一瓶")
+        await svc.answer("room-1", "配送时效怎么样")
+        # 桶 09/10: 各 1 条 unsolved
+        _set_hour(monkeypatch, base.replace(hour=9))
+        await svc.answer("room-1", "能开发票吗")
+        _set_hour(monkeypatch, base.replace(hour=10))
+        await svc.answer("room-1", "有礼品装吗")
+        assert recorder.calls == []      # 仅 2 个已结束桶, 未达 3 不告警
+        # 翻页到 11 点: 08/09/10 成为已结束桶 → 首条记录触发告警
+        _set_hour(monkeypatch, base.replace(hour=11))
+        await svc.answer("room-1", "度数是多少啊")
+        assert len(recorder.calls) == 1
+        call = recorder.calls[0]
+        assert call["buckets"] == ["2026-10-16 08", "2026-10-16 09",
+                                   "2026-10-16 10"]
+        assert call["rates"] == [1.0, 1.0, 1.0]
+        # topQuestion: 「多少钱一瓶」跨桶计数 2 次居首
+        assert call["top"]["question"] == "多少钱一瓶"
+        assert call["top"]["count"] == 2
+
+    asyncio.run(run())
+
+
+# ---------- T12 L1 armed 后仍超阈值不重复 ----------
+
+def test_t12_no_repeat_alert_while_armed(monkeypatch):
+    """告警后 armed: 后续桶持续超阈值不再重复发送"""
+
+    async def run():
+        recorder = _AlertRecorder()
+        monkeypatch.setattr(live_qa_module, "_notify_admins_unsolved",
+                            recorder)
+        stub = _unresolved_stub()
+        svc = LiveQaService(knowledge=stub)
+        base = datetime(2026, 10, 16, 8, 5)
+        for hour in (8, 9, 10):           # 3 个高桶
+            _set_hour(monkeypatch, base.replace(hour=hour))
+            await svc.answer("room-1", f"未解问题零{hour}")
+        _set_hour(monkeypatch, base.replace(hour=11))
+        await svc.answer("room-1", "未解问题十一")   # 触发告警
+        assert len(recorder.calls) == 1
+        # 桶 11/12/13 继续全 unsolved → 仍 armed 不重复
+        for hour in (12, 13):
+            _set_hour(monkeypatch, base.replace(hour=hour))
+            await svc.answer("room-1", f"未解问题{hour}号")
+        _set_hour(monkeypatch, base.replace(hour=14))
+        await svc.answer("room-1", "未解问题十四号")  # last3=11/12/13
+        assert len(recorder.calls) == 1
+
+    asyncio.run(run())
+
+
+# ---------- T13 L1 跌回解除 armed → 可再告警 ----------
+
+def test_t13_rearm_after_rate_recovers(monkeypatch):
+    """低率桶解除 armed(重置连续)→ 再连续 3 高桶可再次告警"""
+
+    async def run():
+        recorder = _AlertRecorder()
+        monkeypatch.setattr(live_qa_module, "_notify_admins_unsolved",
+                            recorder)
+        stub = _unresolved_stub()
+        svc = LiveQaService(knowledge=stub)
+        base = datetime(2026, 10, 16, 8, 5)
+        for hour in (8, 9, 10):           # 3 个高桶
+            _set_hour(monkeypatch, base.replace(hour=hour))
+            await svc.answer("room-1", f"首轮问题{hour}")
+        _set_hour(monkeypatch, base.replace(hour=11))
+        await svc.answer("room-1", "首轮问题十一")     # 告警#1
+        assert len(recorder.calls) == 1
+        # 桶 11 补 2 条 direct → 率 1/3 ≈ 0.333 ≤ 0.40(跌回)
+        stub.result = _StubKnowledge().result
+        _set_hour(monkeypatch, base.replace(hour=11))
+        await svc.answer("room-1", "常规问题甲")
+        await svc.answer("room-1", "常规问题乙")
+        # 桶 12 low(1 direct) → 最近 3 桶含低桶 → 解除 armed
+        _set_hour(monkeypatch, base.replace(hour=12))
+        await svc.answer("room-1", "常规问题丙")
+        assert len(recorder.calls) == 1
+        # 桶 13/14/15 重新连续 3 个高桶 → 桶 16 首条记录再告警
+        stub.result = dict(_UNSOLVED_RESULT)
+        for hour in (13, 14, 15):
+            _set_hour(monkeypatch, base.replace(hour=hour))
+            await svc.answer("room-1", f"二轮问题{hour}")
+        _set_hour(monkeypatch, base.replace(hour=16))
+        await svc.answer("room-1", "二轮问题十六")     # 告警#2
+        assert len(recorder.calls) == 2
+        assert recorder.calls[1]["buckets"] == [
+            "2026-10-16 13", "2026-10-16 14", "2026-10-16 15"]
+
+    asyncio.run(run())
+
+
+# ---------- T14 L2 gaps 按 live_qa 来源过滤 ----------
+
+def test_t14_gaps_filter_live_qa_source():
+    """直播缺口列表只含 sessionId 前缀 live_qa: 的缺口, 频次倒序"""
+
+    async def run():
+        from repositories.store import reset_store
+        reset_store()
+        svc = LiveQaService()      # 真实 KnowledgeService
+        ks = svc._knowledge
+        await ks.record_gap("直播高频问题A", session_id="live_qa:room-1")
+        await ks.record_gap("直播高频问题A", session_id="live_qa:room-1")
+        await ks.record_gap("直播问题B", session_id="live_qa:room-2")
+        await ks.record_gap("客服来源问题C", session_id="chat:abc")
+        await ks.record_gap("教学来源问题D", session_id="chat_teach:1")
+        gaps = await svc.list_gaps()
+        assert len(gaps) == 2                    # 只显 live_qa 来源(A/B)
+        assert all(g["sessionId"].startswith("live_qa:") for g in gaps)
+        # 频次倒序: 同问累计 2 次居首, 且带最近提问时间
+        assert gaps[0]["question"] == "直播高频问题A"
+        assert gaps[0]["askCount"] == 2
+        assert gaps[0]["lastAskedAt"]
+        assert [g["askCount"] for g in gaps] == sorted(
+            [g["askCount"] for g in gaps], reverse=True)
+
+    asyncio.run(run())
+
+
+# ---------- T15 L2 to-draft 落 pending 草稿且不 publish ----------
+
+def test_t15_gap_to_draft_pending_not_published():
+    """转草稿: knowledge 待审 status=pending/未 publish; 缺口 resolve 闭环"""
+
+    async def run():
+        from repositories.store import reset_store
+        from services.knowledge_service import _reset_knowledge_caches
+        reset_store()
+        _reset_knowledge_caches()
+        svc = LiveQaService()
+        ks = svc._knowledge
+        gap = await ks.record_gap("直播转草稿问题A",
+                                  session_id="live_qa:room-9")
+        result = await svc.gap_to_draft(gap_id=gap["id"])
+        assert result["entryStatus"] == "pending"
+        assert result["gapResolved"] is True
+        # 草稿在 knowledge 候选池: pending 且从未发布
+        entry = await ks.get_entry(result["entryId"])
+        assert entry["status"] == "pending"
+        assert entry["publishedAt"] == ""
+        assert entry["question"] == "直播转草稿问题A"
+        assert entry["answer"] == live_qa_module.LIVE_QA_GAP_DRAFT_ANSWER
+        # 缺口已 resolve 并关联草稿条目(对齐 teach_submit 闭环范式)
+        resolved = [g for g in await ks.list_gaps(status="resolved")
+                    if g["id"] == gap["id"]]
+        assert resolved and resolved[0]["entryId"] == result["entryId"]
+        # 转草稿后不再出现在直播缺口列表(闭环)
+        assert await svc.list_gaps() == []
+        # 非直播来源缺口拒绝转草稿; question 文本定位亦可
+        gap2 = await ks.record_gap("客服来源问题B", session_id="chat:abc")
+        with pytest.raises(KeyError):
+            await svc.gap_to_draft(gap_id=gap2["id"])
+        await ks.record_gap("直播物流几天能到货", session_id="live_qa:room-2")
+        r3 = await svc.gap_to_draft(question="直播物流几天能到货")
+        assert r3["entryStatus"] == "pending"
+
+    asyncio.run(run())

@@ -13,8 +13,8 @@
     - P3 进化闭环: feedback / feedbacks / params / detect
                    / memo / memos
     - 无感复购(蓝图近期项②): repurchase/scan / repurchase/suggestions
-                   / repurchase/dispatch(建议书留痕, 派发须管理员
-                   逐条确认且仅 enforce 模式解锁)
+                   / repurchase/dispatch / repurchase/stats(建议书留痕,
+                   派发须管理员逐条确认且仅 enforce 模式解锁)
 
 铁律: 全部确定性规则引擎(LLM 禁入); 建议书永不自动执行;
 不输出信值五维与 TV 资产(68 号雷达域)。
@@ -413,6 +413,23 @@ async def repurchase_dispatch(data: RepurchaseDispatchRequest,
     try:
         result = await _repurchase.dispatch(
             suggestion_id=data.suggestionId, operator=data.operator)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/member-ai/repurchase/stats",
+            tags=["智客AI智能会员大模型"])
+async def repurchase_stats(x_role: str = Header(None, alias="X-Role")):
+    """复购建议书留痕聚合统计(R1 观察闭环: observe→enforce 决策依据)
+
+    纯读留痕聚合, 确定性无 LLM: total/byTier(upcoming|overdue)/
+    byQFactor(cv=None 即小样本跳过 → "skipped")/last7dDaily(近 7 天
+    日产出)/dispatchRate(=sent/(sent+pending), 分母即全部留痕)/mode。
+    """
+    _require_admin(x_role)
+    try:
+        result = await _repurchase.stats()
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

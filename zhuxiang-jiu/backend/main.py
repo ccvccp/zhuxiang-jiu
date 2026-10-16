@@ -579,6 +579,12 @@ async def _on_startup():
     # (ZK_SCAN_AUTO=on 且 ZK_MODE != off 时启动, 引擎活化)
     from services.zk_scan_scheduler import start_scan_loop as start_zk_scan
     start_zk_scan()
+    # 无感复购预测(蓝图近期项②): 每日建议书扫描留痕(R1/R2 观察闭环)
+    # (REPURCHASE_SCAN_AUTO=on 且 REPURCHASE_PUSH_MODE != off 时启动,
+    #  默认 off 零行为变化; 建议书永不自动发送, 派发须管理员人工确认)
+    from services.repurchase_scan_scheduler import (
+        start_scan_loop as start_repurchase_scan)
+    start_repurchase_scan()
     # 智码·AI智能二维码大模型: 每日愉悦度健康/免疫监控/码域快照扫描
     # (QR70_SCAN_AUTO=on 且 QR70_MODE != off 时启动, 引擎活化)
     from services.qr70_scan_scheduler import start_scan_loop as start_qr70_scan

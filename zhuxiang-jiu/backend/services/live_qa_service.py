@@ -23,6 +23,17 @@
 模式闸:
     - LIVE_QA_MODE=off|on(默认 on——纯只读问答无副作用);
       off 时返回统一 disabled 话术并留痕 ragMode=off。
+
+unsolved 闭环(L1/L2, 依据 docs/复购预测与直播QA模块优化建议.md §三):
+    - L1 趋势分桶+阈值告警: _record 按小时桶(键 "YYYY-MM-DD HH")
+      累计 total/unsolved/filtered/cached, 进程内保留最近 48 桶;
+      stats 输出 hourlyBuckets 与 unsolvedRateTrend; 连续 3 个
+      已结束桶 unsolved 率 > 40% → 管理员站内信告警一次(armed
+      幂等去重——仍超阈值不重复, 跌回 ≤40% 解除后可再告警;
+      告警仅发管理员不属于用户触达, 发送 fail-soft 不影响问答主链);
+    - L2 缺口闭环: list_gaps 拉取 live_qa 来源缺口(sessionId 前缀
+      匹配), gap_to_draft 转知识草稿(status=pending 进候选池——
+      先审后显铁律, 绝不直接 publish)。
 """
 
 import contextlib
@@ -33,7 +44,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from services.knowledge_service import KnowledgeService
+from services.knowledge_service import (
+    KnowledgeService, GAP_STATUS_OPEN,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +60,19 @@ LIVE_QA_MAX_QUESTION_LEN = 200
 # 同问去重窗口(秒)与缓存上限(防内存膨胀, 超限淘汰最旧一半)
 LIVE_QA_DEDUP_TTL = 60
 LIVE_QA_DEDUP_MAX = 1000
+
+# 小时分桶(L1 unsolved 趋势观测): 键 "YYYY-MM-DD HH", 进程内保留
+# 最近 48 桶, 超限淘汰最旧(对齐去重缓存的淘汰策略风格)
+LIVE_QA_HOURLY_BUCKET_KEEP = 48
+# unsolved 率阈值告警: 连续 3 个已结束桶率 > 0.40 → 管理员站内信一次
+LIVE_QA_UNSOLVED_ALERT_THRESHOLD = 0.40
+LIVE_QA_UNSOLVED_ALERT_BUCKETS = 3
+# 直播缺口会话前缀(record_gap 的 session_id=f"live_qa:{room}" 形态)
+LIVE_QA_GAP_SESSION_PREFIX = "live_qa:"
+# 缺口转草稿的占位答案(不含违禁词, 正式答案由运营补充后送审)
+LIVE_QA_GAP_DRAFT_ANSWER = (
+    "【待补充】直播弹幕高频未解问题转知识草稿，正式答案待运营补充。"
+)
 
 # 统一话术(off / 过滤 / 低置信兜底)
 LIVE_QA_DISABLED_ANSWER = "直播问答小助手暂时下线啦，感谢关注竹香酒直播间～"
@@ -84,6 +110,11 @@ def _hit_sensitive(question: str) -> bool:
     return any(word in lowered for word in LIVE_QA_SENSITIVE_WORDS)
 
 
+def _now() -> datetime:
+    """进程时钟(小时分桶键与告警判定用; 测试可 monkeypatch 注入假时钟)"""
+    return datetime.utcnow()
+
+
 def _append_log(record: dict) -> None:
     """JSONL 追加留痕(观测面; 失败静默——留痕绝不阻断问答)"""
     with contextlib.suppress(Exception):
@@ -91,6 +122,62 @@ def _append_log(record: dict) -> None:
         with open(LIVE_QA_LOG_DIR / "live_qa.jsonl", "a",
                   encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+async def _notify_admins_unsolved(alert_buckets: list[dict],
+                                  top_question: dict) -> bool:
+    """unsolved 趋势告警 → 管理员站内信(仅发管理员, 不属于用户触达)
+
+    先例对齐 security_alert_service(_list_admin_ids/_broadcast):
+        - 管理员来源: MemberRepository().list_all() 中 role=admin;
+        - 发送: MessageService.send_message(channel=inmail,
+          category=security, priority=P1), 逐一发送单人失败不阻断。
+    发送整体 fail-soft: 无收件人/异常仅 warning, 绝不向问答主链抛出。
+    Returns: 是否至少送达一人。
+    """
+    try:
+        from repositories.member_repository import MemberRepository
+        admins = sorted(int(m["id"]) for m in
+                        await MemberRepository().list_all()
+                        if m.get("role") == "admin" and m.get("id"))
+        if not admins:
+            logger.warning("live_qa_unsolved_alert_no_admin_recipient")
+            return False
+        lines = [f"- {b['hour']}: unsolved {b['unsolved']}/{b['total']}"
+                 f"({b['unsolvedRate']:.1%})" for b in alert_buckets]
+        top_q = str(top_question.get("question") or "")
+        top_n = int(top_question.get("count") or 0)
+        title = "[直播运维] 直播问答未解决率连续走高告警"
+        content = (
+            "直播弹幕问答未解决率(unsolved)连续 "
+            f"{len(alert_buckets)} 个小时桶超过 40%:\n"
+            + "\n".join(lines)
+            + (f"\n最高频未解问题: 「{top_q[:30]}」(被问 {top_n} 次)"
+               if top_q else "")
+            + "\n处置建议: 优先补充知识条目——管理端拉取直播缺口"
+            "(GET /api/live-qa/gaps)并将高频缺口转知识草稿送审"
+            "(POST /api/live-qa/gaps/to-draft)。"
+            "\n(本告警仅发管理员; 同轮持续超阈值不重复发送)"
+        )
+        from services.message_service import (
+            MessageService, CHANNEL_INMAIL, CATEGORY_SECURITY, PRIORITY_P1,
+        )
+        svc = MessageService()
+        sent = 0
+        for admin_id in admins:
+            try:
+                await svc.send_message(
+                    admin_id, CHANNEL_INMAIL, title, content,
+                    category=CATEGORY_SECURITY, priority=PRIORITY_P1)
+                sent += 1
+            except Exception as exc:
+                # 单人发送失败不影响其余管理员触达
+                logger.warning("live_qa_unsolved_alert_send_failed "
+                               "admin=%s: %s", admin_id, exc)
+        return sent > 0
+    except Exception as exc:
+        logger.warning("live_qa_unsolved_alert_skip: %s", exc)
+        return False
 
 
 class LiveQaService:
@@ -104,6 +191,10 @@ class LiveQaService:
         self._recent: dict[tuple[str, str], tuple[float, dict]] = {}
         # 进程内留痕(stats 汇总数据源; 全量审计走 JSONL)
         self._records: list[dict] = []
+        # 小时分桶(L1): "YYYY-MM-DD HH" -> 桶计数(全局口径不分直播间)
+        self._hourly: dict[str, dict] = {}
+        # 阈值告警状态: armed=本轮已告警(仍超阈值不重复, 跌回解除后可再告警)
+        self._alert_armed = False
 
     # ------------------------------------------------------------
     # 弹幕问答主入口
@@ -126,7 +217,7 @@ class LiveQaService:
         if live_qa_mode() == "off":
             result = {**base, "answer": LIVE_QA_DISABLED_ANSWER,
                       "ragMode": "off", "ts": ts}
-            self._record(question, result)
+            await self._record(question, result)
             return result
 
         q = (question or "").strip()
@@ -136,12 +227,12 @@ class LiveQaService:
                 <= len(q) <= LIVE_QA_MAX_QUESTION_LEN):
             result = {**base, "answer": LIVE_QA_FILTERED_ANSWER,
                       "ragMode": "filtered", "filtered": True, "ts": ts}
-            self._record(question, result)
+            await self._record(question, result)
             return result
         if _hit_sensitive(q):
             result = {**base, "answer": LIVE_QA_FILTERED_ANSWER,
                       "ragMode": "filtered", "filtered": True, "ts": ts}
-            self._record(question, result)
+            await self._record(question, result)
             return result
 
         # ③ 进程级 60s 同问去重(幂等铁律: 命中直接复用上次结果)
@@ -150,7 +241,7 @@ class LiveQaService:
         if hit is not None and hit[0] > time.time():
             cached_result = dict(hit[1])
             cached_result["cached"] = True
-            self._record(question, cached_result)
+            await self._record(question, cached_result)
             return cached_result
 
         # ④ RAG 问答(确定性 rule 轨; LLM 轨不进关键路径)
@@ -187,7 +278,7 @@ class LiveQaService:
                 self._recent.pop(k, None)
 
         # ⑥⑦ 留痕 + 返回
-        self._record(question, result)
+        await self._record(question, result)
         return result
 
     # ------------------------------------------------------------
@@ -195,7 +286,9 @@ class LiveQaService:
     # ------------------------------------------------------------
 
     def stats(self, room_id: str = None) -> dict:
-        """弹幕问答统计(total/unsolved/filtered/cached/未解率/高频问top5)"""
+        """弹幕问答统计(total/unsolved/filtered/cached/未解率/高频问top5
+        + 小时分桶 hourlyBuckets 与 unsolvedRateTrend——L1 观测面,
+        分桶为全局口径(不分直播间, 与告警判定一致))"""
         rows = [r for r in self._records
                 if not room_id or r.get("roomId") == room_id]
         total = len(rows)
@@ -212,6 +305,9 @@ class LiveQaService:
             item["count"] += 1
         top = sorted(counter.values(),
                      key=lambda x: (-x["count"], x["question"]))[:5]
+        # 小时分桶(时间升序, 近 N 桶; N=保留窗口上限)
+        buckets = [self._bucket_public(self._hourly[k])
+                   for k in sorted(self._hourly)]
         return {
             "total": total,
             "unsolved": unsolved,
@@ -219,14 +315,205 @@ class LiveQaService:
             "cached": cached,
             "unsolvedRate": round(unsolved / total, 4) if total else 0.0,
             "topQuestions": top,
+            "hourlyBuckets": buckets,
+            "unsolvedRateTrend": [b["unsolvedRate"] for b in buckets],
         }
 
     # ------------------------------------------------------------
-    # 内部: 留痕(进程内 list + 即写 JSONL)
+    # 直播缺口闭环(L2): 拉取 live_qa 来源缺口 + 转知识草稿
     # ------------------------------------------------------------
 
-    def _record(self, question: str, result: dict) -> None:
-        """每条问答留痕一 dict(含全部返回字段+原始问题), 即写 JSONL"""
+    async def list_gaps(self, limit: int = 100) -> list[dict]:
+        """直播来源知识缺口(open; sessionId 前缀 live_qa:, 按频次倒序)
+
+        仅未处置(open)缺口有补知识运营意义; 输出含频次(askCount)
+        与最近提问时间(lastAskedAt)。缺口字段结构(以
+        KnowledgeService.record_gap 落库为准): id/question/
+        normQuestion/sessionId/askCount/status/entryId/createdAt/
+        lastAskedAt/resolvedAt。
+        """
+        gaps = await self._knowledge.list_gaps(
+            status=GAP_STATUS_OPEN, limit=500)
+        live = [g for g in gaps if str(g.get("sessionId") or "")
+                .startswith(LIVE_QA_GAP_SESSION_PREFIX)]
+        live.sort(key=lambda g: (-int(g.get("askCount", 0)),
+                                 int(g.get("id") or 0)))
+        return [{
+            "id": g.get("id"),
+            "question": g.get("question"),
+            "sessionId": g.get("sessionId"),
+            "askCount": int(g.get("askCount", 0)),
+            "status": g.get("status"),
+            "createdAt": g.get("createdAt"),
+            "lastAskedAt": g.get("lastAskedAt"),
+        } for g in live[:limit]]
+
+    async def gap_to_draft(self, gap_id: int = 0,
+                            question: str = "") -> dict:
+        """直播缺口转知识草稿(先审后显铁律: 落 pending, 绝不 publish)
+
+        定位缺口: gapId 精确匹配 / question 文本匹配(二选一), 仅接受
+        sessionId 前缀 live_qa: 的直播来源缺口;
+        落草稿: KnowledgeService.create_entry(question=缺口问题,
+        answer=占位)——治理流水线原生 status=pending 进候选池,
+        keywords 留空待运营补充;
+        收尾: best-effort resolve_gap(action=resolve, 关联草稿条目)
+        标记缺口已补——对齐 teach_submit 的既有缺口闭环范式。
+
+        Raises:
+            KeyError: 直播来源缺口不存在
+            ValueError: 参数缺失/知识治理拦截(违禁词/重复知识)
+        """
+        gap_id = int(gap_id or 0)
+        target = (question or "").strip()
+        if not gap_id and not target:
+            raise ValueError("须提供 gapId 或 question 以定位缺口")
+        gaps = await self._knowledge.list_gaps(
+            status=GAP_STATUS_OPEN, limit=500)
+        live = [g for g in gaps if str(g.get("sessionId") or "")
+                .startswith(LIVE_QA_GAP_SESSION_PREFIX)]
+        matched = ([g for g in live
+                    if int(g.get("id") or 0) == gap_id] if gap_id
+                   else [g for g in live
+                         if str(g.get("question") or "").strip() == target])
+        if not matched:
+            raise KeyError(f"直播知识缺口不存在(gapId={gap_id}, "
+                           f"question={target[:20]})")
+        gap = matched[0]
+        # 转草稿: 占位答案经 create_entry 合规筛查, pending 进候选池
+        entry = await self._knowledge.create_entry(
+            question=str(gap.get("question") or target),
+            answer=LIVE_QA_GAP_DRAFT_ANSWER)
+        # 缺口标记 best-effort(失败不影响草稿已落库, 留痕人工复核)
+        gap_resolved = False
+        with contextlib.suppress(Exception):
+            await self._knowledge.resolve_gap(
+                int(gap["id"]), action="resolve", entry_id=entry["id"])
+            gap_resolved = True
+        if not gap_resolved:
+            logger.warning("live_qa_gap_mark_resolved_failed gap=%s",
+                           gap.get("id"))
+        return {
+            "gapId": gap.get("id"),
+            "question": entry["question"],
+            "entryId": entry["id"],
+            "entryStatus": entry["status"],   # pending(待人工审核后发布)
+            "gapResolved": gap_resolved,
+        }
+
+    # ------------------------------------------------------------
+    # 内部: 留痕(进程内 list + 即写 JSONL + 小时分桶 + 阈值告警)
+    # ------------------------------------------------------------
+
+    async def _record(self, question: str, result: dict) -> None:
+        """每条问答留痕一 dict(含全部返回字段+原始问题), 即写 JSONL;
+        同一回答链路内完成小时分桶累计与 unsolved 阈值告警判定"""
         record = {**result, "question": question}
         self._records.append(record)
         _append_log(record)
+        self._bucket_accumulate(question, result)
+        await self._check_unsolved_alert()
+
+    # ------------------------------------------------------------
+    # 内部: 小时分桶(L1)与阈值告警判定
+    # ------------------------------------------------------------
+
+    def _bucket_accumulate(self, question: str, result: dict) -> None:
+        """小时分桶累计(键 "YYYY-MM-DD HH"; 保留最近 48 桶淘汰最旧)
+
+        桶内 _unsolvedQ 为该桶 unsolved 问题计数器(告警 topQuestion
+        数据源, 对外投影时剥离)。
+        """
+        key = _now().strftime("%Y-%m-%d %H")
+        bucket = self._hourly.get(key)
+        if bucket is None:
+            bucket = {"hour": key, "total": 0, "unsolved": 0,
+                      "filtered": 0, "cached": 0, "_unsolvedQ": {}}
+            self._hourly[key] = bucket
+        bucket["total"] += 1
+        if result.get("ragMode") == "unsolved":
+            bucket["unsolved"] += 1
+            norm = _norm_question(str(question or ""))
+            if norm:
+                item = bucket["_unsolvedQ"].setdefault(
+                    norm, {"question": str(question), "count": 0})
+                item["count"] += 1
+        if result.get("filtered"):
+            bucket["filtered"] += 1
+        if result.get("cached"):
+            bucket["cached"] += 1
+        # 超限淘汰最旧桶(键 "YYYY-MM-DD HH" 字典序即时间序)
+        if len(self._hourly) > LIVE_QA_HOURLY_BUCKET_KEEP:
+            for k in sorted(self._hourly)[
+                    :len(self._hourly) - LIVE_QA_HOURLY_BUCKET_KEEP]:
+                self._hourly.pop(k, None)
+
+    @staticmethod
+    def _bucket_rate(bucket: dict) -> float:
+        """桶 unsolved 率(纯计数确定性; 空桶防 0 除返回 0.0)"""
+        total = int(bucket.get("total", 0))
+        if not total:
+            return 0.0
+        return round(int(bucket.get("unsolved", 0)) / total, 4)
+
+    @classmethod
+    def _bucket_public(cls, bucket: dict) -> dict:
+        """桶对外投影(剥内部 _unsolvedQ 计数器, 补 unsolvedRate)"""
+        return {
+            "hour": bucket["hour"],
+            "total": int(bucket["total"]),
+            "unsolved": int(bucket["unsolved"]),
+            "filtered": int(bucket["filtered"]),
+            "cached": int(bucket["cached"]),
+            "unsolvedRate": cls._bucket_rate(bucket),
+        }
+
+    @staticmethod
+    def _top_unsolved_question(buckets: list[dict]) -> dict:
+        """跨桶最高频 unsolved 问题(并列取问题串较小者——确定性)"""
+        merged: dict[str, dict] = {}
+        for b in buckets:
+            for norm, item in (b.get("_unsolvedQ") or {}).items():
+                m = merged.setdefault(
+                    norm, {"question": item["question"], "count": 0})
+                m["count"] += int(item["count"])
+        if not merged:
+            return {"question": "", "count": 0}
+        return sorted(merged.values(),
+                      key=lambda x: (-x["count"], x["question"]))[0]
+
+    async def _check_unsolved_alert(self) -> None:
+        """unsolved 阈值告警(同一回答链路内判定, 纯计数确定性)
+
+        最近 3 个已结束桶(小时已翻页且有留痕的桶, 无留痕的小时
+        无桶不参与判定)率均 > 0.40 → 管理员站内信告警一次:
+            - 幂等去重: 告警后进入 armed, 仍超阈值不重复告警;
+            - 解除重置: 最近 3 桶任一跌回 ≤0.40 → 解除 armed
+              (重置连续口径), 之后再次连续 3 桶超阈值可再告警。
+        发送 fail-soft: 先置 armed 再发送(发送失败不重试轰炸,
+        异常仅 warning, 不影响问答主链)。
+        """
+        current_key = _now().strftime("%Y-%m-%d %H")
+        closed_keys = sorted(k for k in self._hourly if k < current_key)
+        last3 = [self._hourly[k] for k in
+                 closed_keys[-LIVE_QA_UNSOLVED_ALERT_BUCKETS:]]
+        if len(last3) < LIVE_QA_UNSOLVED_ALERT_BUCKETS:
+            return
+        over = all(self._bucket_rate(b) > LIVE_QA_UNSOLVED_ALERT_THRESHOLD
+                   for b in last3)
+        if not over:
+            self._alert_armed = False   # 跌回阈值 → 解除 armed(重置连续)
+            return
+        if self._alert_armed:
+            return                     # 本轮已告警, 不重复
+        self._alert_armed = True
+        top = self._top_unsolved_question(last3)
+        try:
+            delivered = await _notify_admins_unsolved(
+                [self._bucket_public(b) for b in last3], top)
+            logger.warning(
+                "live_qa_unsolved_alert_dispatched buckets=%s top=%s "
+                "delivered=%s", [b["hour"] for b in last3],
+                top.get("question"), delivered)
+        except Exception as exc:
+            logger.warning("live_qa_unsolved_alert_send_skip: %s", exc)

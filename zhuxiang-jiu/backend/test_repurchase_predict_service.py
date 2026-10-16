@@ -434,3 +434,126 @@ def test_r2_route_dispatch_smoke(monkeypatch):
     r2 = client.post("/api/member-ai/repurchase/dispatch",
                      headers={"X-Role": "admin"}, json={"suggestionId": 1})
     assert r2.status_code == 422             # 缺 operator → 422
+
+
+# ---------- T10 stats 聚合正确性(R1) ----------
+
+def test_t10_stats_aggregation(monkeypatch):
+    """stats: byTier/byQFactor/last7dDaily/dispatchRate 聚合正确
+    (cv=None → byQFactor.skipped; 7 天窗口外不计入日分桶)"""
+
+    async def run():
+        monkeypatch.setenv("REPURCHASE_PUSH_MODE", "observe")
+        svc = _svc()
+        now = datetime.now(UTC)
+        # 6 条留痕: (tier, qFactor, cv, status, createdAt 距今天数)
+        records = [
+            ("upcoming", 1.2, 0.05, "pending", 0),
+            ("upcoming", 1.2, 0.10, "sent", 1),
+            ("overdue", 1.0, 0.40, "pending", 2),
+            ("overdue", 1.0, None, "sent", 3),     # 小样本 → skipped
+            ("overdue", 0.8, 0.90, "pending", 6),
+            ("overdue", 0.8, 0.95, "pending", 8),  # 7 天窗口外
+        ]
+        for i, (tier, qf, cv, status, d_ago) in enumerate(records, 1):
+            rec = {"suggestionId": i, "memberId": i, "tier": tier,
+                   "qFactor": qf, "cv": cv, "status": status,
+                   "createdAt": (now - timedelta(days=d_ago)).isoformat()}
+            await svc.store.save(SUGGESTION_TABLE, i, rec)
+
+        s = await svc.stats()
+        assert s["total"] == 6
+        assert s["byTier"] == {"upcoming": 2, "overdue": 4}
+        # skipped=1(小样本 cv=None); 1.2×2 / 1.0×1 / 0.8×2
+        assert s["byQFactor"] == {"1.2": 2, "1.0": 1, "0.8": 2,
+                                  "skipped": 1}
+        # dispatchRate = sent/(sent+pending) = 2/6
+        assert s["dispatchRate"] == pytest.approx(2 / 6, abs=0.01)
+        assert s["mode"] == "observe"
+        # last7dDaily: 恒 7 天旧→新, 今日在末位; 8 天前不计入 → 共 5 条
+        daily = s["last7dDaily"]
+        assert len(daily) == 7
+        assert daily[-1]["date"] == now.strftime("%Y-%m-%d")
+        assert daily[-1]["count"] == 1
+        assert daily[0]["count"] == 1            # 6 天前那条
+        assert sum(d["count"] for d in daily) == 5
+        # 与 suggestions 列表人工抽核对齐: 分桶总和 = total
+        assert (sum(s["byTier"].values())
+                == sum(s["byQFactor"].values()) == s["total"])
+
+    asyncio.run(run())
+
+
+# ---------- T11 stats 空留痕全零(R1) ----------
+
+def test_t11_stats_empty(monkeypatch):
+    """空留痕: 全零结构 + dispatchRate=0.0(除零兜底) + mode 回显"""
+
+    async def run():
+        monkeypatch.setenv("REPURCHASE_PUSH_MODE", "observe")
+        svc = _svc()
+        s = await svc.stats()
+        assert s["total"] == 0
+        assert s["byTier"] == {"upcoming": 0, "overdue": 0}
+        assert s["byQFactor"] == {"1.2": 0, "1.0": 0, "0.8": 0,
+                                  "skipped": 0}
+        assert s["dispatchRate"] == 0.0
+        assert len(s["last7dDaily"]) == 7
+        assert all(d["count"] == 0 for d in s["last7dDaily"])
+        assert s["mode"] == "observe"
+
+    asyncio.run(run())
+
+
+# ---------- T12 调度 auto off 零副作用(R2) ----------
+
+def test_t12_scheduler_auto_off_noop(monkeypatch):
+    """REPURCHASE_SCAN_AUTO 默认 off → start_scan_loop 零副作用
+    (打桩 RepurchasePredictService, 断言 scan_due 从未被调)"""
+    import services.repurchase_predict_service as rps
+    calls = []
+
+    class _Recorder:
+        def __init__(self, *args, **kwargs):
+            calls.append("instantiated")
+
+        async def scan_due(self, window_days=3):
+            calls.append(("scan_due", window_days))
+            return {"mode": "observe", "scanned": 0}
+
+    monkeypatch.setattr(rps, "RepurchasePredictService", _Recorder)
+    monkeypatch.delenv("REPURCHASE_SCAN_AUTO", raising=False)
+    from services import repurchase_scan_scheduler as rss
+    rss.start_scan_loop()                 # 同步调用后直接返回
+    assert calls == []                    # 未实例化未扫描, 零副作用
+
+
+# ---------- T13 调度 auto on 启动即扫一轮(R2) ----------
+
+def test_t13_scheduler_auto_on_scans(monkeypatch):
+    """auto on + observe 模式 → 启动即跑一轮 scan_due(window_days=3),
+    之后进入 sleep 等下一轮(interval 到期由 _interval 保证)"""
+
+    async def run():
+        import services.repurchase_predict_service as rps
+        calls = []
+
+        class _Recorder:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def scan_due(self, window_days=3):
+                calls.append(window_days)
+                return {"mode": "observe", "scanned": 1, "predictable": 1,
+                        "upcoming": 1, "overdue": 0, "skipped": 0}
+
+        monkeypatch.setattr(rps, "RepurchasePredictService", _Recorder)
+        monkeypatch.setenv("REPURCHASE_SCAN_AUTO", "on")
+        monkeypatch.setenv("REPURCHASE_PUSH_MODE", "observe")
+        monkeypatch.setenv("REPURCHASE_SCAN_INTERVAL_MIN", "60")
+        from services import repurchase_scan_scheduler as rss
+        rss.start_scan_loop()             # 事件循环内 → create_task
+        await asyncio.sleep(0.1)          # 让首轮 run_once 执行完
+        assert calls == [3]               # 启动立即扫一轮, 窗口 3 天
+
+    asyncio.run(run())
