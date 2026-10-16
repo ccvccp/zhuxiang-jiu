@@ -64,6 +64,8 @@ async def test_wire_shadow_keeps_candidate(monkeypatch):
 
 async def test_wire_assist_applies(monkeypatch):
     monkeypatch.setenv("VOICE82_MODE", "assist")
+    # P4 开闸: assist 注入还需放量内——100=全量
+    monkeypatch.setenv("VOICE82_ASSIST_ROLLOUT", "100")
     _mk_effective(3, {"vad_silence_ms": 1400, "probe_depth": 0,
                       "interrupt_first": "on"})
     p = await wire_params({}, 3)
@@ -74,6 +76,7 @@ async def test_wire_assist_applies(monkeypatch):
 
 async def test_wire_clamp_bounds(monkeypatch):
     monkeypatch.setenv("VOICE82_MODE", "assist")
+    monkeypatch.setenv("VOICE82_ASSIST_ROLLOUT", "100")
     _mk_effective(4, {"vad_silence_ms": 99999,
                       "probe_depth": 9,
                       "confirm_threshold": 0.05,

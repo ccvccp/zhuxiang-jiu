@@ -222,6 +222,8 @@ async def test_effective_assist_applied(monkeypatch):
     svc = await _make_effective(monkeypatch)
     await svc.promote(9)
     monkeypatch.setenv("VOICE82_MODE", "assist")
+    # P4 开闸: assist 生效还需放量内(_in_rollout)——100=全量
+    monkeypatch.setenv("VOICE82_ASSIST_ROLLOUT", "100")
     r = await svc.effective_params(9)
     assert r["effective"] and r["params"]["probe_depth"] == 0  # T27
 
@@ -230,6 +232,7 @@ async def test_discard_rollback(monkeypatch):
     svc = await _make_effective(monkeypatch)
     await svc.promote(9)
     monkeypatch.setenv("VOICE82_MODE", "assist")
+    monkeypatch.setenv("VOICE82_ASSIST_ROLLOUT", "100")
     r = await svc.discard(9, reason="回滚验证")
     assert r["success"] and r["clearedEffective"] == 1    # T28
     assert not (await svc.effective_params(9))["effective"]

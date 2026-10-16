@@ -210,6 +210,55 @@ async def voice82_shadow_status(x_role: str = Header(
     return await Voice82EvolutionService().shadow_status()
 
 
+# ============================================================
+# P4: 开闸决策数据面 + 按比例放量(assist 生效条件收紧为
+# mode==assist 且 _in_rollout; 默认 0=未开闸零行为变化)
+# ============================================================
+
+@router.get("/rollout")
+async def voice82_rollout_view(x_role: str = Header(
+        default="", alias="X-Role")):
+    """开闸决策数据面(门槛+放量+信号概览+advice——零 LLM)
+
+    开闸决策 runbook: 先 GET 本端点看门槛 → POST 小比例 →
+    观察 → 逐步放量; 回滚 = POST pct=0
+    """
+    _require_admin(x_role)
+    from services.voice82_evolution_service import (
+        Voice82EvolutionService,
+    )
+    return await Voice82EvolutionService().rollout_dashboard()
+
+
+@router.post("/rollout")
+async def voice82_rollout_set(payload: dict,
+                              x_role: str = Header(
+                                  default="", alias="X-Role")):
+    """调整放量比例 {pct: 0-100}(写 Redis 运行时键, 返回 dashboard 刷新值)
+
+    开闸决策 runbook: 先 GET /api/voice82/rollout 看门槛 →
+    POST 小比例(如 {"pct": 5}) → 观察 → 逐步放量
+    """
+    _require_admin(x_role)
+    from services.voice82_evolution_service import (
+        Voice82EvolutionService, set_assist_rollout,
+    )
+    try:
+        pct = int(payload.get("pct"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422,
+                            detail="pct 必填且为整数(0-100)")
+    if not 0 <= pct <= 100:
+        raise HTTPException(status_code=422,
+                            detail="pct 需在 0-100 之间")
+    try:
+        await set_assist_rollout(pct)
+    except ValueError as exc:
+        # Redis 运行时键不可用 → 提示走 env 静态回退面
+        raise HTTPException(status_code=409, detail=str(exc))
+    return await Voice82EvolutionService().rollout_dashboard()
+
+
 def register_voice82_routes(app):
     """路由注册(routes/__init__ register 函数族惯例)"""
     app.include_router(router)

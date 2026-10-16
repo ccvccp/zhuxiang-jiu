@@ -31,8 +31,8 @@ from repositories.backend import (
 )
 from repositories.xiaozhu_repository import Xiaozhu48Repository
 from services.voice82_dialog_service import (
-    PARAM_DEFAULTS, PARAM_KEYS, SCORE_KIND, Voice82DialogService,
-    biz_domain_of,
+    COLD_START_SESSIONS, PARAM_DEFAULTS, PARAM_KEYS, SCORE_KIND,
+    Voice82DialogService, biz_domain_of,
 )
 
 logger = logging.getLogger("voice82_evolution")
@@ -53,6 +53,109 @@ def evolution_mode() -> str:
     """三态开关: off / shadow / assist(默认 off)"""
     m = os.environ.get("VOICE82_MODE", "off").strip().lower()
     return m if m in ("off", "shadow", "assist") else "off"
+
+
+# ------------------------------------------------------------------
+# P4·开闸: assist 按比例放量(运行时可调, 默认 0=零行为变化)
+#
+# 键形态对齐 xiaozhu LLM 轨运行时键先例(zhuxiang:xiaozhu:
+# llm_dialog——env 静态 + Redis 运行时, 免容器重建按需 SET/DEL);
+# 「开闸」≠直接切 VOICE82_MODE=assist(全局行为变化违灰度纪律),
+# 而是给 assist 态加按会员分桶的确定性放量闸。
+# ------------------------------------------------------------------
+
+ROLLOUT_REDIS_KEY = "zhuxiang:voice82:rollout"   # 运行时放量键
+ROLLOUT_OBSERVE_DAYS = 7                          # 放量观察窗(advice 文案)
+
+
+def _num(v, default=0.0) -> float:
+    """宽松数值转换(存储层 hash 值恒 str——脏值回落默认)"""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _ts_epoch(v) -> float:
+    """ISO ts → epoch(解析失败=0 → 不计入近 7 日)"""
+    try:
+        dt = datetime.fromisoformat(str(v or ""))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _env_rollout_pct() -> int:
+    """env 静态回落数值(VOICE82_ASSIST_ROLLOUT, 默认 0; 非法回落 0)"""
+    try:
+        return max(0, min(100, int(os.environ.get(
+            "VOICE82_ASSIST_ROLLOUT", "0").strip())))
+    except ValueError:
+        return 0
+
+
+async def assist_rollout_pct() -> int:
+    """assist 放量比例(0-100)
+
+    三源优先级: Redis 运行时键 zhuxiang:voice82:rollout >
+    env VOICE82_ASSIST_ROLLOUT > 默认 0。fail-soft——Redis
+    不可用/无键/值非法一律回落 env(开闸决策永不因存储故障
+    误放大, 只会收窄)。
+    """
+    try:
+        if is_redis_mode():
+            client = await get_redis_client()
+            v = await client.get(ROLLOUT_REDIS_KEY)
+            if v is not None:
+                if isinstance(v, bytes):
+                    v = v.decode()
+                return max(0, min(100, int(str(v).strip())))
+    except Exception:                     # noqa: BLE001 fail-soft
+        pass
+    return _env_rollout_pct()
+
+
+async def set_assist_rollout(pct) -> int:
+    """写运行时放量键(clamp 0-100; 免容器重建即调即生效)
+
+    Redis 不可用(未启用/写入异常) → ValueError 提示改走 env
+    VOICE82_ASSIST_ROLLOUT 静态回退面。
+    """
+    p = max(0, min(100, int(pct)))
+    try:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(ROLLOUT_REDIS_KEY, str(p))
+            return p
+    except Exception as exc:              # noqa: BLE001
+        raise ValueError(f"Redis 写入失败({exc}), 请改用 env "
+                         "VOICE82_ASSIST_ROLLOUT") from exc
+    raise ValueError("运行时键不可用(STORE_MODE!=redis), "
+                     "请改用 env VOICE82_ASSIST_ROLLOUT")
+
+
+def _in_rollout(member_id, pct: int | None = None) -> bool:
+    """放量判定(确定性分桶——Knuth 乘法散列)
+
+    桶值 = int(member_id*2654435761 % 1000)/10 ∈ [0, 99.9],
+    桶值 < pct 即命中。选择理由: 无随机抖动、同会员跨请求/
+    跨进程结果稳定(可复现), 灰度边界明确——放量比例回退时
+    同桶会员集合不变, 复盘可精确圈定影响面。
+    边界: pct<=0 恒 False(未开闸); pct>=100 恒 True(全量);
+    member_id None(游客)恒 False(游客不参与放量)。
+    pct 缺省回落 env 口径(effective_params 调用时传入
+    await assist_rollout_pct() 的实时三源值)。
+    """
+    if member_id is None:
+        return False
+    p = _env_rollout_pct() if pct is None else int(pct)
+    if p <= 0:
+        return False
+    if p >= 100:
+        return True
+    return int(int(member_id) * 2654435761 % 1000) / 10 < p
 
 
 # ------------------------------------------------------------------
@@ -281,13 +384,38 @@ class Voice82EvolutionService:
                 "reason": reason or ""}
 
     async def effective_params(self, member_id) -> dict:
-        """生效参数: assist 且有 effective → 覆盖; 否则 params_for"""
+        """生效参数: assist 且过放量闸且有 effective → 覆盖; 否则 params_for
+
+        判定次序(前挡后, P4 开闸灰度铁律):
+            mode → 冷启动 → 放量 → effective
+            - mode!=assist: 恒 base(既有路径零变化)
+            - 冷启动(画像 sessions<COLD_START_SESSIONS=10):
+              恒 base(hold=cold_start——P0 红线「前 10 会话只采
+              不调」在 assist 路径同样成立; 画像未建不视为
+              冷启动, 走 effective 表既有口径=有 promote 决策
+              即可生效)
+            - 放量外(assist 且 _in_rollout=False): 恒 base
+              (hold=rollout——即使 env 已切 assist, 放量外
+              会员恒注面板基线, wire 侧留 voice82_rollout_hold)
+            - 全过才查 effective 表做白名单 merge
+        """
         prof = await self._dialog.get_profile(member_id)
         base = (prof.get("params") if prof.get("success")
                 else dict(PARAM_DEFAULTS))
         if evolution_mode() != "assist":
             return {"mode": evolution_mode(), "params": base,
                     "effective": False}
+        if prof.get("success"):
+            meta = ((prof.get("profile") or {})
+                    .get("meta") or {})
+            if int(_num(meta.get("sessions"))) < COLD_START_SESSIONS:
+                return {"mode": "assist", "params": base,
+                        "effective": False, "hold": "cold_start"}
+        pct = await assist_rollout_pct()
+        if not _in_rollout(member_id, pct):
+            return {"mode": "assist", "params": base,
+                    "effective": False, "hold": "rollout",
+                    "rolloutPct": pct}
         eff = await self._hgetall(
             TBL_EFFECTIVE, f"m{int(member_id)}" if member_id
             is not None else "")
@@ -467,6 +595,67 @@ class Voice82EvolutionService:
                 "note": "ready=影子达标可评估 promote(仍走人工)"
                 if ready else "未达标(继续观察)"}
 
+    # ---- P4 开闸决策数据面(零 LLM——数字全确定性聚合) ----
+
+    async def _table_keys(self, table: str) -> list:
+        """表键列举(双模式; redis 扫描限额 500 键同观测面纪律)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k(table, "*"))
+            return [k.decode() if isinstance(k, bytes) else k
+                    for k in keys[:500]]
+        return list((get_in_memory_store().get(table) or {}).keys())
+
+    async def rollout_dashboard(self) -> dict:
+        """开闸决策数据面: 门槛+放量+信号+候选/生效计数+建议
+
+        advice 四档(级联确定性模板, 零 LLM):
+            未 ready → 「影子数据未达标(sessions=X/200,
+              正反馈=Y%/55%), 维持 shadow」
+            ready 且 pct=0 → 「门槛达标, 可从 5% 起步」
+            ready 且 0<pct<100 → 「灰度中 X%, 观察 N 日再放量」
+            pct=100 → 「全量, 关注 needs_evolution 率」
+        开闸决策 runbook: 先 GET 看门槛 → POST 小比例 →
+        观察 → 逐步放量; 回滚 = POST pct=0。
+        """
+        mode = evolution_mode()
+        pct = await assist_rollout_pct()
+        gate = await self.shadow_status()
+        sigs = (await self.signals_view(limit=1000))["signals"] or []
+        cutoff = datetime.now(UTC).timestamp() - ROLLOUT_OBSERVE_DAYS * 86400
+        recent = sum(1 for s in sigs
+                     if _ts_epoch(s.get("ts")) >= cutoff)
+
+        def _avg(key: str) -> float:
+            vals = [_num(s.get(key)) for s in sigs]
+            return round(sum(vals) / len(vals), 3) if vals else 0.0
+
+        pos_pct = round(float(gate.get("positiveRatio") or 0) * 100, 1)
+        if not gate.get("ready"):
+            advice = (f"影子数据未达标(sessions="
+                      f"{gate.get('sessions')}/{SHADOW_MIN_SESSIONS}, "
+                      f"正反馈={pos_pct}%"
+                      f"/{int(SHADOW_POSITIVE_RATIO * 100)}%), "
+                      "维持 shadow")
+        elif pct == 0:
+            advice = "门槛达标, 可从 5% 起步"
+        elif pct < 100:
+            advice = (f"灰度中 {pct}%, 观察 {ROLLOUT_OBSERVE_DAYS} 日"
+                      "再放量")
+        else:
+            advice = "全量, 关注 needs_evolution 率"
+        return {"success": True, "mode": mode, "rolloutPct": pct,
+                "gate": gate,
+                "signals": {"total": len(sigs), "last7d": recent,
+                            "avg": {"task": _avg("task"),
+                                    "efficiency": _avg("efficiency"),
+                                    "experience": _avg("experience"),
+                                    "bizValue": _avg("bizValue"),
+                                    "reward": _avg("reward")}},
+                "challenger": len(await self._table_keys(TBL_CHALLENGER)),
+                "effectiveCount": len(await self._table_keys(TBL_EFFECTIVE)),
+                "advice": advice}
+
 
 # ------------------------------------------------------------------
 # P3 语音链接入: 对话响应参数注入(路由层消费)
@@ -488,7 +677,8 @@ async def wire_params(result: dict | None,
 
     语义: shadow → 恒注面板现行基线(零行为变化), 有 challenger
           候选时留痕对比日志; assist → 注入 effective 覆盖值
-          (全部 clamp 白名单边界内)。
+          (全部 clamp 白名单边界内); assist 但放量外会员 →
+          恒注基线并留 voice82_rollout_hold 专用痕(P4 开闸)。
     """
     try:
         svc = Voice82EvolutionService()
@@ -523,6 +713,17 @@ async def wire_params(result: dict | None,
                    "interruptFirst": params["interrupt_first"]}
         if isinstance(result, dict):
             result["voice82"] = payload
+        if (not effective and member_id is not None
+                and e.get("hold") == "rollout"):
+            # 放量外留痕(P4 专用日志——分桶值与 pct 入 key,
+            # 复盘可精确圈定放量影响面; 恒注基线与 shadow 同形)
+            try:
+                bucket = int(int(member_id) * 2654435761 % 1000) / 10
+            except (TypeError, ValueError):
+                bucket = -1
+            logger.info("voice82_rollout_hold member=%s bucket=%s "
+                        "pct=%s actual=panel_baseline",
+                        member_id, bucket, e.get("rolloutPct"))
         if not effective and member_id is not None:
             # shadow 留痕: 候选若在, 记"如果 assist 会用"(观测)
             try:

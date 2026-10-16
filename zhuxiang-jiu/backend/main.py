@@ -103,6 +103,9 @@ from routes import (
     register_knowledge_routes,
     # 数字人直播弹幕QA(复用 knowledge RAG 规则轨)
     register_live_qa_routes,
+    # MCP 只读工具面(小竹蓝图 P4-⑧: FC 注册表零隐私子集
+    # 包标准 MCP 协议, off 默认+Token 强制)
+    register_mcp_routes,
     # AI智能中枢模块(35号·全站AI大模型总调度)
     register_hub_routes,
     # 限时秒杀模块
@@ -299,6 +302,9 @@ register_role_routes(app)
 register_attract_routes(app)
 register_knowledge_routes(app)
 register_live_qa_routes(app)
+# MCP 只读工具面(小竹蓝图 P4-⑧: POST /mcp off 默认+Token 强制,
+# 白名单=零隐私只读子集三重交集; 与商城蓝图 V4.0 汇合项)
+register_mcp_routes(app)
 register_hub_routes(app)
 register_flashsale_routes(app)
 register_ai_scoring_routes(app)
