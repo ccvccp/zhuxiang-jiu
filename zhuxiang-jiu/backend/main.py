@@ -302,6 +302,10 @@ register_role_routes(app)
 register_attract_routes(app)
 register_knowledge_routes(app)
 register_live_qa_routes(app)
+# Self-Play 对抗压测(小竹蓝图 P4-10 第二批: 红队模板六类×现有防线
+# ×确定性判定; 两端点均 admin——对抗结果只留痕+告警管理员)
+from routes.selfplay_routes import register_selfplay_routes
+register_selfplay_routes(app)
 # MCP 只读工具面(小竹蓝图 P4-⑧: POST /mcp off 默认+Token 强制,
 # 白名单=零隐私只读子集三重交集; 与商城蓝图 V4.0 汇合项)
 register_mcp_routes(app)
@@ -479,6 +483,10 @@ register_radar_routes(app)
 # 信值·臻选购物平台(68号 P0: 信值账户聚合层)
 from routes.xinzhi_routes import register_xinzhi_routes
 register_xinzhi_routes(app)
+# DPO 偏好对数据面(小竹蓝图 P4-10 第一批: S1/S2/S4 三源归集+
+# 人工评审环常闭+stats; 归集只产 pending, approved 必经人工)
+from routes.dpo_routes import register_dpo_routes
+register_dpo_routes(app)
 
 
 # ============================================================
@@ -591,6 +599,18 @@ async def _on_startup():
     from services.repurchase_scan_scheduler import (
         start_scan_loop as start_repurchase_scan)
     start_repurchase_scan()
+    # DPO 偏好对归集(小竹蓝图 P4-10 第一批): 定时批量三源配对留痕
+    # (DPO_COLLECT_AUTO=on 才启动, 默认 off 零行为变化;
+    #  归集只产 pending, approved 必经管理员评审环)
+    from services.dpo_collect_scheduler import (
+        start_collect_loop as start_dpo_collect)
+    start_dpo_collect()
+    # Self-Play 对抗压测(小竹蓝图 P4-10 第二批): 定时批量红蓝对抗轮
+    # (SELFPLAY_MODE=on 才启动, 默认 off 零行为变化; 判定器纯规则
+    #  零 LLM, A1-A5 失守走安全告警/A6 走缺口登记 L2 闭环)
+    from services.selfplay_scheduler import (
+        start_scheduler as start_selfplay)
+    start_selfplay()
     # 智码·AI智能二维码大模型: 每日愉悦度健康/免疫监控/码域快照扫描
     # (QR70_SCAN_AUTO=on 且 QR70_MODE != off 时启动, 引擎活化)
     from services.qr70_scan_scheduler import start_scan_loop as start_qr70_scan

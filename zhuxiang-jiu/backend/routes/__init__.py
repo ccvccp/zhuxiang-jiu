@@ -83,6 +83,8 @@ from routes.attract_routes import register_attract_routes
 from routes.knowledge_routes import register_knowledge_routes
 # 数字人直播弹幕QA(复用 knowledge RAG 规则轨)
 from routes.live_qa_routes import register_live_qa_routes
+# Self-Play 对抗压测(小竹蓝图 P4-10 第二批·红队模板×现有防线×确定性判定)
+from routes.selfplay_routes import register_selfplay_routes
 # MCP 只读工具面(小竹蓝图 P4-⑧: FC 注册表零隐私子集包标准 MCP)
 from routes.mcp_routes import register_mcp_routes
 # AI智能中枢模块(35号·全站AI大模型总调度)
@@ -130,6 +132,8 @@ from routes.zjian_routes import register_zjian_routes
 from routes.scene_routes import register_scene_routes
 # AI智能安全管理模块(43号·安全网关+威胁评分+挑战验证+申诉)
 from routes.security_routes import register_security_routes
+# DPO 偏好对数据面(小竹蓝图 P4-10 第一批: 三源归集+人工评审环+stats)
+from routes.dpo_routes import register_dpo_routes
 
 __all__ = [
     # 已有(15)
@@ -187,6 +191,7 @@ __all__ = [
     "register_attract_routes",
     "register_knowledge_routes",
     "register_live_qa_routes",
+    "register_selfplay_routes",
     "register_mcp_routes",
     "register_hub_routes",
     "register_promo_routes",
@@ -212,4 +217,5 @@ __all__ = [
     "register_zjian_routes",
     "register_scene_routes",
     "register_security_routes",
+    "register_dpo_routes",
 ]

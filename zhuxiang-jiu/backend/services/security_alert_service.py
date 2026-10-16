@@ -49,7 +49,8 @@ DEGRADED_THRESHOLD = 3
 # 信号分组展示名(面板/站内信分组渲染)
 SIGNAL_NAMES = {"redis": "Redis 体检", "intel": "情报订阅",
                 "scheduler": "调度器", "ibms": "智能后台巡检(74号)",
-                "growth80": "会员增长防刷(80号)"}
+                "growth80": "会员增长防刷(80号)",
+                "selfplay": "Self-Play 对抗(小竹P4-10)"}
 
 
 class SecurityAlertService:
@@ -218,6 +219,35 @@ class SecurityAlertService:
             )[:200],
         }]
         return await self._dispatch(alerts, False)
+
+    async def notify_selfplay_alerts(self, breaches: list,
+                                     force: bool = False) -> dict:
+        """小竹蓝图 P4-10 第二批·Self-Play 对抗失守告警
+
+        SelfPlayService.run_round 判定的 A1-A5 防线缺陷 →
+        alerts 格式(signal=selfplay, level=warn, rule=selfplay:类)
+        → 共享 _dispatch(过滤/去重/聚合单封/管理员触达全套继承;
+        同类 24h 去重防定时轮重复轰炸, 手动轮可 force 跳过)。
+
+        A6 领域盲区不走此通道(走 KnowledgeService.record_gap
+        入缺口队列, 复用 L2 缺口→草稿闭环)。
+
+        Args:
+            breaches: 失守清单 [{category, question,
+                      defensePoint, detail, ...}]
+            force: 跳过 24h 去重(手动触发可传)
+        """
+        alerts = [{
+            "signal": "selfplay",
+            "level": "warn",
+            "rule": f"selfplay:{str(b.get('category') or 'unknown')}",
+            "message": (
+                f"[{b.get('category')}] 防线失守——"
+                f"{b.get('defensePoint')}: {b.get('detail')} "
+                f"(攻击样例: {str(b.get('question') or '')[:60]})"
+            )[:200],
+        } for b in (breaches or [])]
+        return await self._dispatch(alerts, force)
 
     # --------------------------------------------------------
     # 共享分发(过滤→去重→聚合单封→触达)
