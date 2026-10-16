@@ -28,7 +28,7 @@
 | `js/env-adapter.js` | H5/小程序双端适配 + live 请求封装（GET query 序列化已修复） |
 | `js/checkout-service.js` 等 | 供应链四件套前端事务（9 阶段与后端 business 模块对齐），mock/live 双轨 |
 
-**live 化现状**（按页面实测）：news 社区流、index 同盟区块、product-detail 知识背景、search 智搜、service 会话、activity 全套、checkout 供应链族已 live；products/cart/news-detail 仍 data.js 本地渲染（live 端点 `/api/product/*` 公开GET 已就绪待接）。
+**live 化现状**（按页面实测）：news 社区流、index 同盟区块、product-detail 知识背景、search 智搜、service 会话、activity 全套、checkout 供应链族已 live；**批次一（T1.1-T1.4）后 products/product-detail/cart/news-detail 四页已全部接入 live 双轨**（mock 同步渲染 + live 异步替换，失败静默回落 data.js）——C 端 15 页全部脱离纯 mock。
 
 ### 1.3 鉴权设计（js/auth.js 统一令牌）
 
@@ -121,7 +121,7 @@ authBadge: 页头登录态 UI(昵称+管理员标识+退出); requireLogin() 未
 
 ### 2.7 news-detail.html — 新闻详情
 
-- **定位**：「新闻详情 - 竹香酒」；data.js 本地渲染（mock 侧）。社区帖子详情 live 端点 `GET /api/community/posts`（公开GET）已就绪待接。
+- **定位**：「新闻详情 - 竹香酒」；双轨渲染（T1.4）：`?id=` → data.js NEWS 静态（原版式回落）；`?post={postId}` → `GET /api/community/posts`（公开GET，只显 approved）评测帖详情——正文（单段长文按句切段对齐静态多段版式）+ 溯源（发布时间/审核员/关联商品 best-effort 商品名增强）；帖子不存在→404 空态文案，服务不可达→临时加载失败空态。
 
 ### 2.8 activity.html — 活动中心
 
@@ -311,7 +311,7 @@ authBadge: 页头登录态 UI(昵称+管理员标识+退出); requireLogin() 未
 | cart | 1 | **订单交易（计价 live ✅ T1.3）** `POST /api/order/price/preview`(登录态会员价明细)；游客走本地引擎 |
 | checkout | 4 | 供应链事务 |
 | news | 2 | 内容社区 |
-| news-detail | 1 | （mock 侧待 live） |
+| news-detail | 1 | **内容社区（live ✅ T1.4）** `GET /api/community/posts`(评测帖正文+溯源+关联商品) |
 | activity | 5 | 活动管理 |
 | activity-detail | 11 | 活动管理 |
 | search | 7 | 智搜 |
@@ -360,8 +360,8 @@ authBadge: 页头登录态 UI(昵称+管理员标识+退出); requireLogin() 未
 
 | 优先级 | 页面 | 动作 | 后端就绪度 |
 |---|---|---|---|
-| 高 | products / news-detail | data.js → `/api/product/*`、`/api/community/posts`（公开GET） | ✅ 已放行 |
-| 中 | cart | 本地计价 → `POST /api/order/price/preview` | ✅ |
+| ~~高~~ ✅ | products / news-detail | data.js → `/api/product/*`、`/api/community/posts`（公开GET）——T1.1/T1.4 已完成 | ✅ 已接 |
+| ~~中~~ ✅ | cart | 本地计价 → `POST /api/order/price/preview`——T1.3 已完成 | ✅ 已接 |
 | 中 | 5 个静态观测页 | 接各自模块公开观测 GET（`/api/zyh/` `/api/synapse/` `/api/zjian/` 已公开GET） | ✅ |
 | 低 | alliance-mall / index | 商户维度增强 | ✅ |
 
