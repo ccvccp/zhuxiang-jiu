@@ -32,6 +32,24 @@
         bar.style.display = 'block';
     }
 
+    // 观测面失败回落(T2.2): 区块渲染静态文案——不编造数据, 提示手动刷新
+    var FALLBACK_TEXT = '观测面暂不可达 · 点击「手动刷新」重试';
+
+    function fallback(ids) {
+        ids.forEach(function (id) {
+            var el = $(id);
+            if (!el) { return; }
+            if (el.tagName === 'TBODY') {
+                var cols = el.closest('table')
+                    .querySelectorAll('thead th').length || 1;
+                el.innerHTML = '<tr><td colspan="' + cols
+                    + '" class="dash-empty">' + FALLBACK_TEXT + '</td></tr>';
+            } else {
+                el.innerHTML = '<div class="dash-empty">' + FALLBACK_TEXT + '</div>';
+            }
+        });
+    }
+
     function getJSON(path) {
         return fetch(apiBase() + path).then(function (r) {
             if (!r.ok) { throw new Error(path + ' → HTTP ' + r.status); }
@@ -180,6 +198,7 @@
                 || '今日日记尚未生成。';
         }).catch(function (e) {
             err('日记加载失败: ' + e.message);
+            $('diaryBox').textContent = FALLBACK_TEXT;
         });
     }
 
@@ -189,15 +208,27 @@
         err('');
         $('apiBase').value = apiBase();
         getJSON('/api/synapse/mode').then(renderMode)
-            .catch(function (e) { err('灰度态加载失败: ' + e.message); });
+            .catch(function (e) {
+                err('灰度态加载失败: ' + e.message);
+                fallback(['ovMode', 'modeDetail']);
+            });
         getJSON('/api/synapse/metrics').then(function (d) {
             renderRouter(d.router || {});
             renderStats(d);
-        }).catch(function (e) { err('统计加载失败: ' + e.message); });
+        }).catch(function (e) {
+            err('统计加载失败: ' + e.message);
+            fallback(['ovRouter', 'ovStats']);
+        });
         getJSON('/api/synapse/hotspots').then(renderHotspots)
-            .catch(function (e) { err('热点加载失败: ' + e.message); });
+            .catch(function (e) {
+                err('热点加载失败: ' + e.message);
+                fallback(['hotspotRows']);
+            });
         getJSON('/api/synapse/evolution').then(renderEvolution)
-            .catch(function (e) { err('进化史加载失败: ' + e.message); });
+            .catch(function (e) {
+                err('进化史加载失败: ' + e.message);
+                fallback(['ovEvolution', 'patchRows']);
+            });
         loadDiary();
         $('lastUpdate').textContent = '更新于 '
             + new Date().toLocaleTimeString();
