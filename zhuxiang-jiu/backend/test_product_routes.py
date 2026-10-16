@@ -706,12 +706,21 @@ class TestReviewFixRegressionRoutes:
         assert by_order.json()["review"]["order_id"] == "ORD_RT_001"
 
     def test_list_my_reviews_exposed(self):
-        """P1-15: 我的评价历史端点暴露(提交评价 → /reviews/mine 可查)"""
+        """P1-15: 我的评价历史端点暴露(提交评价 → /reviews/mine 可查)
+
+        JWT 范式(2026-10-12): /api/product 前缀 GET 属公开浏览面,
+        public path 无 token 剥离 X-Member-Id(零信任), 须带 Bearer。
+        """
         client.post(f"/api/product/{PID_CLASSIC_42}/reviews",
                     json={"rating": 5, "content": "我的评价历史测试"},
                     headers={"X-Member-Id": "1"})
-        resp = client.get("/api/product/reviews/mine",
-                          headers={"X-Member-Id": "1"})
+        login = client.post("/api/auth/login",
+                            json={"phone": "13800000001",
+                                  "password": "test123456"})
+        assert login.status_code == 200, login.text
+        bearer = {"Authorization":
+                  f"Bearer {login.json()['accessToken']}"}
+        resp = client.get("/api/product/reviews/mine", headers=bearer)
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True

@@ -1925,7 +1925,7 @@ class KnowledgeService:
                     # "Bot/1.0" 会被 403 Too Many Reqs(2026-10-02
                     # 生产实证; 带联系信息后同 IP 直接过)
                     "User-Agent": "ZhuxiangKnowledgeBot/1.0 "
-                                  "(+https://zxjiu.com)"})
+                                  "(+https://zyjiu.com)"})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 raw = resp.read().decode("utf-8", errors="ignore")
         except Exception as exc:

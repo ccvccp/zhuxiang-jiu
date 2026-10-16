@@ -22,12 +22,15 @@ import base64
 import os
 import sys
 
-os.environ["LOCK_MODE"] = "asyncio"
-os.environ["STORE_MODE"] = "asyncio"
-os.environ["AUTH_MODE"] = "strict"
-os.environ["XIAOZHU_MODE"] = "assist"
-os.environ.pop("LLM_API_KEY", None)
-os.environ["LLM_ENABLED"] = "off"
+# 环境设置已移入 main(): 避免 pytest 全量收集时模块导入副作用
+# 泄漏 AUTH_MODE=strict 污染同进程后续测试(2026-10-12 全量体检修复)
+ENV_OVERRIDES = {
+    "LOCK_MODE": "asyncio",
+    "STORE_MODE": "asyncio",
+    "AUTH_MODE": "strict",
+    "XIAOZHU_MODE": "assist",
+    "LLM_ENABLED": "off",
+}
 
 PASS = 0
 FAIL = 0
@@ -49,6 +52,10 @@ def reset_all():
 
 
 def main():
+    # standalone 运行路径: 进程内独占设置环境(与原顶层行为一致)
+    for k, v in ENV_OVERRIDES.items():
+        os.environ[k] = v
+    os.environ.pop("LLM_API_KEY", None)
     reset_all()
     from fastapi.testclient import TestClient
 
@@ -129,9 +136,9 @@ def main():
     print("[05 指令集 + 角色上下文]")
     r = client.get("/api/xiaozhu/commands", headers=h)
     body = r.json()
-    record("GET commands(28 指令+唤醒词+窗口)",
+    record("GET commands(29 指令+唤醒词+窗口)",
            r.status_code == 200
-           and len(body.get("commands") or []) == 28
+           and len(body.get("commands") or []) == 29
            and body.get("wakeWords") == ["小竹"]
            and body.get("wakeFreeWindowSeconds") == 300,
            f"{r.status_code}|{len(body.get('commands') or [])}")

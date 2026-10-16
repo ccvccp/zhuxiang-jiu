@@ -110,6 +110,7 @@ class CreateOrderRequest(PydBaseModel):
     settleMode: str = Field("monthly", description="结算模式 monthly/cash/prepaid")
     extraFee: float = Field(0.0, ge=0, description="附加费")
     discount: float = Field(1.0, gt=0, le=1.0, description="折扣率(0-1.0]")
+    useEwaybill: bool = Field(False, description="电子面单下单(P2 批次③: 经物流网关取运单号+大头笔+面单模板; mock 态确定性可测)")
 
 
 class RouteCarrierRequest(PydBaseModel):
@@ -211,6 +212,7 @@ async def create_logistics_order(
             settle_mode=data.settleMode,
             extra_fee=data.extraFee,
             discount=data.discount,
+            use_ewaybill=data.useEwaybill,
         )
         if routing:
             result["smartRouting"] = routing
@@ -335,11 +337,30 @@ async def list_logistics_tracks(
 # ============================================================
 
 @router.post("/api/logistics/callback/track", tags=["物流接口管理"])
-async def track_callback(data: TrackCallbackRequest):
+async def track_callback(
+    data: TrackCallbackRequest,
+    x_carrier_signature: str | None = Header(
+        None, alias="X-Carrier-Signature"),
+):
     """物流商轨迹回调(公开, 实际由签名鉴权)
 
     自动添加轨迹 + 尝试更新订单状态(非法流转忽略不报错)
+
+    回调验签(P2 批次③, 对齐 payment 范式): LGS_CARRIER_MODE != mock
+    时强制 X-Carrier-Signature(HMAC-SHA256, 密钥 LGS_CALLBACK_TOKEN),
+    无效签名 401 拒绝; mock 态放开(本地/CI 零凭证)。
     """
+    # 验签门(real/mock_fallback 强制; mock 态直接放行)
+    import json as _json
+    from services.logistics_gateway_service import (
+        verify_callback_signature,
+    )
+    try:
+        verify_callback_signature(
+            _json.dumps(data.model_dump(), ensure_ascii=False),
+            x_carrier_signature or "")
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e)) from e
     try:
         result = await _service.add_track_callback(
             waybill_no=data.waybillNo,
@@ -350,6 +371,117 @@ async def track_callback(data: TrackCallbackRequest):
             operator=data.operator,
             track_time=data.trackTime,
         )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 3.5 电子面单 + 物流理赔(P2 批次③, 5 端点)
+# ============================================================
+
+class ClaimRequest(PydBaseModel):
+    waybillNo: str = Field(..., description="运单号")
+    claimType: str = Field(..., description="理赔类型 damage/lost/short")
+    claimAmount: float = Field(..., gt=0, description="理赔金额")
+    evidenceUrls: list[str] | None = Field(None, description="凭证图片 URL 列表")
+    description: str = Field("", description="理赔说明")
+    applicant: str = Field("", description="申请人")
+
+
+class ClaimReviewRequest(PydBaseModel):
+    approved: bool = Field(..., description="true=受理 / false=拒赔")
+    payoutAmount: float | None = Field(None, gt=0, description="赔付金额(≤申请额, 缺省=申请额)")
+    note: str = Field("", description="审核说明")
+    reviewer: str = Field("admin", description="审核人")
+
+
+@router.post("/api/logistics/ewaybill/{waybill_no}/print", tags=["物流接口管理"])
+async def print_ewaybill(waybill_no: str):
+    """电子面单打印(返回大头笔/面单模板; 仅 useEwaybill 下单可打印)"""
+    try:
+        result = await _service.print_ewaybill(waybill_no)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/logistics/ewaybill/{waybill_no}/cancel", tags=["物流接口管理"])
+async def cancel_ewaybill(waybill_no: str):
+    """电子面单取消(real 渠道作废)/运单作废(仅待揽收可取消)"""
+    try:
+        result = await _service.cancel_ewaybill(waybill_no)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/logistics/claim", tags=["物流接口管理"])
+async def create_claim(
+    data: ClaimRequest,
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
+):
+    """物流理赔申请(保价件破损/丢损/短少; 仅已签收运单, 防重复申请)"""
+    _require_member_id(x_member_id)
+    try:
+        result = await _service.claim_shipment(
+            waybill_no=data.waybillNo,
+            claim_type=data.claimType,
+            claim_amount=data.claimAmount,
+            evidence_urls=data.evidenceUrls,
+            description=data.description,
+            applicant=data.applicant,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/logistics/claims", tags=["物流接口管理"])
+async def list_claims(
+    waybillNo: str | None = Query(None, description="运单号筛选"),
+    status: str | None = Query(None, description="状态筛选 pending/accepted/paid/rejected"),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """理赔列表(公开, 状态筛选)"""
+    try:
+        items = await _service.list_claims(
+            waybill_no=waybillNo, status=status, limit=limit)
+        return {"success": True, "data": items, "count": len(items)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/logistics/claim/{claim_no}/review", tags=["物流接口管理"])
+async def review_claim(
+    claim_no: str,
+    data: ClaimReviewRequest,
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """理赔审核(admin: 受理定赔付金额 / 拒赔)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.claim_review(
+            claim_no=claim_no,
+            approved=data.approved,
+            payout_amount=data.payoutAmount,
+            reviewer=data.reviewer,
+            note=data.note,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/logistics/claim/{claim_no}/payout", tags=["物流接口管理"])
+async def payout_claim(
+    claim_no: str,
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """理赔打款(admin: 受理单复用 payment 打款链, 审批阈值在产)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.claim_payout(claim_no)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

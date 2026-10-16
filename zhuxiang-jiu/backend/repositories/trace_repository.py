@@ -461,6 +461,61 @@ class TraceRepository:
             self.store["_trace_box_seq"] = 0
             self.store["_trace_life_seq"] = 0
             self.store["_trace_scan_seq"] = 0
+        # NFC 防伪双向索引(P2 批次③, setdefault 兼容旧 store)
+        self.store.setdefault("trace_life_by_nfc", {})     # nfcUid → lifeCode
+        self.store.setdefault("trace_nfc_by_life", {})     # lifeCode → nfcUid
+
+    # ============================================================
+    # NFC 防伪绑定索引(P2 批次③)
+    # ============================================================
+
+    async def save_nfc_binding(self, nfc_uid: str, life_code: str) -> None:
+        """写入 NFC UID↔生命码双向绑定"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("trace", "life_by_nfc", nfc_uid),
+                             life_code)
+            await client.set(_k("trace", "nfc_by_life", life_code),
+                             nfc_uid)
+        else:
+            self._ensure_store()
+            self.store["trace_life_by_nfc"][nfc_uid] = life_code
+            self.store["trace_nfc_by_life"][life_code] = nfc_uid
+
+    async def get_life_code_by_nfc(self, nfc_uid: str) -> str | None:
+        """UID → 生命码(未绑定返回 None)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.get(
+                _k("trace", "life_by_nfc", nfc_uid))
+        self._ensure_store()
+        return self.store["trace_life_by_nfc"].get(nfc_uid)
+
+    async def get_nfc_by_life_code(self, life_code: str) -> str | None:
+        """生命码 → UID(未绑定返回 None)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return await client.get(
+                _k("trace", "nfc_by_life", life_code))
+        self._ensure_store()
+        return self.store["trace_nfc_by_life"].get(life_code)
+
+    async def delete_nfc_binding(self, nfc_uid: str) -> None:
+        """解绑(双向清除)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            life_code = await client.get(
+                _k("trace", "life_by_nfc", nfc_uid))
+            await client.delete(_k("trace", "life_by_nfc", nfc_uid))
+            if life_code:
+                await client.delete(
+                    _k("trace", "nfc_by_life", life_code))
+        else:
+            self._ensure_store()
+            life_code = self.store["trace_life_by_nfc"].pop(
+                nfc_uid, None)
+            if life_code:
+                self.store["trace_nfc_by_life"].pop(life_code, None)
 
     # --- 箱码 ---
 

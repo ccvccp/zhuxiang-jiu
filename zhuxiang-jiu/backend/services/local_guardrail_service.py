@@ -20,7 +20,7 @@ DFA(Trie) O(N) 引擎 + 酒类/招商场景专属词库(一级拦截/
     意图漂移)仍由 LLM 分类轨 system prompt 约束 + 执行层
     沙箱/FC 网关承担——本地挡明确违规, LLM 兜边缘案例。
 
-词库分域( zxjiu.com 酒类销售+招商加盟双场景):
+词库分域( zyjiu.com 酒类销售+招商加盟双场景):
     一级拦截(blocklist, 5 类): 命中即拦, 返回分类标准话术
         minor_protection   未成年人保护(酒类销售红线)
         franchise_redline  招商红线承诺(非法集资/欺诈风险)

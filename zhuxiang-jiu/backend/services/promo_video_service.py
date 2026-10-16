@@ -170,7 +170,7 @@ class PromoVideoService:
                       ln, font=warn_font, fill=C_TEXT)
             y += 120
         brand_font = _font(40, bold=False)
-        draw.text((72, 1160), "© 竹香酒 zxjiu.com · 竹香型白酒",
+        draw.text((72, 1160), "© 竹香酒 zyjiu.com · 竹香型白酒",
                   font=brand_font, fill=C_MUTED)
         self._ip_badge(img)
         return img

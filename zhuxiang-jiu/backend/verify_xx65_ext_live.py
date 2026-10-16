@@ -1,4 +1,4 @@
-"""65号·可选项扩展 实机验证(生产 zxjiu.com)
+"""65号·可选项扩展 实机验证(生产 zyjiu.com)
 
 覆盖四件套:
     [01 前置]      mode=assist + 护栏自动巡检运行
@@ -27,7 +27,7 @@ PASS = 0
 FAIL = 0
 RESULTS = []
 
-BASE = "https://zxjiu.com"
+BASE = "https://zyjiu.com"
 SSH = ["ssh", "root@47.236.61.117"]
 CONTAINER = "zhuxiang-backend-1"
 REDIS = "zhuxiang-redis-1"
@@ -276,7 +276,7 @@ def main() -> bool:
     global PASS, FAIL
     print("=" * 62)
     print("65号·可选项扩展 实机验证"
-          "(生产 zxjiu.com)")
+          "(生产 zyjiu.com)")
     print("=" * 62)
 
     # [01 前置]

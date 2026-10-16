@@ -286,7 +286,7 @@ class Sv73PipelineService:
         # 落地(clickId)→注册自动归并→下单回写→_link_metrics 聚合
         short_code = content.get("shortCode") or ""
         if short_code:
-            base = (base + f"(引流短链 zxjiu.com/r/{short_code}: "
+            base = (base + f"(引流短链 zyjiu.com/r/{short_code}: "
                     "发布描述/评论区置顶/主页链接载体——点击即入 "
                     "attract 归因漏斗)")
         if sv73.get("template") in ("dh_oral", "dh_mix",

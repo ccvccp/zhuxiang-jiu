@@ -41,6 +41,8 @@ SOURCE_LOGIN = "login"            # 每日登录奖励
 SOURCE_REFUND = "refund"          # 退款返还
 SOURCE_EXPIRE = "expire"           # 过期
 SOURCE_DEDUCT = "deduct"          # 抵扣
+SOURCE_EXCHANGE = "exchange"      # 兑换商城消耗(P2)
+SOURCE_DAILY_TASK = "daily_task"  # 每日任务奖励(P2)
 
 # 流水状态
 LOG_STATUS_FROZEN = 0       # 冻结
@@ -260,8 +262,13 @@ class PointsRepository:
             self.store["points_signins"] = {}               # userId → {dateStr → signin}
             self.store["points_expire_batches"] = {}        # batchId → batch
             self.store["points_expire_by_user"] = {}        # userId → [batchId, ...]
+            # 兑换商城(P2)
+            self.store["points_exchange_items"] = {}        # itemId → item
+            self.store["points_exchange_records"] = {}      # recordId → record
+            self.store["points_exchange_by_user"] = {}      # userId → [recordId]
             self.store["_points_log_seq"] = 0
             self.store["_points_expire_seq"] = 0
+            self.store["_points_exchange_seq"] = 0
 
     # --- 账户 ---
 
@@ -594,3 +601,153 @@ class PointsRepository:
                         and batch.get("consumedPoints", 0) < batch.get("points", 0)):
                     result.append(batch)
         return result
+
+    # ============================================================
+    # 兑换商城(P2: 积分生态扩展)
+    # ============================================================
+
+    async def next_exchange_id(self) -> int:
+        """生成兑换记录ID"""
+        if is_redis_mode():
+            return await self._redis_next_id("points_exchange")
+        return self._mem_next_id("_points_exchange_seq")
+
+    async def get_exchange_item(self, item_id: str) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(
+                _k("points", "exchange_item", item_id))
+            return json.loads(data) if data else None
+        self._ensure_store()
+        return self.store.setdefault(
+            "points_exchange_items", {}).get(item_id)
+
+    async def save_exchange_item(self, item: dict) -> None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("points", "exchange_item", item["itemId"]),
+                json.dumps(item, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store.setdefault(
+                "points_exchange_items", {})[item["itemId"]] = item
+
+    async def list_exchange_items(self, only_on_sale: bool = True) -> list[dict]:
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k("points", "exchange_item", "*"))
+            items = []
+            for key in keys:
+                data = await client.get(key)
+                if not data:
+                    continue
+                try:
+                    it = json.loads(data)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(it, dict):
+                    continue
+                items.append(it)
+        else:
+            self._ensure_store()
+            items = list(self.store.setdefault(
+                "points_exchange_items", {}).values())
+        if only_on_sale:
+            items = [i for i in items if i.get("onSale", 1)]
+        # 兑换价低的靠前(新人友好)
+        items.sort(key=lambda i: i.get("pointsCost", 0))
+        return items
+
+    async def add_exchange_record(self, record: dict) -> int:
+        record_id = await self.next_exchange_id()
+        record["id"] = record_id
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("points", "exchange_record", record_id),
+                json.dumps(record, ensure_ascii=False))
+            await client.lpush(
+                _k("points", "exchange_by_user", record["userId"]),
+                record_id)
+        else:
+            self._ensure_store()
+            self.store.setdefault(
+                "points_exchange_records", {})[record_id] = record
+            self.store.setdefault(
+                "points_exchange_by_user", {},
+            ).setdefault(record["userId"], []).append(record_id)
+        return record_id
+
+    async def get_exchange_record(self, record_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(
+                _k("points", "exchange_record", record_id))
+            return json.loads(data) if data else None
+        self._ensure_store()
+        return self.store.setdefault(
+            "points_exchange_records", {}).get(record_id)
+
+    async def save_exchange_record(self, record: dict) -> None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("points", "exchange_record", record["id"]),
+                json.dumps(record, ensure_ascii=False))
+        else:
+            self._ensure_store()
+            self.store.setdefault(
+                "points_exchange_records", {})[record["id"]] = record
+
+    async def list_exchange_records(self, user_id: int = None,
+                                    status: str = None,
+                                    limit: int = 50) -> list[dict]:
+        if is_redis_mode():
+            client = await get_redis_client()
+            if user_id:
+                ids = await client.lrange(
+                    _k("points", "exchange_by_user", user_id),
+                    0, limit - 1)
+                records = []
+                for rid in ids:
+                    data = await client.get(
+                        _k("points", "exchange_record", rid))
+                    if not data:
+                        continue
+                    try:
+                        r = json.loads(data)
+                    except (TypeError, ValueError):
+                        continue
+                    if status and r.get("status") != status:
+                        continue
+                    records.append(r)
+            else:
+                keys = await client.keys(
+                    _k("points", "exchange_record", "*"))
+                records = []
+                for key in keys:
+                    data = await client.get(key)
+                    if not data:
+                        continue
+                    try:
+                        r = json.loads(data)
+                    except (TypeError, ValueError):
+                        continue
+                    if not isinstance(r, dict):
+                        continue
+                    if status and r.get("status") != status:
+                        continue
+                    records.append(r)
+        else:
+            self._ensure_store()
+            records = list(self.store.setdefault(
+                "points_exchange_records", {}).values())
+            if user_id:
+                records = [r for r in records
+                           if r.get("userId") == user_id]
+            if status:
+                records = [r for r in records
+                           if r.get("status") == status]
+        records.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
+        return records[:limit]

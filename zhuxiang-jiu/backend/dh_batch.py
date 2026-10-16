@@ -42,7 +42,7 @@
                          ——口播基准图 2026-10-02 换版(竹林美女解说
                          竹奕酒), 每次跑批自动从本地
                          assets/ip/zhuxiaomei_front.jpg 上传校验)
-  SV73_API               生产 API 基址(默认 https://zxjiu.com)
+  SV73_API               生产 API 基址(默认 https://zyjiu.com)
 """
 
 import argparse
@@ -60,7 +60,7 @@ import paramiko
 
 PROD_HOST = "root@47.236.61.117"
 PROD_CONTAINER = "zhuxiang-backend-1"
-API = "https://zxjiu.com"
+API = "https://zyjiu.com"
 ADL_API = "https://api.autodl.com"
 
 

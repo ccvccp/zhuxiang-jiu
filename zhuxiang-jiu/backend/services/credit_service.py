@@ -77,6 +77,11 @@ _QUARTER_RANGES = {
     4: ("10-01", "01-01"),
 }
 
+# 信用修复任务(决策会 D-D 选项 B·二期): 连续守约30天+20分,
+# 每修复周期(以 repairUntil 为周期键)至多回分一次
+REPAIR_KEEP_DAYS = 30
+REPAIR_KEEP_REWARD = 20
+
 
 class CreditService:
     """信用管理业务逻辑(双模式存储, 锁保护 RMW)"""
@@ -610,6 +615,108 @@ class CreditService:
             }
 
     # ============================================================
+    # 8.5 信用修复任务(D-D 二期: 连续守约打卡回分)
+    # ============================================================
+
+    async def repair_keep_checkin(self, user_id: int) -> dict:
+        """修复期守约打卡(连续守约达标回分, 每修复周期至多一次)
+
+        规则(决策会 D-D 选项 B):
+            - 仅修复期账户(repairUntil 未到期)可打卡
+            - 每日一次(UTC 日期幂等)
+            - 连续守约 REPAIR_KEEP_DAYS 天 → +REPAIR_KEEP_REWARD 分
+            - 每修复周期(周期键=repairUntil)至多回分一次,
+              新周期(再次降级)重新累计
+
+        Returns:
+            {userId, date, streak, targetDays, rewarded, scoreAfter?}
+
+        Raises:
+            KeyError: 信用账户不存在
+            ValueError: 不在修复期 / 今日已打卡
+        """
+        lock_key = f"credit:account:{user_id}"
+
+        async with get_lock(lock_key):
+            account = await self.repo.get_score(user_id)
+            if account is None:
+                raise KeyError(f"信用账户不存在(userId={user_id})")
+
+            now = datetime.utcnow()
+            now_iso = now.isoformat()
+            repair_until = account.get("repairUntil")
+            if not repair_until or now_iso >= repair_until:
+                raise ValueError(
+                    f"不在信用修复期, 无需守约打卡(userId={user_id})")
+
+            today = now.date().isoformat()
+            # 新修复周期(周期键变化): 清零重新累计
+            if account.get("repairKeepCycle") != repair_until:
+                account["repairKeepCycle"] = repair_until
+                account["repairKeepDates"] = []
+            dates = list(account.get("repairKeepDates") or [])
+            if today in dates:
+                raise ValueError(f"今日已打卡(userId={user_id})")
+            dates.append(today)
+            # 只留修复期内(60天)打卡记录, 防账户膨胀
+            account["repairKeepDates"] = dates[-CREDIT_REPAIR_DAYS - 1:]
+
+            # 连续守约天数(从今日回溯)
+            date_set = set(dates)
+            streak = 0
+            d = now.date()
+            while d.isoformat() in date_set:
+                streak += 1
+                d -= timedelta(days=1)
+
+            result = {
+                "userId": user_id,
+                "date": today,
+                "streak": streak,
+                "targetDays": REPAIR_KEEP_DAYS,
+                "rewarded": False,
+            }
+            # 达标回分: 每修复周期至多一次(标记先置, 随调分落库)
+            if (streak >= REPAIR_KEEP_DAYS
+                    and account.get("repairKeepRewardedFor")
+                    != repair_until):
+                account["repairKeepRewardedFor"] = repair_until
+                adjust = await self._adjust_score_locked(
+                    account, REPAIR_KEEP_REWARD,
+                    f"修复任务·连续守约{streak}天达标回分", "system")
+                result["rewarded"] = True
+                result["scoreAfter"] = adjust.get("scoreAfter")
+            else:
+                await self.repo.save_score(account)
+            return result
+
+    def repair_keep_status(self, account: dict,
+                           now: datetime = None) -> dict:
+        """修复任务面板状态(纯计算无 IO, points 每日任务面板联动用)"""
+        now = now or datetime.utcnow()
+        repair_until = account.get("repairUntil") or ""
+        dates = account.get("repairKeepDates") or []
+        if account.get("repairKeepCycle") != repair_until:
+            dates = []   # 周期键不一致视为未开始(打卡接口内重置)
+        date_set = set(dates)
+        streak = 0
+        d = now.date()
+        while d.isoformat() in date_set:
+            streak += 1
+            d -= timedelta(days=1)
+        return {
+            "inRepair": bool(repair_until
+                             and now.isoformat() < repair_until),
+            "repairUntil": repair_until or None,
+            "streak": streak,
+            "targetDays": REPAIR_KEEP_DAYS,
+            "checkedToday": now.date().isoformat() in date_set,
+            "rewarded": bool(repair_until)
+                        and account.get("repairKeepRewardedFor")
+                        == repair_until,
+        }
+
+    # ============================================================
     # 9. 信用统计
     # ============================================================
 
@@ -695,6 +802,75 @@ class CreditService:
             "recentChanges": recent_changes,
             "reportAt": ts(),
         }
+
+    # ============================================================
+    # 10.5 月度快照(D-E: 审计可比, 每月1日批算/管理端可重算)
+    # ============================================================
+
+    async def monthly_snapshot(self, user_id: int,
+                               month: str = None) -> dict:
+        """生成/覆盖单用户月度快照(当月无参则取当前月)
+
+        Raises:
+            KeyError: 信用账户不存在
+        """
+        account = await self.repo.get_score(user_id)
+        if account is None:
+            raise KeyError(f"信用账户不存在(userId={user_id})")
+        month = month or ts()[:7]
+        score = account.get("bambooScore", 0)
+        level = account.get("creditLevel", LEVEL_L1)
+
+        # 因子摘要: 当月信用流水按类型聚合(正负分各计)
+        logs = await self.repo.list_logs(user_id, limit=200)
+        month_logs = [l for l in logs
+                      if str(l.get("createdAt", "")).startswith(month)]
+        positive = sum(int(l.get("delta", 0) or 0)
+                       for l in month_logs if (l.get("delta") or 0) > 0)
+        negative = sum(int(l.get("delta", 0) or 0)
+                       for l in month_logs if (l.get("delta") or 0) < 0)
+
+        snapshot = {
+            "userId": user_id,
+            "month": month,                       # YYYY-MM
+            "bambooScore": score,
+            "creditLevel": level,
+            "roleType": account.get("roleType", ROLE_MEMBER),
+            "status": account.get("status", STATUS_NORMAL),
+            "monthPositive": positive,
+            "monthNegative": negative,
+            "monthEventCount": len(month_logs),
+            "paylaterUsed": account.get("paylaterUsed", 0.0),
+            "createdAt": ts(),
+        }
+        await self.repo.save_snapshot(snapshot)
+        return snapshot
+
+    async def run_monthly_snapshot_scan(self,
+                                        month: str = None) -> dict:
+        """全量月度快照批算(调度入口: 每月1日; month 缺省=当前月)
+
+        覆盖语义: 同月重复执行为重算(最新分值覆盖旧快照)
+        """
+        month = month or ts()[:7]
+        accounts = await self.repo.list_scores(limit=100000)
+        done, failed = 0, []
+        for acct in accounts:
+            try:
+                await self.monthly_snapshot(
+                    int(acct.get("userId") or 0), month)
+                done += 1
+            except Exception as exc:
+                failed.append({"userId": acct.get("userId"),
+                               "error": str(exc)[:80]})
+        return {"month": month, "accounts": len(accounts),
+                "snapshotted": done, "failed": failed}
+
+    async def list_snapshots(self, user_id: int = None,
+                             month: str = None) -> list[dict]:
+        """快照查询(本人历史/按月全量)"""
+        return await self.repo.list_snapshots(
+            user_id=user_id, month=month)
 
     # ============================================================
     # 11. v8.0 季度信用积分结算(文档5.1)
@@ -1334,7 +1510,7 @@ class CreditService:
             except Exception:
                 pass
 
-            return {
+            result = {
                 "orderId": order_id,
                 "userId": user_id,
                 "amount": amount,
@@ -1347,6 +1523,21 @@ class CreditService:
                 "status": PAYLATER_STATUS_REPAID,
                 "repaidAt": now_iso,
             }
+
+        # 竹信分 C2 按时还款 +3(best-effort; 逾期者已有 -20 惩罚不双记)
+        # NOTE: 必须在 credit:account 锁外触发——挂点内 adjust_score
+        # 需取同 key 锁, 非重入锁会造成自死锁
+        if overdue_days == 0:
+            try:
+                from services.role_service import (
+                    RoleService, BEHAVIOR_PAYLATER_REPAID_ON_TIME,
+                )
+                await RoleService().publish_member_credit_event(
+                    int(user_id), BEHAVIOR_PAYLATER_REPAID_ON_TIME,
+                    "credit", ref_id=f"paylater:{order_id}")
+            except Exception:
+                pass
+        return result
 
     async def list_paylater_orders(self, user_id: int, status: str = None,
                                    limit: int = 100) -> list[dict]:

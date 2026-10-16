@@ -596,6 +596,50 @@ class ChatService:
                  + await self.repo.mark_read(session_id, SENDER_CUSTOMER_SERVICE))
         return {"sessionId": session_id, "marked": count}
 
+    async def recall_message(self, session_id: str, message_id: int,
+                             sender_type: str, sender_id: int) -> dict:
+        """撤回消息(WS chat_recall 事件语义; 发送本人 2 分钟内可撤)
+
+        软撤回: 消息保留占位(recalled 标记+内容清空), 撤回时间留痕。
+
+        Raises:
+            KeyError: 会话/消息不存在
+            ValueError: 非本人消息 / 超出撤回窗口 / 已撤回
+        """
+        from datetime import datetime, timedelta
+        session = await self.repo.get_session(session_id)
+        if session is None:
+            raise KeyError(f"会话不存在(sessionId={session_id})")
+        msg = await self.repo.get_message(message_id)
+        if msg is None or msg.get("sessionId") != session_id:
+            raise KeyError(f"消息不存在(messageId={message_id})")
+        if msg.get("senderType") != sender_type \
+                or int(msg.get("senderId") or 0) != int(sender_id):
+            raise ValueError("仅消息发送者本人可撤回")
+        if msg.get("recalled"):
+            raise ValueError("消息已撤回")
+        try:
+            created = datetime.fromisoformat(msg.get("createdAt", ""))
+            if created.tzinfo is not None:
+                created = created.replace(tzinfo=None)  # 统一 naive 口径
+        except ValueError:
+            created = None
+        if created and datetime.utcnow() > created + timedelta(minutes=2):
+            raise ValueError("已超出撤回窗口(发送后 2 分钟内可撤回)")
+
+        now = ts()
+        await self.repo.update_message(message_id, {
+            "recalled": True,
+            "recalledAt": now,
+            "content": "",
+        })
+        return {
+            "sessionId": session_id,
+            "messageId": message_id,
+            "recalled": True,
+            "recalledAt": now,
+        }
+
     async def list_user_sessions(self, user_id: int, limit: int = 50) -> list[dict]:
         """查询用户会话列表"""
         return await self.repo.list_sessions_by_user(user_id, limit)

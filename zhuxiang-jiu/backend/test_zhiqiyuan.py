@@ -392,7 +392,7 @@ async def main():
     for suite in (TestFabric(), TestQA(), TestForecast(),
                   TestTax(), TestEvolution()):
         await suite.run()
-    await test_mode_and_scheduler()
+    await run_mode_and_scheduler()
     print("-" * 60)
     for line in RESULTS:
         print(line)
@@ -401,7 +401,9 @@ async def main():
     return FAIL == 0
 
 
-async def test_mode_and_scheduler():
+# 注意: 函数名用 run_ 前缀(非 test_), 避免被 pytest 误收集
+# (依赖前面 suite 先种子订单; pytest 直跑时 store 为空 → 财务数据缺)
+async def run_mode_and_scheduler():
     """三态灰度 + 扫描调度器(引擎活化升级用例)"""
     from services.zy_mode_service import (
         current_mode, require_decision_mode,

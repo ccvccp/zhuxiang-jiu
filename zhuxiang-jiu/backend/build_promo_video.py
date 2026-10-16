@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-BASE = "https://zxjiu.com"
+BASE = "https://zyjiu.com"
 
 DEMO = {
     "contentId": 0,

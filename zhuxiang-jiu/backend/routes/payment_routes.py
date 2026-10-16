@@ -128,6 +128,7 @@ class CreatePayRequest(PydBaseModel):
     pointsAmount: float = Field(0, ge=0, description="积分抵扣")
     guestPhone: str | None = Field(None, description="游客手机号(游客场景必填, 11位)")
     ageConfirmed: bool = Field(False, description="已满18周岁声明(游客场景必填, 酒类合规)")
+    installments: int | None = Field(None, description="分期期数(3/6/12; huabei/baitiao 渠道必传)")
 
 
 class PayCallbackRequest(PydBaseModel):
@@ -278,6 +279,7 @@ async def create_pay(
             points_amount=req.pointsAmount,
             guest_phone=req.guestPhone,
             age_confirmed=req.ageConfirmed,
+            installments=req.installments,
         )
     except KeyError as e:
         raise _map_key_error(e) from e
@@ -477,6 +479,23 @@ async def list_pending_refunds(
     return await _service.list_pending_refunds(limit)
 
 
+@router.post("/api/payment/callback/refund", tags=["收款管理"])
+async def refund_callback(req: RefundCallbackRequest):
+    """退款回调(渠道推送, 幂等)
+
+    NOTE: 必须注册在 POST /{pay_no}/refund 之前, 否则被动态路由
+    捕获(pay_no="callback" 导致渠道回调 404, 2026-10-12 全量体检修复)。
+    """
+    try:
+        return await _service.refund_callback(
+            req.channelRefundNo, req.callbackContent, req.refundNo,
+        )
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
 @router.post("/api/payment/{pay_no}/refund", tags=["收款管理"])
 async def create_refund(
     pay_no: str,
@@ -555,17 +574,7 @@ async def cancel_refund(
         raise _map_value_error(e) from e
 
 
-@router.post("/api/payment/callback/refund", tags=["收款管理"])
-async def refund_callback(req: RefundCallbackRequest):
-    """退款回调(渠道推送, 幂等)"""
-    try:
-        return await _service.refund_callback(
-            req.channelRefundNo, req.callbackContent, req.refundNo,
-        )
-    except KeyError as e:
-        raise _map_key_error(e) from e
-    except ValueError as e:
-        raise _map_value_error(e) from e
+# (refund_callback 已上移至 create_refund 之前, 防动态路由遮蔽)
 
 
 # ============================================================

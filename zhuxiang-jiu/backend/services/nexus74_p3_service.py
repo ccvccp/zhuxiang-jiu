@@ -41,6 +41,7 @@
 
 import logging
 import os
+import urllib.error
 from datetime import datetime, timedelta, \
     timezone, UTC
 
@@ -68,8 +69,40 @@ logger = logging.getLogger("nexus74_p3_service")
 _BJT = timezone(timedelta(hours=8))
 _WECHAT_DRYRUN_ENV = "NEXUS74_WECHAT_DRYRUN"
 _WECHAT_FAILSIM_ENV = "NEXUS74_WECHAT_FAILSIM"
+# A 档真实直连(2026-10-04 凭证配置升级):
+#   凭证键: WECHAT_MP_APPID/SECRET(74号专用) 优先,
+#   回退解析 36号 PROMO_CHANNEL_WECHAT_MP_KEY(appid|secret)
+#   ——一次配置两线受益
+_WECHAT_APPID_ENV = "WECHAT_MP_APPID"
+_WECHAT_SECRET_ENV = "WECHAT_MP_SECRET"
+_PROMO_KEY_ENV = "PROMO_CHANNEL_WECHAT_MP_KEY"
+# 发送形态(与 36号铁律一致: 默认 preview 试收不计配额,
+# send 全体群发与 36号共用服务号自然月 4 次硬限配额)
+_NEXUS_SEND_MODE_ENV = "NEXUS74_WECHAT_SEND_MODE"
+_NEXUS_PREVIEW_OPENID_ENV = \
+    "NEXUS74_WECHAT_PREVIEW_OPENID"
+# 品牌封面渲染 ID 段(与 36号 contentId 空间隔离;
+# PromoCoverService 确定性渲染)
+_NEXUS_COVER_ID_BASE = 74000000
 _RETRIABLE_KINDS = ("api_transient",
                     "quota_exceeded")
+
+
+def _wechat_credentials() -> tuple:
+    """A 档凭证读取(74号专用键优先→36号键回退;
+    返回 (appid, secret), 缺任一为 ("", ""))"""
+    app_id = (os.environ.get(
+        _WECHAT_APPID_ENV, "") or "").strip()
+    secret = (os.environ.get(
+        _WECHAT_SECRET_ENV, "") or "").strip()
+    if app_id and secret:
+        return app_id, secret
+    parts = [p.strip() for p in
+             (os.environ.get(_PROMO_KEY_ENV, "")
+              or "").split("|") if p.strip()]
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return "", ""
 
 
 def _bj_now(now: str) -> datetime:
@@ -186,11 +219,20 @@ class Nexus74P3Service:
     # A 档适配器(微信直连——诚实工程)
     # ============================================================
 
-    def _adapter_a_wechat(
-            self, publication_id: int) -> dict:
-        """A 档微信直连(无凭证→auth_expired
-        归因——不伪造成功; DRYRUN=演练;
-        FAILSIM=测试注入)"""
+    async def _adapter_a_wechat(
+            self, publication_id: int,
+            adaptation: dict) -> dict:
+        """A 档微信直连(2026-10-04 真实直连升级)
+
+        分支序(诚实工程):
+            FAILSIM → 失败模拟(测试注入)
+            DRYRUN  → 演练(ok, 不触平台)
+            凭证缺失 → auth_expired(不伪造成功)
+            真实直连 → 品牌封面(确定性渲染)→
+                token→素材→草稿→preview/send
+                (复用 36号 wechat_mp 四步协议;
+                send 与 36号共用服务号月配额)
+        """
         sim = os.environ.get(
             _WECHAT_FAILSIM_ENV, "")
         if sim in ERROR_KINDS:
@@ -210,14 +252,156 @@ class Nexus74P3Service:
                     "wx-dryrun-"
                     f"{publication_id}"),
             }
-        return {
-            "ok": False,
-            "kind": "auth_expired",
-            "message": (
-                "微信公众号 API 凭证未配置"
-                f"({_WECHAT_DRYRUN_ENV}=1 "
-                "可演练直连链路)"),
-        }
+        app_id, secret = _wechat_credentials()
+        if not (app_id and secret):
+            return {
+                "ok": False,
+                "kind": "auth_expired",
+                "message": (
+                    "微信公众号 API 凭证未配置"
+                    f"({_WECHAT_APPID_ENV}/"
+                    f"{_WECHAT_SECRET_ENV} 或 "
+                    f"{_PROMO_KEY_ENV}=appid|secret; "
+                    f"{_WECHAT_DRYRUN_ENV}=1 可演练)"),
+            }
+        # ---- 真实直连(36号 wechat_mp 四步协议复用) ----
+        send_mode = (os.environ.get(
+            _NEXUS_SEND_MODE_ENV, "preview")
+            or "preview").strip().lower()
+        if send_mode not in ("preview", "send"):
+            send_mode = "preview"
+        from services.promo_channel_service \
+            import (PromoChannelService,
+                    WechatMpAPIError)
+        pcs = PromoChannelService()
+        thumb_media_id = ""
+        draft_media_id = ""
+        try:
+            # 0) 品牌封面(确定性渲染, 74号独立 ID 段)
+            from services.promo_cover_service \
+                import PromoCoverService
+            tags = adaptation.get("tags") or []
+            cover = PromoCoverService(
+            ).ensure_cover({
+                "contentId":
+                    _NEXUS_COVER_ID_BASE
+                    + publication_id,
+                "title": adaptation.get(
+                    "title", ""),
+                "body": adaptation.get(
+                    "summary", ""),
+                "hashtags":
+                    " ".join(tags),
+            })
+            cover_png = cover.read_bytes()
+            # 1) token(预热缓存)
+            await pcs._wechat_mp_token(
+                app_id, secret)
+            # 2) 封面素材(永久图片)
+            thumb_media_id = \
+                await pcs._wechat_mp_call(
+                    app_id, secret,
+                    pcs._wechat_mp_add_material,
+                    cover_png,
+                    "nexus74_cover_"
+                    f"{publication_id}.png")
+            # 3) 图文草稿
+            content = {
+                "contentId":
+                    _NEXUS_COVER_ID_BASE
+                    + publication_id,
+                "title": adaptation.get(
+                    "title", ""),
+                "body": adaptation.get(
+                    "summary", ""),
+                "hashtags":
+                    " ".join(tags),
+                "shortCode": "",
+            }
+            draft_media_id = \
+                await pcs._wechat_mp_call(
+                    app_id, secret,
+                    pcs._wechat_mp_draft_add,
+                    content, thumb_media_id)
+            # 4) 发送(preview 试收 / send 群发)
+            if send_mode == "preview":
+                openid = (os.environ.get(
+                    _NEXUS_PREVIEW_OPENID_ENV,
+                    "") or "").strip()
+                if not openid:
+                    raise ValueError(
+                        "preview 形态需试收 openid("
+                        f"{_NEXUS_PREVIEW_OPENID_ENV}"
+                        ", 运营者微信关注公众号后"
+                        "后台可见)")
+                msg_id = await pcs._wechat_mp_call(
+                    app_id, secret,
+                    pcs._wechat_mp_mass_preview,
+                    draft_media_id, openid)
+            else:
+                await pcs._wechat_mp_quota_guard()
+                msg_id = await pcs._wechat_mp_call(
+                    app_id, secret,
+                    pcs._wechat_mp_mass_sendall,
+                    draft_media_id)
+                await pcs._wechat_mp_quota_consume()
+            return {
+                "ok": True,
+                "externalId":
+                    str(msg_id or ""),
+                "sendMode": send_mode,
+                "mediaId": draft_media_id,
+                "thumbMediaId":
+                    thumb_media_id,
+            }
+        except WechatMpAPIError as exc:
+            kind = ("auth_expired"
+                    if exc.errcode
+                    in (40001, 42001)
+                    else "api_transient")
+            out = {
+                "ok": False,
+                "kind": kind,
+                "message": (
+                    f"微信 API 错误(errcode="
+                    f"{exc.errcode}): "
+                    f"{str(exc)[:160]}"),
+            }
+            if thumb_media_id:
+                out["thumbMediaId"] = \
+                    thumb_media_id
+            if draft_media_id:
+                out["mediaId"] = \
+                    draft_media_id
+            return out
+        except (urllib.error.URLError,
+                TimeoutError) as exc:
+            # sendall 结果未知(不双发不标成功;
+            # 36号 C3 语义平移)
+            return {
+                "ok": False,
+                "kind": "api_transient",
+                "message": (
+                    "发送结果未知(网络异常: "
+                    f"{exc}), 需人工在公众号"
+                    "后台核对"),
+                "mediaId": draft_media_id,
+                "thumbMediaId":
+                    thumb_media_id,
+            }
+        except ValueError as exc:
+            out = {
+                "ok": False,
+                "kind": "api_transient",
+                "message": str(exc)[:200],
+            }
+            if thumb_media_id:
+                out["thumbMediaId"] = \
+                    thumb_media_id
+            if draft_media_id:
+                out["mediaId"] = \
+                    draft_media_id
+            return out
 
     # ============================================================
     # ① 发布编排(三级适配器——决策面)
@@ -416,8 +600,8 @@ class Nexus74P3Service:
                     "review_required 内容不可"
                     "自主发布(人工确认优先)")
             record["autoPublished"] = True
-        result = self._adapter_a_wechat(
-            publication_id)
+        result = await self._adapter_a_wechat(
+            publication_id, adaptation)
         if result["ok"]:
             record["status"] = "published"
             record["externalId"] = \
@@ -514,8 +698,19 @@ class Nexus74P3Service:
 
         pub["retryCount"] = \
             int(pub.get("retryCount", 0)) + 1
-        result = self._adapter_a_wechat(
-            publication_id)
+        # 重发布取最新适配版本(同源最新——
+        # 失败适配可能在期间已重新生成)
+        adapts = await self.repo \
+            .list_adaptations(
+                source_id=pub["sourceId"],
+                limit=200)
+        candidates = [a for a in adapts
+                      if a["platform"]
+                      == pub["platform"]]
+        adaptation = (candidates[-1]
+                      if candidates else {})
+        result = await self._adapter_a_wechat(
+            publication_id, adaptation)
         if result["ok"]:
             pub["status"] = "published"
             pub["externalId"] = \
@@ -657,11 +852,20 @@ class Nexus74P3Service:
 
     def healthz(self) -> dict:
         """适配器健康(A 档连通性——
-        诚实工程: 无凭证报 no_credentials)"""
+        诚实工程: 无凭证报 no_credentials;
+        2026-10-04: 凭证识别双键(WECHAT_MP_*
+        优先→36号 PROMO_CHANNEL 键回退) +
+        发送形态公示)"""
         dryrun = os.environ.get(
             _WECHAT_DRYRUN_ENV) == "1"
-        creds = bool(os.environ.get(
-            "WECHAT_MP_APPID"))
+        app_id, secret = _wechat_credentials()
+        creds = bool(app_id and secret)
+        send_mode = (os.environ.get(
+            _NEXUS_SEND_MODE_ENV, "preview")
+            or "preview").strip().lower()
+        if send_mode not in ("preview",
+                             "send"):
+            send_mode = "preview"
         adapters = [{
             "platform": "wechat_mp",
             "platformName": "微信公众号",
@@ -669,10 +873,11 @@ class Nexus74P3Service:
             "dryrun": dryrun,
             "credentialsConfigured":
                 creds,
+            "sendMode": send_mode,
             "status": (
                 "ready(dryrun 演练)"
                 if dryrun
-                else ("ready"
+                else (f"ready({send_mode})"
                       if creds
                       else "no_credentials")),
         }]

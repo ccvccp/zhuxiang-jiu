@@ -206,6 +206,23 @@ class ChatRepository:
             return await self._redis_mark_read(session_id, sender_type)
         return self._mem_mark_read(session_id, sender_type)
 
+    async def update_message(self, message_id: int, updates: dict) -> None:
+        """按ID部分更新消息(撤回等; 不存在静默跳过)"""
+        if is_redis_mode():
+            msg = await self._redis_get_message(message_id)
+            if msg is None:
+                return
+            msg.update(updates)
+            client = await get_redis_client()
+            await client.set(_k("chat", "message", message_id),
+                             json.dumps(msg, ensure_ascii=False))
+            return
+        self._ensure_store()
+        msg = self.store["chat_messages"].get(message_id)
+        if msg is None:
+            return
+        msg.update(updates)
+
     # ============================================================
     # 知识库 CRUD
     # ============================================================

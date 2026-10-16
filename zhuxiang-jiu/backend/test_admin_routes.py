@@ -30,6 +30,7 @@ import asyncio
 import contextlib
 import os
 import sys
+import time as _time_mod
 from datetime import datetime
 
 # 确保使用内存模式
@@ -878,7 +879,11 @@ class TestTwoFactor:
             record("test_2f_09_verify_wrong_code", True)
 
         # test 2f-10: pending 会话正确码 verify → 完成(含权限回填)
-        r = await svc.verify_2fa_login(pending_token, totp_at(secret))
+        # (时间无关化: enable(2f-04)已消费当前窗口 C, 同窗码会被重放
+        #  防护拒绝——原 totp_at(secret) 仅当跨 30s 窗口边界运行才过,
+        #  属时间敏感测试债; 改用下一窗口 C+1 的码, 与运行时刻解耦)
+        next_code = totp_at(secret, _time_mod.time() + 30)
+        r = await svc.verify_2fa_login(pending_token, next_code)
         record("test_2f_10_verify_success",
                r.get("twoFactorVerified") is True and "permissions" in r,
                f"unexpected: {r}")

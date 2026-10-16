@@ -81,6 +81,30 @@ def _map_key_error(exc: KeyError) -> HTTPException:
     return HTTPException(status_code=404, detail=msg)
 
 
+async def _ws_notify_transfer(session_id: str, result: dict,
+                              reason: str = "") -> None:
+    """转人工 REST 成功后向 WS 在线端推送 chat_transfer/chat_queue(best-effort)"""
+    try:
+        from services.chat_ws_manager import ws_manager
+        await ws_manager.broadcast_session(session_id, {
+            "type": "chat_transfer", "reason": reason,
+            "customerServiceId": result.get("customerServiceId")})
+        await ws_manager.notify_queue(session_id, "waiting")
+    except Exception:   # noqa: BLE001
+        pass
+
+
+async def _ws_notify_accept(session_id: str, result: dict) -> None:
+    """客服接入 REST 成功后推送 chat_assign(会话端+工作台, best-effort)"""
+    try:
+        from services.chat_ws_manager import ws_manager
+        await ws_manager.notify_assignment(
+            session_id, result.get("customerServiceId") or 0,
+            extra={"acceptedAt": result.get("acceptedAt", "")})
+    except Exception:   # noqa: BLE001
+        pass
+
+
 def _map_value_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc))
 
@@ -266,6 +290,7 @@ async def transfer_to_human(
     try:
         reason = data.reason if data else ""
         result = await _service.transfer_to_human(session_id, reason=reason)
+        await _ws_notify_transfer(session_id, result, reason)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
@@ -329,6 +354,7 @@ async def cs_accept(
     _require_admin(x_role)
     try:
         result = await _service.cs_accept(session_id)
+        await _ws_notify_accept(session_id, result)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

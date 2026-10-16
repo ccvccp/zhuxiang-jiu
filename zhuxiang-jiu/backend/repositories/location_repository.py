@@ -16,6 +16,7 @@
     - 存证类型: address/location/logistics/delivery/heatmap/site
 """
 
+import hashlib
 import json
 import math
 from datetime import datetime
@@ -79,6 +80,35 @@ def haversine_km(lng1: float, lat1: float, lng2: float, lat2: float) -> float:
     d_lng = math.radians(lng2 - lng1)
     a = math.sin(d_lat / 2) ** 2 + math.cos(rad_lat1) * math.cos(rad_lat2) * math.sin(d_lng / 2) ** 2
     return 2 * EARTH_RADIUS_KM * math.asin(math.sqrt(a))
+
+
+def point_in_polygon(lng: float, lat: float,
+                     polygon: str) -> bool:
+    """坐标是否在多边形围栏内(ray casting, 射线法)
+
+    polygon 格式: "lng,lat;lng,lat;..."(顶点顺序不限, 自动闭合)
+    """
+    points = []
+    for pair in str(polygon or "").split(";"):
+        parts = [p for p in pair.split(",") if p.strip()]
+        if len(parts) >= 2:
+            try:
+                points.append((float(parts[0]), float(parts[1])))
+            except ValueError:
+                continue
+    if len(points) < 3:
+        return False
+    inside = False
+    n = len(points)
+    for i in range(n):
+        x1, y1 = points[i]
+        x2, y2 = points[(i + 1) % n]
+        # 射线法: 点在边的 y 区间内且在交点右侧则翻转
+        if (y1 > lat) != (y2 > lat):
+            x_cross = x1 + (lat - y1) * (x2 - x1) / (y2 - y1)
+            if lng < x_cross:
+                inside = not inside
+    return inside
 
 
 class LocationRepository:
@@ -428,6 +458,12 @@ class LocationRepository:
             if z_type == ZONE_TYPE_NATIONAL:
                 matched.append(z)
                 continue
+            # 多边形围栏优先(字段预留, P2 批次②消费): 比圆形更精确
+            polygon = z.get("polygon")
+            if polygon:
+                if point_in_polygon(longitude, latitude, polygon):
+                    matched.append(dict(z, matchType="polygon"))
+                continue
             center_lng = z.get("centerLng")
             center_lat = z.get("centerLat")
             radius = z.get("radius", 0)
@@ -439,6 +475,35 @@ class LocationRepository:
                 z_copy["distance"] = round(distance, 2)
                 matched.append(z_copy)
         return matched
+
+    # ============================================================
+    # 地理编码缓存(P2 批次②: 地址→坐标 TTL 30 天, 降高德配额消耗)
+    # ============================================================
+
+    GEOCODE_CACHE_TTL_SECONDS = 30 * 24 * 3600
+
+    @staticmethod
+    def geocode_cache_key(address: str) -> str:
+        digest = hashlib.md5(
+            str(address or "").encode("utf-8")).hexdigest()
+        return _k("loc", "geocode", "cache", digest)
+
+    async def get_geocode_cache(self, cache_key: str):
+        """读地理编码缓存(未命中返回 None)"""
+        if is_redis_mode():
+            raw = await (await get_redis_client()).get(cache_key)
+            return json.loads(raw) if raw else None
+        return self.store.get(cache_key)
+
+    async def set_geocode_cache(self, cache_key: str,
+                                value: dict) -> None:
+        """写地理编码缓存(TTL 30 天; 内存模式不设 TTL)"""
+        if is_redis_mode():
+            await (await get_redis_client()).set(
+                cache_key, json.dumps(value, ensure_ascii=False),
+                ex=self.GEOCODE_CACHE_TTL_SECONDS)
+        else:
+            self.store[cache_key] = value
 
     # ============================================================
     # 区块链存证表 CRUD
@@ -468,6 +533,21 @@ class LocationRepository:
         if is_redis_mode():
             return await self._redis_get("loc", "evidence", evidence_id)
         return self._mem_get("loc_evidence", evidence_id)
+
+    async def update_evidence(self, evidence_id: int,
+                              fields: dict) -> dict | None:
+        """部分更新存证记录(上链回填 txHash/blockHeight 等)"""
+        evidence = await self.get_evidence(evidence_id)
+        if evidence is None:
+            return None
+        evidence.update(fields)
+        if is_redis_mode():
+            await self._redis_create("loc", "evidence", evidence_id,
+                                     evidence)
+        else:
+            self._ensure_store()
+            self.store["loc_evidence"][evidence_id] = evidence
+        return evidence
 
     async def get_evidence_by_hash(self, evidence_hash: str) -> dict | None:
         """按哈希查询存证"""

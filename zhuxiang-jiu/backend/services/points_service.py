@@ -27,7 +27,8 @@ from repositories.points_repository import (
     PointsRepository,
     # 流水类型
     LOG_TYPE_EARN, LOG_TYPE_SPEND, SOURCE_CHECKIN, SOURCE_ORDER, SOURCE_REFUND,
-    SOURCE_EXPIRE, SOURCE_DEDUCT, SOURCE_CREDIT, LOG_STATUS_AVAILABLE, LOG_STATUS_EXPIRED, LOG_STATUS_CONSUMED,
+    SOURCE_EXPIRE, SOURCE_DEDUCT, SOURCE_CREDIT, SOURCE_DAILY_TASK, SOURCE_EXCHANGE,
+    LOG_STATUS_AVAILABLE, LOG_STATUS_EXPIRED, LOG_STATUS_CONSUMED,
     # 过期批次状态
     EXPIRE_STATUS_ACTIVE, EXPIRE_STATUS_EXPIRED, EXPIRE_STATUS_CONSUMED,
 )
@@ -92,6 +93,14 @@ MONTHLY_EARN_LIMIT = 50000
 PER_ORDER_EARN_LIMIT = 5000
 # 最低抵扣单位
 MIN_DEDUCT_POINTS = 100
+
+# 兑换竹信分等级折扣(决策会 D-C 选项 B·二期): L3/L4/L5 → 95/92/90 折竹叶价
+# (无账户/L1/L2 → 不打折; best-effort 读取, 异常不打折)
+CREDIT_EXCHANGE_DISCOUNT = {
+    "L3": 0.95,
+    "L4": 0.92,
+    "L5": 0.90,
+}
 
 
 class PointsService:
@@ -744,6 +753,327 @@ class PointsService:
             "lastSigninDate": last_signin.get("signDate") if last_signin else None,
             "lastSigninContinuous": last_signin.get("continuousDays") if last_signin else 0,
         }
+
+    # ============================================================
+    # 每日任务(P2: 积分生态扩展)
+    # ============================================================
+
+    # 任务注册表: 完成即发分(客户端行为上报, 生产可加固为服务端埋点);
+    # signin 任务特殊——积分由签到接口发放, 任务面板只读签到记录;
+    # credit_repair_keep 特殊(D-D 二期)——信用修复期守约打卡,
+    # 回分走信用模块(竹信分+20), 面板仅修复期账户展示(creditTask 标记)
+    DAILY_TASKS = (
+        {"taskCode": "signin", "name": "每日签到",
+         "points": 0, "sort": 1, "autoTracked": True},
+        {"taskCode": "browse_product", "name": "浏览商品 3 款",
+         "points": 5, "sort": 2, "autoTracked": False},
+        {"taskCode": "share_product", "name": "分享商品给好友",
+         "points": 5, "sort": 3, "autoTracked": False},
+        {"taskCode": "first_order", "name": "完成一笔订单",
+         "points": 20, "sort": 4, "autoTracked": False},
+        {"taskCode": "credit_repair_keep", "name": "信用守约打卡",
+         "points": 0, "sort": 5, "autoTracked": True,
+         "creditTask": True},
+    )
+
+    async def _repair_keep_info(self, user_id: int):
+        """修复任务状态(best-effort 读信用账户; 无账户/异常 → None)"""
+        try:
+            from services.credit_service import CreditService
+            account = await CreditService().repo.get_score(user_id)
+            if not account:
+                return None
+            return CreditService().repair_keep_status(account)
+        except Exception:
+            return None
+
+    async def list_daily_tasks(self, user_id: int) -> dict:
+        """每日任务面板(任务列表+今日完成状态)"""
+        today = date.today()
+        # 今日已领取的 daily_task 流水(refId=task:{code}:{date} 幂等标记)
+        logs = await self.repo.list_logs(
+            user_id, source=SOURCE_DAILY_TASK, limit=100)
+        done_codes = set()
+        for lg in logs:
+            ref = lg.get("refId") or ""
+            if ref.endswith(f":{today.isoformat()}"):
+                done_codes.add(ref.rsplit(":", 1)[0][len("task:"):])
+        # 签到任务读签到表
+        signed = await self.repo.get_signin(user_id, today)
+        # 修复期守约任务读信用账户(D-D 二期, 非修复期不展示)
+        repair_info = await self._repair_keep_info(user_id)
+
+        tasks = []
+        done_count = 0
+        total_points = 0
+        for t in sorted(self.DAILY_TASKS,
+                        key=lambda x: x["sort"]):
+            if t.get("creditTask"):
+                if not repair_info or not repair_info.get("inRepair"):
+                    continue   # 非修复期不展示
+                done = repair_info.get("checkedToday", False)
+                done_count += 1 if done else 0
+                tasks.append({
+                    "taskCode": t["taskCode"], "name": t["name"],
+                    "points": t["points"], "done": done,
+                    "autoTracked": t["autoTracked"],
+                    "streak": repair_info.get("streak", 0),
+                    "targetDays": repair_info.get("targetDays", 0),
+                    "rewarded": repair_info.get("rewarded", False),
+                })
+                continue
+            done = (t["taskCode"] == "signin"
+                    and signed is not None) or t["taskCode"] in done_codes
+            done_count += 1 if done else 0
+            total_points += t["points"] if done else 0
+            tasks.append({
+                "taskCode": t["taskCode"], "name": t["name"],
+                "points": t["points"], "done": done,
+                "autoTracked": t["autoTracked"],
+            })
+        return {
+            "userId": user_id,
+            "date": today.isoformat(),
+            "tasks": tasks,
+            "doneCount": done_count,
+            "totalCount": len(tasks),
+            "earnedToday": total_points,
+        }
+
+    async def complete_daily_task(self, user_id: int,
+                                  task_code: str) -> dict:
+        """上报完成每日任务(发分+幂等)
+
+        Raises:
+            KeyError: 任务不存在
+            ValueError: 今日已完成 / 签到类任务不可上报
+        """
+        task = next((t for t in self.DAILY_TASKS
+                     if t["taskCode"] == task_code), None)
+        if task is None:
+            raise KeyError(f"任务不存在({task_code})")
+        if task["autoTracked"]:
+            if task.get("creditTask"):
+                raise ValueError(
+                    "守约打卡由信用打卡接口(/api/credit/repair/keep)"
+                    f"自动完成, 无需上报({task_code})")
+            raise ValueError(
+                f"签到任务由签到接口自动完成, 无需上报({task_code})")
+
+        today = date.today()
+        date_str = today.isoformat()
+        ref_id = f"task:{task_code}:{date_str}"
+        lock_key = f"points:daily-task:{user_id}:{date_str}"
+
+        async with get_lock(lock_key):
+            existing = await self.repo.list_logs(
+                user_id, source=SOURCE_DAILY_TASK, limit=100)
+            if any(lg.get("refId") == ref_id for lg in existing):
+                raise ValueError(f"今日已完成该任务({task_code})")
+
+            async with get_lock(f"points:account:{user_id}"):
+                log_id = await self._earn_points(
+                    user_id=user_id,
+                    points=task["points"],
+                    source=SOURCE_DAILY_TASK,
+                    ref_id=ref_id,
+                    ref_desc=f"每日任务·{task['name']}",
+                )
+            return {
+                "userId": user_id,
+                "taskCode": task_code,
+                "name": task["name"],
+                "pointsEarned": task["points"],
+                "logId": log_id,
+                "date": date_str,
+            }
+
+    # ============================================================
+    # 兑换商城(P2: 积分生态扩展)
+    # ============================================================
+
+    # 种子目录(幂等灌注; 管理端可增改): 券类即时发放(券系统落地后
+    # 迁移核销, 对齐 P1-9/P1-12 惯例), 实物 pending 待发货,
+    # 权益即时开通
+    EXCHANGE_ITEMS_SEED = (
+        {"itemId": "EX-COUPON-10", "name": "¥10 无门槛优惠券",
+         "type": "coupon", "pointsCost": 1000, "stock": 100,
+         "perUserDailyLimit": 1},
+        {"itemId": "EX-SAMPLE-100", "name": "竹香经典 100ml 品鉴装",
+         "type": "product", "pointsCost": 2600, "stock": 50,
+         "perUserDailyLimit": 2},
+        {"itemId": "EX-VIP-MONTH", "name": "SVIP 月卡 30 天",
+         "type": "benefit", "pointsCost": 5000, "stock": 999,
+         "perUserDailyLimit": 1},
+        {"itemId": "EX-GIFT-BOX", "name": "竹香礼盒 500ml×2",
+         "type": "product", "pointsCost": 9800, "stock": 20,
+         "perUserDailyLimit": 1},
+    )
+
+    async def _ensure_exchange_items(self) -> None:
+        """幂等灌注种子目录(已存在 itemId 不覆盖, 保留管理端修改)"""
+        for seed in self.EXCHANGE_ITEMS_SEED:
+            if await self.repo.get_exchange_item(seed["itemId"]) is None:
+                item = dict(seed)
+                item["onSale"] = 1
+                item["createdAt"] = datetime.utcnow().isoformat()
+                await self.repo.save_exchange_item(item)
+
+    async def list_exchange_items(self) -> dict:
+        """兑换商城目录"""
+        await self._ensure_exchange_items()
+        items = await self.repo.list_exchange_items()
+        return {
+            "success": True,
+            "count": len(items),
+            "items": items,
+        }
+
+    async def _credit_exchange_discount(self, user_id: int) -> dict:
+        """竹信分等级折扣(best-effort: 无账户/异常 → 原价)"""
+        try:
+            from repositories.credit_repository import CreditRepository
+            account = await CreditRepository().get_score(user_id)
+            level = (account or {}).get("creditLevel") or ""
+            return {
+                "rate": CREDIT_EXCHANGE_DISCOUNT.get(level, 1.0),
+                "level": level,
+            }
+        except Exception:
+            return {"rate": 1.0, "level": ""}
+
+    async def exchange_item(self, user_id: int, item_id: str,
+                            quantity: int = 1,
+                            address: str = "") -> dict:
+        """积分兑换商品(库存扣减+足额扣分 FIFO+记录)
+
+        竹信分等级折扣(D-C 二期): L3/L4/L5 按 95/92/90 折扣竹叶价,
+        折后价参与余额校验与 FIFO 扣减, 记录留 basePointsCost 留痕。
+
+        Raises:
+            KeyError: 商品不存在/已下架
+            ValueError: 数量非法/库存不足/超每日限购/积分不足
+        """
+        if quantity < 1 or quantity > 10:
+            raise ValueError(f"兑换数量须在 1-10, 当前 {quantity}")
+        await self._ensure_exchange_items()
+
+        item = await self.repo.get_exchange_item(item_id)
+        if item is None or not item.get("onSale", 1):
+            raise KeyError(f"兑换商品不存在或已下架({item_id})")
+
+        base_cost = int(item["pointsCost"]) * quantity
+        discount = await self._credit_exchange_discount(user_id)
+        rate = discount["rate"]
+        cost = int(base_cost * rate + 0.5) if rate < 1.0 else base_cost
+        today = date.today().isoformat()
+
+        # 锁序: 商品锁 → 账户锁(与签到/抵扣互斥; 全局锁序一致防死锁)
+        async with get_lock(f"points:exchange:{item_id}"):
+            # 库存
+            if item.get("stock", 0) < quantity:
+                raise ValueError(
+                    f"库存不足(剩余{item.get('stock', 0)}, 需{quantity})")
+            # 每日限购
+            limit = item.get("perUserDailyLimit") or 0
+            if limit:
+                records = await self.repo.list_exchange_records(
+                    user_id=user_id, limit=100)
+                used = sum(r.get("quantity", 0) for r in records
+                           if r.get("itemId") == item_id
+                           and r.get("createdAt", "").startswith(today))
+                if used + quantity > limit:
+                    raise ValueError(
+                        f"超出每日限购({limit}/天, 今日已兑{used})")
+
+            async with get_lock(f"points:account:{user_id}"):
+                account = await self.repo.get_account(user_id)
+                available = (account or {}).get("totalPoints", 0)
+                if available < cost:
+                    raise ValueError(
+                        f"积分不足(可用{available}, 需{cost})")
+
+                # 足额扣分: FIFO 消耗批次(对齐 deduct_points 语义,
+                # 无订单抵现上限——兑换是全额消耗场景)
+                batches = await self.repo.list_expiring_batches(user_id)
+                remaining = cost
+                for batch in batches:
+                    if remaining <= 0:
+                        break
+                    batch_points = batch["points"]
+                    consumed = batch.get("consumedPoints", 0)
+                    avail_in_batch = batch_points - consumed
+                    if avail_in_batch <= 0:
+                        continue
+                    consume = min(avail_in_batch, remaining)
+                    new_consumed = consumed + consume
+                    await self.repo.update_expire_batch(
+                        batch["id"], new_consumed,
+                        EXPIRE_STATUS_CONSUMED
+                        if new_consumed >= batch_points
+                        else EXPIRE_STATUS_ACTIVE)
+                    remaining -= consume
+                account["totalPoints"] = available - cost
+                account["totalSpent"] = \
+                    account.get("totalSpent", 0) + cost
+                await self.repo.save_account(account)
+
+                # 兑换记录(实物 pending 待发货, 券/权益即时)
+                is_physical = item.get("type") == "product"
+                record = {
+                    "userId": user_id,
+                    "itemId": item_id,
+                    "itemName": item.get("name"),
+                    "itemType": item.get("type"),
+                    "quantity": quantity,
+                    "pointsCost": cost,
+                    "basePointsCost": base_cost,
+                    "discountRate": rate,
+                    "creditLevel": discount["level"],
+                    "address": address if is_physical else "",
+                    "status": "pending" if is_physical else "issued",
+                    "createdAt": datetime.utcnow().isoformat(),
+                }
+                record_id = await self.repo.add_exchange_record(record)
+                # 扣分流水(refId 绑定记录, 幂等可查)
+                log_id = await self.repo.add_log({
+                    "userId": user_id,
+                    "type": LOG_TYPE_SPEND,
+                    "source": SOURCE_EXCHANGE,
+                    "points": -cost,
+                    "balance": account["totalPoints"],
+                    "refId": f"exchange:{record_id}",
+                    "refDesc": f"兑换·{item.get('name')}×{quantity}",
+                    "expireAt": None,
+                    "status": LOG_STATUS_CONSUMED,
+                })
+
+            # 库存扣减(锁内最后落, 失败前置校验已挡)
+            item["stock"] = item.get("stock", 0) - quantity
+            await self.repo.save_exchange_item(item)
+
+        return {
+            "recordId": record_id,
+            "userId": user_id,
+            "itemId": item_id,
+            "itemName": item.get("name"),
+            "quantity": quantity,
+            "pointsCost": cost,
+            "basePointsCost": base_cost,
+            "discountRate": rate,
+            "creditLevel": discount["level"],
+            "pointsSaved": base_cost - cost,
+            "status": record["status"],
+            "balance": account["totalPoints"],
+            "logId": log_id,
+        }
+
+    async def list_exchange_records(self, user_id: int = None,
+                                    status: str = None,
+                                    limit: int = 50) -> list[dict]:
+        """兑换记录查询"""
+        return await self.repo.list_exchange_records(
+            user_id, status, limit)
 
     # ============================================================
     # 内部方法

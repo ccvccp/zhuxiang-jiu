@@ -4,11 +4,11 @@ import logging
 import os
 from datetime import datetime, UTC
 
-# CORS 白名单(生产域名 zxjiu.com 同源反代 + 本地调试 localhost/file:// null origin;
+# CORS 白名单(生产域名 zyjiu.com 同源反代 + 本地调试 localhost/file:// null origin;
 # 追加环境可通过环境变量 CORS_ORIGINS 覆盖, 始终为具体域名白名单, 禁止 "*")
 CORS_ORIGINS = os.environ.get(
     "CORS_ORIGINS",
-    "https://zxjiu.com,https://www.zxjiu.com,"
+    "https://zyjiu.com,https://www.zyjiu.com,"
     "http://localhost:8080,http://localhost:3000,"
     "http://127.0.0.1:8080,http://127.0.0.1:3000,null",
 ).split(",")

@@ -11,7 +11,7 @@
     - 挑战挂起态(state)进程内存 + TTL 300s 惰性清理;
       多实例部署演进: state 迁 Redis(bio_challenge 同款范式)
     - RP id/origins 可配(ENTRY_WEBAUTHN_RP_ID/ORIGINS),
-      origin 校验 fail-hard(生产 zxjiu.com 显式配置)
+      origin 校验 fail-hard(生产 zyjiu.com 显式配置)
     - sign_count 单调递增校验(克隆检测, fido2 内建)开箱即得
 """
 

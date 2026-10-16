@@ -1138,12 +1138,12 @@ input, textarea, select {
 .service-entries {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 20px;
+    gap: 16px;
 }
 
 .service-entry {
     background: #fff;
-    padding: 32px 20px;
+    padding: 22px 14px;
     border-radius: var(--radius-lg);
     text-align: center;
     box-shadow: var(--shadow-sm);
@@ -1168,11 +1168,11 @@ input, textarea, select {
 }
 
 .service-entry .icon {
-    width: 64px;
-    height: 64px;
+    width: 56px;
+    height: 56px;
     background: rgba(74, 124, 89, 0.1);
     border-radius: 50%;
-    margin: 0 auto 16px;
+    margin: 0 auto 12px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1181,13 +1181,22 @@ input, textarea, select {
     transition: var(--transition);
 }
 
+/* 金刚区图片图标(2026-10-02 竹绿扁平图标): 圆底改为承托图片, 微圆角 */
+.service-entry .icon img {
+    width: 46px;
+    height: 46px;
+    border-radius: 12px;
+    display: block;
+    object-fit: cover;
+}
+
 .service-entry h3 {
-    font-size: 16px;
-    margin-bottom: 6px;
+    font-size: 14px;
+    margin-bottom: 4px;
 }
 
 .service-entry p {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--color-text-light);
     transition: var(--transition);
 }

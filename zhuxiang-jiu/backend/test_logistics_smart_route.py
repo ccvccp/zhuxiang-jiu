@@ -19,6 +19,10 @@ import sys
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ["AUTH_MODE"] = "compat"
+# standalone 裸头自举(对齐 test_message_antispam 惯例):
+# 安全收紧后 compat 默认剥离 X-Member-Id/X-Role, HTTP 段
+# 依赖裸头访问受保护路径, 须显式信任(仅本测试进程内生效)
+os.environ.setdefault("AUTH_COMPAT_TRUST_HEADERS", "1")
 
 from services.logistics_service import smart_route_carrier
 from repositories.store import _mock_store

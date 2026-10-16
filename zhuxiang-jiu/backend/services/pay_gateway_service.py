@@ -13,7 +13,7 @@
 
 凭证环境变量(.env 注入, 私钥支持内联 PEM 或挂载文件路径):
     PAY60_CHANNEL_KEY            渠道主凭证(pay60 fail-hard 校验项)
-    PAY60_NOTIFY_URL             回调地址(默认 https://zxjiu.com/api/payment/callback/pay)
+    PAY60_NOTIFY_URL             回调地址(默认 https://zyjiu.com/api/payment/callback/pay)
     --- 微信支付 V3 ---
     PAY60_WECHAT_MCHID           商户号
     PAY60_WECHAT_APPID           应用ID(公众号/小程序)
@@ -29,6 +29,8 @@
 """
 
 import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -49,7 +51,7 @@ WECHAT_API_BASE = "https://api.mch.weixin.qq.com"
 # 支付宝开放平台网关
 ALIPAY_GATEWAY = "https://openapi.alipay.com/gateway.do"
 # 默认回调地址(与 nginx /api 反代同源)
-DEFAULT_NOTIFY_URL = "https://zxjiu.com/api/payment/callback/pay"
+DEFAULT_NOTIFY_URL = "https://zyjiu.com/api/payment/callback/pay"
 # 微信回调时间窗(±秒, 防重放)
 WECHAT_CALLBACK_MAX_SKEW = 300
 # 平台证书缓存 TTL(12h; auto-fetch 模式)
@@ -286,6 +288,88 @@ class AlipayGateway:
         raise ValueError(f"支付宝不支持该方式: {method}(仅 wap/page/qr)")
 
 
+class HuabeiGateway(AlipayGateway):
+    """花呗分期(借道支付宝手机网站支付, enable_pay_installment 参数族——
+    无需单独商户号; 分期费率/每期还款额由渠道预下单返回, 后端只透传)"""
+
+    async def execute(self, pay_order: dict, notify_url: str,
+                      client_ip: str = "", openid: str = "") -> dict:
+        method = pay_order.get("payMethod") or "wap"
+        if method != "wap":
+            raise ValueError(f"花呗仅支持 wap(手机网站)方式: {method}")
+        biz = {
+            "out_trade_no": pay_order["payNo"],
+            "total_amount": f"{float(pay_order['actualAmount']):.2f}",
+            "subject": pay_order.get("description")
+                       or f"订单 {pay_order['orderId']}",
+            "product_code": "QUICK_WAP_WAY",
+            # 花呗分期参数族: enable_pay_installment=2 展示分期入口;
+            # 分期数经 extend_params.hn_fq_num 透传(渠道校验用户额度)
+            "enable_pay_installment": "2",
+        }
+        if pay_order.get("installments"):
+            biz["extend_params"] = {
+                "hn_fq_num": str(pay_order["installments"])}
+        params = self._signed_params("alipay.trade.wap.pay", biz,
+                                     notify_url)
+        pay_url = ALIPAY_GATEWAY + "?" + urlencode(
+            {k: params[k] for k in sorted(params)})
+        return {"prepay": {"gateway": "huabei", "method": "wap"},
+                "payParams": {"payUrl": pay_url}}
+
+
+class BaitiaoGateway:
+    """京东白条(京东支付收单统一下单, 独立签名体系——
+    未签约不注册渠道即无影响, 仅 channel=baitiao 时实例化)"""
+
+    REQUIRED = ("PAY60_BAITIAO_MERCHANT", "PAY60_BAITIAO_KEY")
+    GATEWAY = "https://pay.jd.com/api/unifiedOrder"
+
+    def __init__(self, http_post):
+        self._http_post = http_post
+
+    def _credentials(self) -> dict:
+        missing = [k for k in self.REQUIRED if not _env(k)]
+        if missing:
+            raise ValueError(
+                f"白条凭证未配置({','.join(missing)}), "
+                f"经 .env 注入——real 渠道 fail-hard 不静默降级")
+        return {"merchant": _env("PAY60_BAITIAO_MERCHANT"),
+                "key": _env("PAY60_BAITIAO_KEY")}
+
+    async def execute(self, pay_order: dict, notify_url: str,
+                      client_ip: str = "", openid: str = "") -> dict:
+        method = pay_order.get("payMethod") or "page"
+        if method != "page":
+            raise ValueError(f"白条仅支持 page(电脑网站)方式: {method}")
+        creds = self._credentials()
+        body = {
+            "merchant": creds["merchant"],
+            "outTradeNo": pay_order["payNo"],
+            "totalAmount": f"{float(pay_order['actualAmount']):.2f}",
+            "subject": pay_order.get("description")
+                       or f"订单 {pay_order['orderId']}",
+            "notifyUrl": notify_url,
+            "payProduct": "baitiao",
+            "timestamp": str(int(time.time())),
+        }
+        if pay_order.get("installments"):
+            body["installments"] = int(pay_order["installments"])
+        # 京东支付签名: 参数升序拼接 + HMAC-SHA256(商户密钥)
+        plain = "&".join(f"{k}={body[k]}" for k in sorted(body))
+        body["sign"] = hmac.new(
+            creds["key"].encode("utf-8"), plain.encode("utf-8"),
+            hashlib.sha256).hexdigest()
+        status, resp = await self._http_post(
+            self.GATEWAY, json_body=body, headers={})
+        resp = resp if isinstance(resp, dict) else {}
+        if status != 200 or resp.get("code") != "SUCCESS":
+            raise ValueError(
+                f"白条预下单失败(HTTP {status}): {str(resp)[:300]}")
+        return {"prepay": {"gateway": "baitiao", "method": "page"},
+                "payParams": {"payUrl": resp.get("payUrl", "")}}
+
+
 async def _default_http_post(url: str, json_body=None, form=None,
                              headers=None):
     """默认传输层(httpx); 生产唯一出口, 测试注入 stub 替代"""
@@ -326,8 +410,14 @@ class PayGatewayService:
             gw = WechatGateway(self._http_post)
         elif channel == "alipay":
             gw = AlipayGateway(self._http_post)
+        elif channel == "huabei":
+            gw = HuabeiGateway(self._http_post)
+        elif channel == "baitiao":
+            gw = BaitiaoGateway(self._http_post)
         else:
-            raise ValueError(f"real 渠道不支持: {channel}(仅 wechat/alipay)")
+            raise ValueError(
+                f"real 渠道不支持: {channel}"
+                f"(仅 wechat/alipay/huabei/baitiao)")
         r = await gw.execute(pay_order, notify_url, client_ip, openid)
         logger.info("gateway_prepay payNo=%s channel=%s method=%s",
                     pay_order.get("payNo"), channel,

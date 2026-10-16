@@ -580,3 +580,100 @@ class LogisticsRepository:
         else:
             lock_key = f"settle_lock_{period}_{carrier}"
             self.store.pop(lock_key, None)
+
+    # ============================================================
+    # 4. 物流理赔(logistics_claims, P2 批次③)
+    # ============================================================
+
+    def _ensure_claim_store(self):
+        self._ensure_store()
+        self.store.setdefault("logistics_claims", {})
+        self.store.setdefault("logistics_claim_index_waybill", {})
+        self.store.setdefault("logistics_claim_seq", 0)
+
+    async def next_claim_no(self, prefix: str = "CLP") -> str:
+        """理赔单号(CLP+日期+3 位序列)"""
+        today = ts()[:10].replace("-", "")
+        if is_redis_mode():
+            client = await get_redis_client()
+            seq = await client.incr(
+                _k("logistics:claim:seq", today))
+        else:
+            self._ensure_claim_store()
+            self.store["logistics_claim_seq"] = \
+                self.store.get("logistics_claim_seq", 0) + 1
+            seq = self.store["logistics_claim_seq"]
+        return f"{prefix}{today}{int(seq) % 1000:03d}"
+
+    async def save_claim(self, claim: dict) -> dict:
+        """创建/更新理赔单(claimNo 主键, waybillNo 索引)"""
+        claim_no = claim["claimNo"]
+        now = ts()
+        claim.setdefault("createdAt", now)
+        claim["updatedAt"] = now
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("logistics:claim", claim_no),
+                             json.dumps(claim, ensure_ascii=False))
+            if claim.get("waybillNo"):
+                await client.sadd(
+                    _k("logistics:claim:index:waybill",
+                       claim["waybillNo"]), claim_no)
+        else:
+            self._ensure_claim_store()
+            self.store["logistics_claims"][claim_no] = dict(claim)
+            if claim.get("waybillNo"):
+                self.store["logistics_claim_index_waybill"] \
+                    .setdefault(claim["waybillNo"], []) \
+                    .append(claim_no)
+        return dict(claim)
+
+    async def get_claim(self, claim_no: str) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(_k("logistics:claim", claim_no))
+            return json.loads(raw) if raw else None
+        self._ensure_claim_store()
+        claim = self.store["logistics_claims"].get(claim_no)
+        return dict(claim) if claim else None
+
+    async def list_claims(self, waybill_no: str = None,
+                          status: str = None,
+                          limit: int = 50) -> list[dict]:
+        """理赔列表(按运单号索引优先, 否则全量倒序)"""
+        claims: list[dict] = []
+        if is_redis_mode():
+            client = await get_redis_client()
+            if waybill_no:
+                nos = await client.smembers(_k(
+                    "logistics:claim:index:waybill", waybill_no))
+                for no in nos:
+                    raw = await client.get(
+                        _k("logistics:claim", no))
+                    if raw:
+                        claims.append(json.loads(raw))
+            else:
+                async for key in client.scan_iter(
+                        match=_k("logistics:claim:*"), count=100):
+                    if "seq" in str(key):
+                        continue
+                    raw = await client.get(key)
+                    if raw:
+                        claims.append(json.loads(raw))
+        else:
+            self._ensure_claim_store()
+            if waybill_no:
+                nos = self.store[
+                    "logistics_claim_index_waybill"].get(
+                    waybill_no, [])
+                claims = [dict(self.store["logistics_claims"][n])
+                          for n in nos
+                          if n in self.store["logistics_claims"]]
+            else:
+                claims = list(self.store["logistics_claims"].values())
+        if status:
+            claims = [c for c in claims
+                      if c.get("status") == status]
+        claims.sort(key=lambda c: c.get("createdAt", ""),
+                    reverse=True)
+        return claims[:limit]

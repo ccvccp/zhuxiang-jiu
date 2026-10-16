@@ -1610,3 +1610,311 @@ class FinanceService:
             "report": report,
             "logs": logs,
         }
+
+    # ============================================================
+    # 报表体系扩展(P2: 补齐设计文档 8.1 六种报表之余四)
+    # ============================================================
+
+    # 期初 Mock 基数(报表体系 Mock 口径, 对齐 profit_statement 成本费用估算范式)
+    OPENING_CASH = 500000.0        # 期初货币资金
+    OPENING_INVENTORY = 300000.0   # 期初存货
+    OPENING_RETAINED = 200000.0    # 期初未分配利润
+    PAID_IN_CAPITAL = 1000000.0    # 实收资本
+
+    async def balance_sheet(self, period: str) -> dict:
+        """资产负债表(月末时点, 资产 = 负债 + 权益 恒等式守护)
+
+        Mock 口径:
+            - 复用利润表口径取当期净利润/税额
+            - 货币资金为轧差项(使恒等式成立)
+        """
+        clean_period = period.replace("-", "").replace("/", "")
+        profit = await self.profit_statement(clean_period)
+        stmt = profit.get("statement", {})
+        net_revenue = stmt.get("revenue", {}).get("mainRevenue", 0)
+        cost_total = stmt.get("cost", {}).get("total", 0)
+        income_tax = stmt.get("incomeTax", {}).get("amount", 0)
+        net_profit = stmt.get("netProfit", 0)
+        taxes_detail = stmt.get("taxAndSurcharge", {})
+
+        logs = [{"step": "资产负债表", "level": "INFO",
+                 "msg": f"账期 {clean_period}"}]
+
+        # 负债
+        payable = _round2(cost_total * 0.30)   # 应付账款(供应商待付)
+        # 应交税费 = 增值税(销项-退回) + 税金及附加 + 所得税
+        posted = await self.finance_repo.list_vouchers(
+            period=clean_period, status=VOUCHER_POSTED)
+        vat = 0.0
+        for v in posted:
+            if v.get("type") == "income":
+                vat += float(v.get("taxAmount", 0))
+            elif v.get("type") == "refund":
+                vat -= float(v.get("taxAmount", 0))
+        taxes_payable = _round2(
+            vat + taxes_detail.get("total", 0) + income_tax)
+        liabilities = {
+            "accountsPayable": payable,
+            "taxesPayable": taxes_payable,
+            "total": _round2(payable + taxes_payable),
+        }
+
+        # 权益
+        equity = {
+            "paidInCapital": self.PAID_IN_CAPITAL,
+            "retainedEarnings": _round2(
+                self.OPENING_RETAINED + net_profit),
+            "total": _round2(
+                self.PAID_IN_CAPITAL + self.OPENING_RETAINED + net_profit),
+        }
+
+        # 资产(货币资金 = 负债+权益 - 应收 - 存货, 轧差平衡项)
+        receivable = _round2(net_revenue * 0.05)
+        inventory = self.OPENING_INVENTORY
+        total_target = _round2(liabilities["total"] + equity["total"])
+        cash = _round2(total_target - receivable - inventory)
+        assets = {
+            "cash": cash,
+            "accountsReceivable": receivable,
+            "inventory": inventory,
+            "total": total_target,
+        }
+
+        logs.append({"step": "恒等式校验", "level": "INFO",
+                     "msg": f"资产 {assets['total']:.2f} = 负债 "
+                            f"{liabilities['total']:.2f} + 权益 {equity['total']:.2f}"})
+        logs.append({"step": "口径说明", "level": "WARN",
+                     "msg": "期初数与货币资金为 Mock 轧差口径(正式启用需接入总账期初)"})
+
+        return {
+            "success": True,
+            "period": clean_period,
+            "statement": {
+                "period": clean_period,
+                "assets": assets,
+                "liabilities": liabilities,
+                "equity": equity,
+                "balanced": _round2(
+                    assets["total"] - liabilities["total"]
+                    - equity["total"]) == 0,
+                "voucherCount": len(posted),
+                "generatedAt": ts(),
+            },
+            "logs": logs,
+        }
+
+    async def cash_flow_statement(self, period: str) -> dict:
+        """现金流量表(月度, 收付实现制)
+
+        结构: 经营/投资/筹资 三活动 + 净增加额 + 期初期末现金
+        """
+        clean_period = period.replace("-", "").replace("/", "")
+        logs = [{"step": "现金流量表", "level": "INFO",
+                 "msg": f"账期 {clean_period}"}]
+
+        # 当期订单实收/退款(收付实现制)
+        all_orders = await self.order_repo.list_all()
+        cash_in = 0.0
+        cash_out_refund = 0.0
+        order_count = 0
+        refund_count = 0
+        for o in all_orders:
+            created = o.get("createdAt", "")
+            # createdAt 为 ISO8601(YYYY-MM-DD...), 账期 YYYYMM 对齐取前 7 位
+            if created[:7].replace("-", "") == clean_period \
+                    and o.get("status") in (
+                        "PAID", "COMPLETED", "SHIPPED", "DELIVERED",
+                        "REFUNDED", "CLOSED"):
+                pay = (o.get("payment") or {})
+                paid_amount = pay.get("paidAmount") \
+                    or (o.get("priceDetail") or {}).get("actualAmount", 0)
+                if pay.get("paidAt") or o.get("status") != "PENDING":
+                    cash_in += float(paid_amount or 0)
+                    order_count += 1
+            refund = o.get("refund") or {}
+            if (refund.get("refundedAt", ""))[:7].replace("-", "") \
+                    == clean_period and o.get("status") == "REFUNDED":
+                cash_out_refund += float(refund.get("refundedAmount", 0) or 0)
+                refund_count += 1
+
+        cash_in = _round2(cash_in)
+        cash_out_refund = _round2(cash_out_refund)
+        payment_fee = _round2(cash_in * 0.006)   # 渠道手续费 0.6%(D-3)
+        operating = _round2(cash_in - cash_out_refund - payment_fee)
+        investing = 0.0
+        financing = 0.0
+        net_increase = _round2(operating + investing + financing)
+        opening = self.OPENING_CASH
+        closing = _round2(opening + net_increase)
+
+        logs.append({"step": "经营活动", "level": "INFO",
+                     "msg": f"收现 ¥{cash_in:.2f} - 退款 ¥{cash_out_refund:.2f}"
+                            f" - 手续费 ¥{payment_fee:.2f} = ¥{operating:.2f}"})
+
+        return {
+            "success": True,
+            "period": clean_period,
+            "statement": {
+                "period": clean_period,
+                "operating": {
+                    "cashReceived": cash_in,
+                    "orderCount": order_count,
+                    "refundsPaid": cash_out_refund,
+                    "refundCount": refund_count,
+                    "paymentFee": payment_fee,
+                    "net": operating,
+                },
+                "investing": {"net": investing},
+                "financing": {"net": financing},
+                "netIncrease": net_increase,
+                "openingCash": opening,
+                "closingCash": closing,
+                "generatedAt": ts(),
+            },
+            "logs": logs,
+        }
+
+    async def tax_filing_report(self, period: str) -> dict:
+        """税务申报表(月度, 聚合已有申报记录四税种)
+
+        无申报记录时返回空表并提示先计税(POST /api/finance/tax/calc/{period})
+        """
+        clean_period = period.replace("-", "").replace("/", "")
+        logs = [{"step": "税务申报表", "level": "INFO",
+                 "msg": f"账期 {clean_period}"}]
+
+        decls = await self.finance_repo.list_tax_declarations(
+            period=clean_period)
+        by_type = {}
+        total_payable = 0.0
+        total_paid = 0.0
+        for d in decls:
+            ttype = d.get("taxType", "unknown")
+            total_payable += float(d.get("payableAmount", 0) or 0)
+            total_paid += float(d.get("paidAmount", 0) or 0)
+            by_type.setdefault(ttype, {
+                "taxType": ttype,
+                "taxTypeName": d.get("taxTypeName", ttype),
+                "payable": 0.0, "paid": 0.0,
+                "declarations": [],
+            })
+            row = by_type[ttype]
+            row["payable"] = _round2(
+                row["payable"] + float(d.get("payableAmount", 0) or 0))
+            row["paid"] = _round2(
+                row["paid"] + float(d.get("paidAmount", 0) or 0))
+            row["declarations"].append({
+                "declarationNo": d.get("declarationNo"),
+                "status": d.get("status"),
+                "payableAmount": d.get("payableAmount"),
+                "paidAmount": d.get("paidAmount"),
+                "declaredAt": d.get("declaredAt"),
+                "paidAt": d.get("paidAt"),
+            })
+
+        if not decls:
+            logs.append({"step": "空表提示", "level": "WARN",
+                         "msg": f"账期 {clean_period} 无申报记录, "
+                                f"请先执行计税 POST /api/finance/tax/calc/{clean_period}"})
+        else:
+            logs.append({"step": "申报汇总", "level": "INFO",
+                         "msg": f"四税种应纳 ¥{total_payable:.2f}, "
+                                f"已缴 ¥{total_paid:.2f}"})
+
+        return {
+            "success": True,
+            "period": clean_period,
+            "statement": {
+                "period": clean_period,
+                "byType": list(by_type.values()),
+                "typeCount": len(by_type),
+                "declarationCount": len(decls),
+                "totalPayable": _round2(total_payable),
+                "totalPaid": _round2(total_paid),
+                "totalUnpaid": _round2(total_payable - total_paid),
+                "generatedAt": ts(),
+            },
+            "logs": logs,
+        }
+
+    async def audit_report(self, year: str) -> dict:
+        """审计报表(年度: 全年利润汇总 + 内控观察点 + Mock 审计意见)
+
+        内控观察: 凭证量/对账差异处置/付款审批分布
+        """
+        clean_year = "".join(c for c in year if c.isdigit())[:4]
+        logs = [{"step": "审计报表", "level": "INFO",
+                 "msg": f"年度 {clean_year}"}]
+
+        # 全年利润(复用利润表口径, period=YYYY)
+        profit = await self.profit_statement(clean_year)
+        stmt = profit.get("statement", {})
+        net_profit = stmt.get("netProfit", 0)
+
+        # 内控观察点
+        vouchers = await self.finance_repo.list_vouchers()
+        year_vouchers = [v for v in vouchers
+                         if (v.get("period", "")).startswith(clean_year)]
+        posted_count = sum(1 for v in year_vouchers
+                           if v.get("status") == VOUCHER_POSTED)
+
+        recons = await self.finance_repo.list_reconciliations()
+        year_recons = [r for r in (recons.get("data")
+                                   if isinstance(recons, dict) else recons)
+                       or []]
+        diff_count = sum(1 for r in year_recons
+                         if abs(float(r.get("diffAmount", 0) or 0)) > 0.01)
+        unresolved = sum(1 for r in year_recons
+                         if abs(float(r.get("diffAmount", 0) or 0)) > 0.01
+                         and r.get("status") not in ("resolved", "confirmed"))
+
+        payments = await self.finance_repo.list_payments()
+        pay_rows = (payments.get("data")
+                    if isinstance(payments, dict) else payments) or []
+        year_payments = [p for p in pay_rows
+                         if (p.get("createdAt", ""))[:4] == clean_year]
+        payment_by_level = {}
+        for p in year_payments:
+            lv = int(p.get("currentLevel", 0) or 0)
+            payment_by_level[str(lv)] = payment_by_level.get(str(lv), 0) + 1
+
+        # Mock 审计意见: 差异全处置 + 有过账凭证 → 无保留意见
+        if unresolved == 0 and posted_count > 0:
+            opinion = "unqualified"   # 无保留意见
+        elif posted_count == 0:
+            opinion = "disclaimer"    # 无法表示意见(无业务数据)
+        else:
+            opinion = "qualified"     # 保留意见(存在未处置差异)
+
+        logs.append({"step": "年度利润", "level": "INFO",
+                     "msg": f"净利润 ¥{net_profit:.2f}"})
+        logs.append({"step": "内控观察", "level": "INFO",
+                     "msg": f"过账凭证 {posted_count} 张, 对账差异 "
+                            f"{diff_count} 笔(未处置 {unresolved})"})
+        logs.append({"step": "审计意见", "level": "WARN",
+                     "msg": f"意见类型: {opinion}(Mock 口径)"})
+
+        return {
+            "success": True,
+            "year": clean_year,
+            "statement": {
+                "year": clean_year,
+                "annualProfit": {
+                    "revenue": stmt.get("revenue", {}),
+                    "netProfit": net_profit,
+                    "incomeTax": stmt.get("incomeTax", {}),
+                },
+                "internalControl": {
+                    "voucherCount": len(year_vouchers),
+                    "postedCount": posted_count,
+                    "reconCount": len(year_recons),
+                    "reconDiffCount": diff_count,
+                    "reconUnresolved": unresolved,
+                    "paymentCount": len(year_payments),
+                    "paymentByLevel": payment_by_level,
+                },
+                "opinion": opinion,
+                "generatedAt": ts(),
+            },
+            "logs": logs,
+        }

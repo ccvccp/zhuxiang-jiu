@@ -66,7 +66,7 @@ resp = c.post("/api/ads", headers=A, json={
     "type": "BANNER", "position": SLOT,
     "title": f"{MARK}竹香佳酿 广告 过量饮酒有害健康",
     "description": "LT测试广告描述 过量饮酒有害健康",
-    "targetUrl": "https://zxjiu.com/lt", "budget": 1000,
+    "targetUrl": "https://zyjiu.com/lt", "budget": 1000,
     "dailyBudget": 100})
 ad = resp.json().get("data") or {}
 aid = ad.get("id")

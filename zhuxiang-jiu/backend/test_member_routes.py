@@ -186,9 +186,21 @@ class TestMemberLogin:
         assert "禁用" in resp.json()["error"]
 
     def test_login_bonus(self):
-        """每日登录奖励: +5 积分(P1-20: 走积分账本, 先迁移遗留 100)"""
+        """每日登录奖励: +5 积分(P1-20: 走积分账本, 先迁移遗留 100)
+
+        JWT 范式(2026-10-12): /api/member/login/bonus 在 PUBLIC_EXACT
+        白名单, public path 无 token 会剥离 X-Member-Id(零信任), 须带
+        Bearer 由中间件注入身份。
+        """
         _migrate_legacy_points()
-        resp = client.post("/api/member/login/bonus", headers={"X-Member-Id": "1"})
+        # 登录取 JWT(member1)
+        login = client.post("/api/auth/login",
+                            json={"phone": "13800000001",
+                                  "password": "test123456"})
+        assert login.status_code == 200, login.text
+        bearer = {"Authorization":
+                  f"Bearer {login.json()['accessToken']}"}
+        resp = client.post("/api/member/login/bonus", headers=bearer)
         assert resp.status_code == 200
         data = resp.json()
         assert data["addedPoints"] == 5

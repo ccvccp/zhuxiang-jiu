@@ -679,6 +679,60 @@ async def credit_mode_resume(
         raise _map_value_error(e) from e
 
 
+@router.get("/api/credit/snapshots/{user_id}", tags=["信用管理模块"])
+async def list_snapshots(
+    user_id: int,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    month: str = Query(None, description="月份过滤(YYYY-MM, 可选)"),
+):
+    """竹信分月度快照(本人历史; month 传任意用户公开月份由前端控制)"""
+    _require_member_id(x_member_id)
+    try:
+        result = await _service.list_snapshots(
+            user_id=user_id, month=month)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/credit/snapshot/run", tags=["信用管理模块"])
+@_decision(admin=True)
+async def run_snapshot(
+    data: dict = None,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """全量月度快照批算(调度入口: 每月1日; 同月重跑=重算覆盖)"""
+    _require_admin(x_role)
+    data = data or {}
+    try:
+        result = await _service.run_monthly_snapshot_scan(
+            month=str(data.get("month") or "") or None)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/credit/repair/keep", tags=["信用管理模块"])
+async def repair_keep_checkin(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """信用修复期守约打卡(D-D 修复任务: 连续守约30天+20分, 每修复周期一次)
+
+    履约权豁免面: 不加 CREDIT_MODE 决策门控(同还款/积分兑换)
+    """
+    _require_member_id(x_member_id)
+    try:
+        user_id = int(x_member_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401,
+                            detail="未登录: X-Member-Id 须为会员ID")
+    try:
+        result = await _service.repair_keep_checkin(user_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
 def register_credit_routes(app):
     """注册信用管理模块路由"""
     app.include_router(router)

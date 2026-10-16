@@ -660,6 +660,205 @@ async def main():
 
     os.environ.pop(
         "NEXUS74_WECHAT_DRYRUN")
+
+    print("[16 A 档真实直连(mock 四步协议)]")
+
+    NOW_D2 = "2026-09-14T10:00:00+00:00"
+    os.environ["WECHAT_MP_APPID"] = "wx74test"
+    os.environ["WECHAT_MP_SECRET"] = "s74test"
+    os.environ["NEXUS74_WECHAT_PREVIEW_OPENID"] = \
+        "oTEST74"
+
+    from services.promo_channel_service import (
+        PromoChannelService as _PCS,
+        WechatMpAPIError,
+    )
+
+    calls: list = []
+    _SAVED = (
+        _PCS._wechat_mp_token,
+        _PCS._wechat_mp_add_material,
+        _PCS._wechat_mp_draft_add,
+        _PCS._wechat_mp_mass_preview,
+        _PCS._wechat_mp_mass_sendall,
+        _PCS._wechat_mp_quota_guard,
+        _PCS._wechat_mp_quota_consume,
+    )
+
+    async def _tok(self, a, s):
+        calls.append("token")
+        return "tok74"
+
+    async def _mat(self, tok, png, fn):
+        assert png[:4] == b"\x89PNG", \
+            "封面非 PNG"
+        calls.append("material")
+        return "TH74"
+
+    async def _draft(self, tok, content, thumb):
+        assert content.get("title"), \
+            "草稿标题空"
+        calls.append("draft")
+        return "DR74"
+
+    async def _prev(self, tok, mid, openid):
+        assert openid == "oTEST74", \
+            f"试收 openid 错({openid})"
+        calls.append("preview")
+        return "msg74"
+
+    async def _sendall(self, tok, mid):
+        calls.append("sendall")
+        return "msgSA"
+
+    async def _guard(self):
+        calls.append("guard")
+
+    async def _consume(self):
+        calls.append("consume")
+
+    _PCS._wechat_mp_token = _tok
+    _PCS._wechat_mp_add_material = _mat
+    _PCS._wechat_mp_draft_add = _draft
+    _PCS._wechat_mp_mass_preview = _prev
+    _PCS._wechat_mp_mass_sendall = _sendall
+    _PCS._wechat_mp_quota_guard = _guard
+    _PCS._wechat_mp_quota_consume = _consume
+
+    try:
+        r = client.post(
+            f"{BASE}/publish", headers=ADMIN,
+            json={"sourceId": src_shadow,
+                  "platform": "wechat_mp",
+                  "now": NOW_D2})
+        d = r.json()["data"]
+        record("直连 preview→published"
+               "(externalId=msg_id)",
+               d["status"] == "published"
+               and d["externalId"]
+               == "msg74")
+        record("四步协议序列"
+               "(token→素材→草稿→preview)",
+               calls[0] == "token"
+               and calls.count("material") == 1
+               and calls.count("draft") == 1
+               and calls[-1] == "preview"
+               and calls.index("material")
+                   < calls.index("draft")
+                   < calls.index("preview"))
+
+        calls.clear()
+        os.environ[
+            "NEXUS74_WECHAT_SEND_MODE"] = "send"
+        r = client.post(
+            f"{BASE}/publish", headers=ADMIN,
+            json={"sourceId": src_shadow,
+                  "platform": "wechat_mp",
+                  "now": NOW_D2})
+        d = r.json()["data"]
+        record("send 群发→published"
+               "(配额 guard+consume)",
+               d["status"] == "published"
+               and d["externalId"] == "msgSA"
+               and "guard" in calls
+               and "consume" in calls)
+
+        # 微信 API 错误归因(40001→auth_expired)
+        async def _prev_err(self, tok, mid,
+                            openid):
+            raise WechatMpAPIError(
+                "access_token 失效", 40001)
+
+        _PCS._wechat_mp_mass_preview = \
+            _prev_err
+        os.environ.pop(
+            "NEXUS74_WECHAT_SEND_MODE")
+        r = client.post(
+            f"{BASE}/publish", headers=ADMIN,
+            json={"sourceId": src_shadow,
+                  "platform": "wechat_mp",
+                  "now": NOW_D2})
+        d = r.json()["data"]
+        record("API 40001→auth_expired"
+               "(诚实归因)",
+               d["status"] == "failed"
+               and d["error"]["kind"]
+               == "auth_expired")
+
+        # preview 缺试收 openid
+        os.environ.pop(
+            "NEXUS74_WECHAT_PREVIEW_OPENID")
+        async def _prev_ok(self, tok, mid,
+                           openid):
+            return "msg74"
+        _PCS._wechat_mp_mass_preview = \
+            _prev_ok
+        r = client.post(
+            f"{BASE}/publish", headers=ADMIN,
+            json={"sourceId": src_shadow,
+                  "platform": "wechat_mp",
+                  "now": NOW_D2})
+        d = r.json()["data"]
+        record("preview 缺 openid→"
+               "api_transient(提示配置)",
+               d["status"] == "failed"
+               and d["error"]["kind"]
+               == "api_transient"
+               and "openid"
+                   in d["error"]["message"])
+
+        # healthz 双键识别+sendMode 公示
+        os.environ[
+            "NEXUS74_WECHAT_PREVIEW_OPENID"] = \
+            "oTEST74"
+        from services.nexus74_p3_service \
+            import Nexus74P3Service as _P3
+        hz = _P3().healthz()
+        wechat_hz = hz["adapters"][0]
+        record("healthz ready(preview)"
+               "(74号专用键)",
+               wechat_hz["status"]
+               == "ready(preview)"
+               and wechat_hz[
+                   "credentialsConfigured"]
+               is True)
+        os.environ.pop("WECHAT_MP_APPID")
+        os.environ.pop("WECHAT_MP_SECRET")
+        os.environ[
+            "PROMO_CHANNEL_WECHAT_MP_KEY"] = \
+            "wx36test|s36test"
+        wechat_hz = _P3().healthz()[
+            "adapters"][0]
+        record("healthz 36号键回退识别",
+               wechat_hz[
+                   "credentialsConfigured"]
+               is True)
+        os.environ.pop(
+            "PROMO_CHANNEL_WECHAT_MP_KEY")
+        os.environ.pop(
+            "NEXUS74_WECHAT_PREVIEW_OPENID")
+        wechat_hz = _P3().healthz()[
+            "adapters"][0]
+        record("无凭证→no_credentials"
+               "(复位)",
+               wechat_hz["status"]
+               == "no_credentials")
+    finally:
+        (_PCS._wechat_mp_token,
+         _PCS._wechat_mp_add_material,
+         _PCS._wechat_mp_draft_add,
+         _PCS._wechat_mp_mass_preview,
+         _PCS._wechat_mp_mass_sendall,
+         _PCS._wechat_mp_quota_guard,
+         _PCS._wechat_mp_quota_consume,
+         ) = _SAVED
+        for _v in ("WECHAT_MP_APPID",
+                   "WECHAT_MP_SECRET",
+                   "NEXUS74_WECHAT_SEND_MODE",
+                   "NEXUS74_WECHAT_PREVIEW_OPENID",
+                   "PROMO_CHANNEL_WECHAT_MP_KEY"):
+            os.environ.pop(_v, None)
+
     os.environ["NEXUSFLOW74_MODE"] = \
         "off"
 

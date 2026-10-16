@@ -543,4 +543,5 @@ async def main():
     sys.exit(1 if FAIL else 0)
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

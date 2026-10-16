@@ -21,6 +21,8 @@ import sys
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ["AUTH_MODE"] = "compat"
+# standalone 直连裸头自举(compat 默认剥离受保护路径裸头 → admin 403)
+os.environ.setdefault("AUTH_COMPAT_TRUST_HEADERS", "1")
 
 from services.trace_service import TraceService
 from repositories.agent_repository import AgentRepository

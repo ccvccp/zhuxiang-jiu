@@ -1,9 +1,9 @@
-"""会员积分管理模块路由(11 端点)
+"""会员积分管理模块路由(16 端点)
 
 鉴权:
-    - 用户端(7 接口): X-Member-Id 头标识当前会员(签到/返分/抵扣/退款/查询)
+    - 用户端(11 接口): X-Member-Id 头标识当前会员(签到/返分/抵扣/退款/查询/每日任务/兑换)
     - 管理端(2 接口): X-Role: admin 头(过期扫描/遗留积分迁移)
-    - 公开(2 接口): 账户/流水/将过期/统计查询(仅读)
+    - 公开(3 接口): 账户/流水/将过期/统计/兑换目录查询(仅读)
 
 异常映射(遵循项目约定):
     - KeyError → 404(账户不存在)
@@ -18,6 +18,8 @@
     - 过期(2):     expire-run / expiring
     - 查询(3):     account / logs / stats
     - 迁移(1):     admin/migrate-legacy(遗留 member.points 一次性入账)
+    - 每日任务(2): daily-tasks(面板) / daily-tasks/{code}/complete(上报, P2)
+    - 兑换商城(3): exchange/items(目录) / exchange(兑换) / exchange/records(记录, P2)
 """
 
 
@@ -298,6 +300,104 @@ async def migrate_legacy_points(
             await member_repo.update_fields(data.memberId, {"points": 0})
         result["memberId"] = data.memberId
         return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# P2 接口: 每日任务 + 兑换商城(积分生态扩展)
+# ============================================================
+
+class ExchangeRequest(PydBaseModel):
+    itemId: str = Field(..., description="兑换商品ID")
+    quantity: int = Field(1, ge=1, le=10, description="兑换数量(1-10)")
+    address: str = Field("", max_length=200, description="收货地址(实物兑换用)")
+
+
+def _parse_member_user_id(x_member_id: str | None) -> int:
+    """从 X-Member-Id 头解析会员数字ID, 缺失 401 / 非数字 400"""
+    member_id = _require_member_id(x_member_id)
+    try:
+        return int(member_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="X-Member-Id 须为数字会员ID")
+
+
+# --- 每日任务(P2) ---
+
+@router.get("/api/points/daily-tasks", tags=["会员积分模块"])
+async def get_daily_tasks(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """每日任务面板(任务列表+今日完成状态)"""
+    user_id = _parse_member_user_id(x_member_id)
+    try:
+        result = await _service.list_daily_tasks(user_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/points/daily-tasks/{task_code}/complete", tags=["会员积分模块"])
+async def complete_daily_task(
+    task_code: str,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """上报完成每日任务(发分+当日幂等; 签到类任务由签到接口自动完成)"""
+    user_id = _parse_member_user_id(x_member_id)
+    try:
+        result = await _service.complete_daily_task(user_id, task_code)
+        # v7.6 自动反馈: 积分发放 → 防薅羊毛观察评分+配对(正常小额期望 low)
+        await ai_hooks.on_points_earned(
+            str(user_id), float(result.get("pointsEarned") or 0))
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# --- 兑换商城(P2) ---
+
+@router.get("/api/points/exchange/items", tags=["会员积分模块"])
+async def list_exchange_items():
+    """兑换商城目录(首次访问幂等灌注种子目录, 按 pointsCost 升序)"""
+    try:
+        return await _service.list_exchange_items()
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/points/exchange", tags=["会员积分模块"])
+async def exchange_item(
+    data: ExchangeRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """积分兑换商品(库存扣减+足额扣分FIFO+每日限购; 实物 pending 待发货)"""
+    user_id = _parse_member_user_id(x_member_id)
+    try:
+        result = await _service.exchange_item(
+            user_id=user_id, item_id=data.itemId,
+            quantity=data.quantity, address=data.address)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/points/exchange/records", tags=["会员积分模块"])
+async def list_exchange_records(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    x_role: str = Header(None, alias="X-Role"),
+    user_id: int = Query(None, description="指定会员ID(仅管理员查询他人)"),
+    status: str = Query(None, description="按状态筛选: pending/issued/shipped/done"),
+    limit: int = Query(50, ge=1, le=200, description="查询条数"),
+):
+    """兑换记录查询(默认查本人, 管理员可指定 user_id 查任意会员)"""
+    if user_id is not None and x_role != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可查询他人兑换记录")
+    if user_id is None:
+        user_id = _parse_member_user_id(x_member_id)
+    try:
+        result = await _service.list_exchange_records(user_id, status, limit)
+        return {"success": True, "data": result, "count": len(result)}
     except Exception as e:
         _handle(e)
 

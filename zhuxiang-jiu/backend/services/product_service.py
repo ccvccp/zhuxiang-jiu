@@ -178,6 +178,119 @@ class ProductService:
         }
 
     # ============================================================
+    # 搜索联想 + 产品对比(P2 体验增强)
+    # ============================================================
+
+    async def search_suggest(self, keyword: str = "",
+                             limit: int = 8) -> dict:
+        """搜索联想(输入前缀/子串 → 候选词; 空 keyword 返回热门词)
+
+        候选词来源: 产品名/系列/标签/场景; 排序 = 前缀命中加权
+        (startswith +2) + 所属产品热度(hot_rank 越小越靠前)。
+
+        Raises:
+            ValueError: limit 非法
+        """
+        if limit < 1 or limit > 20:
+            raise ValueError(f"limit 须在 1-20 之间, 当前 {limit}")
+        kw = (keyword or "").strip().lower()
+        products = await self.product_repo.list_all()
+
+        # 词条 → 最高得分(产品维度)
+        scores: dict[str, float] = {}
+        hot_words: dict[str, int] = {}
+        for p in products:
+            weight = 10 - min(int(p.get("hot_rank") or 99), 9)  # 1-10
+            words = {p.get("name") or "", p.get("series") or "",
+                     *(p.get("tags") or []), *(p.get("scenes") or [])}
+            for w in words:
+                w = str(w).strip()
+                if not w:
+                    continue
+                hot_words[w] = hot_words.get(w, 0) + weight
+                if kw and kw in w.lower():
+                    score = weight + (2 if w.lower().startswith(kw) else 0)
+                    scores[w] = max(scores.get(w, 0), score)
+
+        if kw:
+            suggests = sorted(scores, key=lambda w: -scores[w])[:limit]
+        else:
+            # 热门搜索词(无输入时): 热度聚合 topN
+            suggests = sorted(hot_words, key=lambda w: -hot_words[w])[:limit]
+
+        return {
+            "success": True,
+            "keyword": keyword or "",
+            "count": len(suggests),
+            "suggests": suggests,
+        }
+
+    async def compare_products(self, product_ids: list[str]) -> dict:
+        """产品对比(2-4 款, 维度对齐表格 + 差异高亮)
+
+        Raises:
+            ValueError: 产品数量不在 2-4
+            KeyError: 任一产品不存在
+        """
+        ids = [str(i).strip() for i in product_ids if str(i).strip()]
+        if len(ids) < 2 or len(ids) > 4:
+            raise ValueError(f"对比产品数须在 2-4 款, 当前 {len(ids)}")
+        if len(set(ids)) != len(ids):
+            raise ValueError("对比产品不可重复")
+
+        products = []
+        for pid in ids:
+            p = await self.product_repo.get_by_id(pid)
+            if p is None:
+                raise KeyError(f"产品不存在({pid})")
+            products.append(p)
+
+        def _attr(p, key):
+            return (p.get("attributes") or {}).get(key, "—")
+
+        # (key, label, 取值函数)
+        dims = [
+            ("name", "产品名称", lambda p: p.get("name", "")),
+            ("series", "系列", lambda p: p.get("series", "")),
+            ("alcohol", "酒精度", lambda p: f"{p.get('alcohol', '—')}°"),
+            ("volume", "容量", lambda p: p.get("volume", "")),
+            ("price", "零售价",
+             lambda p: f"¥{p.get('price', 0):.2f}"),
+            ("member_price", "会员价",
+             lambda p: f"¥{p.get('member_price', 0):.2f}"),
+            ("svip_price", "SVIP价",
+             lambda p: f"¥{p.get('svip_price', 0):.2f}"),
+            ("rating", "评分",
+             lambda p: f"{p.get('rating_avg', 0)} ({p.get('rating_count', 0)}条)"),
+            ("stock", "库存", lambda p: p.get("stock", 0)),
+            ("sales_total", "累计销量", lambda p: p.get("sales_total", 0)),
+            ("tags", "标签", lambda p: ", ".join(p.get("tags") or [])),
+            ("scenes", "适用场景", lambda p: ", ".join(p.get("scenes") or [])),
+            ("taste", "口感", lambda p: _attr(p, "taste")),
+            ("aroma", "香型", lambda p: _attr(p, "aroma")),
+            ("process", "工艺", lambda p: _attr(p, "process")),
+            ("ingredients", "原料", lambda p: _attr(p, "ingredients")),
+            ("storage", "存储", lambda p: _attr(p, "storage")),
+        ]
+        dimensions = []
+        diff_count = 0
+        for key, label, getter in dims:
+            values = [getter(p) for p in products]
+            diff = len({str(v) for v in values}) > 1
+            diff_count += 1 if diff else 0
+            dimensions.append({"key": key, "label": label,
+                               "values": values, "diff": diff})
+
+        return {
+            "success": True,
+            "count": len(products),
+            "products": [self._to_summary(p) for p in products],
+            "dimensions": dimensions,
+            "diffCount": diff_count,
+            "sameCount": len(dimensions) - diff_count,
+        }
+
+    # ============================================================
     # 推荐
     # ============================================================
 

@@ -70,6 +70,10 @@ def test_t1_full_chain_referral_points():
         promo = PromotionService()
         a = await _mk_member("13900000001")
         b = await _mk_member("13900000002")
+        # 前置: 关闭邀请人静默时段(默认 22:00-08:00 会拦截营销站内信,
+        # 夜间跑测试时通知被延迟 → 断言 0 条; 关闭后时间无关)
+        await MessageService().update_subscription(
+            a["id"], silent_enabled=False)
         r = await promo.claim_promo_code(a["id"], "douyin")
         code = r["code"]
 

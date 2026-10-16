@@ -307,7 +307,8 @@ class LogisticsService:
                             settle_mode: str = "monthly",
                             extra_fee: float = 0.0,
                             discount: float = 1.0,
-                            waybill_no: str = "") -> dict:
+                            waybill_no: str = "",
+                            use_ewaybill: bool = False) -> dict:
         """物流下单(幂等: 同一 orderId 只能有一个未关闭运单)
 
         Args:
@@ -327,6 +328,9 @@ class LogisticsService:
             waybill_no: 外部运单号(2026-10-03 智运发货流接入——
                 管理员发货手填的真实物流商运单号, 传入则优先使用,
                 留空维持模拟生成; 基础 18 端点不传零影响)
+            use_ewaybill: 电子面单下单(P2 批次③——经物流网关取
+                运单号+大头笔+面单模板, mock 态确定性可测; real
+                出单即真实物流动作仅生产开启; 与 waybill_no 互斥)
 
         Raises:
             ValueError: 参数非法 / 已有未关闭运单
@@ -378,6 +382,27 @@ class LogisticsService:
             # 生成运单号(实际由物流商返回, 此处模拟)
             # 加入随机后缀确保唯一性(避免同毫秒同订单生成相同运单号)
             # 2026-10-03: 外部运单号优先(发货流接入, 真实运单号贯通轨迹)
+            # P2 批次③: 电子面单下单(use_ewaybill 经网关取运单号+面单,
+            # 网关三态: mock 确定性/real 真实下单 fail-hard)
+            ewaybill = None
+            if use_ewaybill:
+                if waybill_no:
+                    raise ValueError(
+                        "电子面单与外部运单号互斥(waybill_no 已传入)")
+                from services.logistics_gateway_service import (
+                    LogisticsGatewayService,
+                )
+                ewaybill = await LogisticsGatewayService() \
+                    .ewaybill_order(carrier, {
+                        "orderId": order_id,
+                        "senderName": sender["name"],
+                        "senderAddress": sender["address"],
+                        "receiverName": receiver["name"],
+                        "receiverAddress": receiver["address"],
+                        "weight": weight,
+                        "pieceCount": piece_count,
+                    })
+                waybill_no = ewaybill["waybillNo"]
             if not waybill_no:
                 import secrets
                 waybill_no = f"{carrier}{ts().replace('-', '').replace(':', '').replace(' ', '')}{order_id[-4:]}{secrets.token_hex(3)}"
@@ -409,6 +434,16 @@ class LogisticsService:
                 "totalFee": total_fee,
                 "settleMode": settle_mode,
                 "status": ORDER_STATUS_PENDING,
+                # 电子面单留痕(P2 批次③): 面单内容+来源
+                "ewaybill": {
+                    "machineCode": (ewaybill or {}).get("machineCode"),
+                    "originCode": (ewaybill or {}).get("originCode"),
+                    "destCode": (ewaybill or {}).get("destCode"),
+                    "printTemplate": (ewaybill or {})
+                    .get("printTemplate"),
+                } if ewaybill else None,
+                "ewaybillSource": ((ewaybill or {}).get("source")
+                                   or "mock") if ewaybill else None,
             }
 
             saved = await self.repo.save_order(order_data)
@@ -632,6 +667,209 @@ class LogisticsService:
             "trackTime": track_time,
         })
         return track
+
+    # ============================================================
+    # P2 批次③: 电子面单(打印/取消) + 物流理赔
+    # ============================================================
+
+    async def print_ewaybill(self, waybill_no: str) -> dict:
+        """面单打印(返回面单内容/云打印 URL——mock 确定性模板)
+
+        Raises:
+            KeyError: 运单不存在
+            ValueError: 运单非电子面单
+        """
+        order = await self.repo.get_order(waybill_no)
+        if not order:
+            raise KeyError(f"运单 {waybill_no} 不存在")
+        ewaybill = order.get("ewaybill")
+        if not ewaybill:
+            raise ValueError(
+                f"运单 {waybill_no} 非电子面单(useEwaybill 下单才可打印)")
+        return {
+            "waybillNo": waybill_no,
+            "carrier": order.get("carrier"),
+            "machineCode": ewaybill.get("machineCode"),
+            "originCode": ewaybill.get("originCode"),
+            "destCode": ewaybill.get("destCode"),
+            "printTemplate": ewaybill.get("printTemplate"),
+            "ewaybillSource": order.get("ewaybillSource"),
+        }
+
+    async def cancel_ewaybill(self, waybill_no: str) -> dict:
+        """面单取消(real 渠道作废)/运单作废(mock)
+
+        仅待揽收(pending/booked)可取消。
+        """
+        async with get_lock(f"logistics:waybill:{waybill_no}"):
+            order = await self.repo.get_order(waybill_no)
+            if not order:
+                raise KeyError(f"运单 {waybill_no} 不存在")
+            if order.get("status") not in (ORDER_STATUS_PENDING,
+                                           ORDER_STATUS_BOOKED):
+                raise ValueError(
+                    f"运单状态不可取消(当前 {order.get('status')},"
+                    f"仅待揽收/已下单)")
+            from services.logistics_gateway_service import (
+                LogisticsGatewayService,
+            )
+            is_ewaybill = bool(order.get("ewaybill"))
+            if is_ewaybill:
+                await LogisticsGatewayService().ewaybill_cancel(
+                    order.get("carrier"), waybill_no)
+            # 状态机作废(pending/booked → failed; close_failed_order
+            # 仅收口 failed 态, 故先经状态机流转)
+            await self.update_status(
+                waybill_no, ORDER_STATUS_FAILED, "system",
+                f"电子面单取消/作废: {waybill_no}")
+            return {
+                "waybillNo": waybill_no,
+                "cancelled": True,
+                "ewaybillCancelled": is_ewaybill,
+            }
+
+    async def claim_shipment(self, waybill_no: str, claim_type: str,
+                              claim_amount: float,
+                              evidence_urls: list = None,
+                              description: str = "",
+                              applicant: str = "") -> dict:
+        """物流理赔申请(保价件破损/丢损/短少)
+
+        Raises:
+            KeyError: 运单不存在
+            ValueError: 类型非法 / 金额非法 / 运单未签收 / 重复申请
+        """
+        valid_types = ("damage", "lost", "short")
+        if claim_type not in valid_types:
+            raise ValueError(
+                f"理赔类型非法: {claim_type}({'/'.join(valid_types)})")
+        if claim_amount <= 0:
+            raise ValueError("理赔金额须 > 0")
+
+        async with get_lock(f"logistics:claim:{waybill_no}"):
+            order = await self.repo.get_order(waybill_no)
+            if not order:
+                raise KeyError(f"运单 {waybill_no} 不存在")
+            if order.get("status") != ORDER_STATUS_SIGNED:
+                raise ValueError(
+                    f"仅已签收运单可理赔(当前 {order.get('status')})")
+            existing = await self.repo.list_claims(
+                waybill_no=waybill_no, limit=50)
+            if any(c.get("status") in ("pending", "accepted")
+                   for c in existing):
+                raise ValueError(
+                    f"运单 {waybill_no} 已有进行中的理赔单")
+            insured = float(order.get("insuredValue") or 0)
+            if insured > 0 and claim_amount > insured:
+                raise ValueError(
+                    f"理赔金额超出保价金额(保价 ¥{insured:,.2f},"
+                    f"申请 ¥{claim_amount:,.2f})")
+
+            claim_no = await self.repo.next_claim_no()
+            claim = {
+                "claimNo": claim_no,
+                "waybillNo": waybill_no,
+                "orderId": order.get("orderId"),
+                "carrier": order.get("carrier"),
+                "claimType": claim_type,
+                "claimAmount": round(claim_amount, 2),
+                "insuredValue": insured,
+                "evidenceUrls": evidence_urls or [],
+                "description": description,
+                "applicant": applicant or order.get("senderName", ""),
+                "status": "pending",   # pending→accepted→paid/rejected
+                "payoutNo": "",
+                "payoutAmount": 0.0,
+                "reviewNote": "",
+                "createdAt": "",
+            }
+            claim = await self.repo.save_claim(claim)
+            logger.info(f"物流理赔申请 claimNo={claim_no} "
+                        f"waybill={waybill_no} type={claim_type} "
+                        f"amount={claim_amount}")
+            return claim
+
+    async def claim_review(self, claim_no: str, approved: bool,
+                            payout_amount: float = None,
+                            reviewer: str = "admin",
+                            note: str = "") -> dict:
+        """理赔审核(受理/拒赔; 受理时定赔付金额≤申请额)
+
+        Raises:
+            KeyError: 理赔单不存在
+            ValueError: 状态非法(仅 pending 可审) / 金额非法
+        """
+        async with get_lock(f"logistics:claim:review:{claim_no}"):
+            claim = await self.repo.get_claim(claim_no)
+            if not claim:
+                raise KeyError(f"理赔单 {claim_no} 不存在")
+            if claim.get("status") != "pending":
+                raise ValueError(
+                    f"理赔单状态不可审核(当前 {claim.get('status')},"
+                    f"仅 pending)")
+            if not approved:
+                claim.update({
+                    "status": "rejected",
+                    "reviewNote": note or "不符合理赔条件, 拒赔",
+                    "reviewer": reviewer,
+                })
+                return await self.repo.save_claim(claim)
+
+            amount = (payout_amount
+                      if payout_amount is not None
+                      else claim["claimAmount"])
+            if amount <= 0 or amount > claim["claimAmount"]:
+                raise ValueError(
+                    f"赔付金额须在 (0, {claim['claimAmount']}] 区间")
+            claim.update({
+                "status": "accepted",
+                "payoutAmount": round(amount, 2),
+                "reviewNote": note or "审核通过, 待打款",
+                "reviewer": reviewer,
+            })
+            return await self.repo.save_claim(claim)
+
+    async def claim_payout(self, claim_no: str) -> dict:
+        """理赔打款(复用 payment.create_payout——审批阈值/重试在产)
+
+        Raises:
+            KeyError: 理赔单不存在
+            ValueError: 状态非 accepted / 打款失败
+        """
+        async with get_lock(f"logistics:claim:review:{claim_no}"):
+            claim = await self.repo.get_claim(claim_no)
+            if not claim:
+                raise KeyError(f"理赔单 {claim_no} 不存在")
+            if claim.get("status") != "accepted":
+                raise ValueError(
+                    f"理赔单状态不可打款(当前 {claim.get('status')},"
+                    f"仅 accepted)")
+            order = await self.repo.get_order(claim["waybillNo"])
+            payee = {
+                "payee_name": (order or {}).get("senderName", "")
+                               or claim.get("applicant", "寄件人"),
+                "payee_account": (order or {}).get(
+                    "senderPhone", "") or "13800000000",
+                "payee_bank": "mock",
+            }
+            from services.payment_service import PaymentService
+            payout = await PaymentService().create_payout(
+                payout_type="logistics",
+                source_id=claim_no,
+                amount=claim["payoutAmount"],
+                **payee,
+            )
+            claim.update({
+                "status": "paid",
+                "payoutNo": (payout or {}).get("payoutNo", ""),
+            })
+            return await self.repo.save_claim(claim)
+
+    async def list_claims(self, waybill_no: str = None,
+                          status: str = None,
+                          limit: int = 50) -> list[dict]:
+        """理赔列表(按运单/状态筛选)"""
+        return await self.repo.list_claims(waybill_no, status, limit)
 
     # ============================================================
     # P0: 月结对账

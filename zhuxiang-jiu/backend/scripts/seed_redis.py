@@ -298,14 +298,44 @@ async def seed_product_reviews(client) -> int:
 
     Key: zhuxiang:product:reviews:{product_id}
     每个元素为评价的 JSON 字符串, 由 ProductRepository._redis_get_reviews 读取。
+    P1-14: 同步维护评价索引(owner + by-member), 与 _redis_add_review
+    写入路径对齐, 种子数据同样免全量扫描。
     """
+    from datetime import datetime
+
+    def _iso_epoch(iso: str) -> float:
+        try:
+            return datetime.fromisoformat(iso).timestamp()
+        except (TypeError, ValueError):
+            return datetime.now().timestamp()
+
     count = 0
+    seeded_members = set()
     for product_id, reviews in _initial_reviews().items():
         if not reviews:
             continue
         items = [json.dumps(r, ensure_ascii=False) for r in reviews]
         await client.rpush(_k("product", "reviews", product_id), *items)
+        for r in reviews:
+            rid = r.get("review_id")
+            if not rid:
+                continue
+            await client.set(_k("product", "review", "owner", rid),
+                             product_id)
+            mid = r.get("member_id")
+            if mid not in (None, ""):
+                await client.zadd(
+                    _k("product", "reviews", "by", "member", str(mid)),
+                    {rid: _iso_epoch(r.get("created_at", ""))})
+                seeded_members.add(str(mid))
         count += len(reviews)
+    # 完成标记: 种子会员的存量已全部入索引, 读路径直接走索引免回退;
+    # 举报时间线索引同理(种子无举报, 标记即完整)
+    for mid in seeded_members:
+        await client.set(
+            _k("product", "reviews", "by", "member", mid, "done"), 1)
+    await client.set(
+        _k("product", "review", "report", "index", "done"), 1)
     return count
 
 

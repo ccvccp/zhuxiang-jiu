@@ -1,18 +1,21 @@
-"""产品展示路由(7 端点)
+"""产品展示路由(23 端点)
 
 端点:
     GET    /api/product/categories                  分类导航(返回分类树)
     GET    /api/product/list                         产品列表(筛选+排序+分页)
     GET    /api/product/search                       搜索(关键词匹配)
+    GET    /api/product/search/suggest               搜索联想(P2, 空=热门词)
+    GET    /api/product/compare                      产品对比(P2, 2-4 款)
     GET    /api/product/hot                          热销推荐
     GET    /api/product/featured                     主推产品
     GET    /api/product/{product_id}                产品详情(含关联推荐)
     GET    /api/product/{product_id}/reviews        评价列表(分页)
     POST   /api/product/{product_id}/reviews        提交评价(需 X-Member-Id)
+    + 评价体系 14 端点(回复/点赞/举报/管理处置/我的评价/by-order)
 
 鉴权:
-    - 提交评价: 需 X-Member-Id 头标识当前会员(Mock 模式)
-    - 其他接口: 公开(浏览/搜索/详情)
+    - 提交评价/回复/点赞/举报: 需 X-Member-Id 头标识当前会员(Mock 模式)
+    - 其他接口: 公开(浏览/搜索/详情/联想/对比)
 
 异常映射(遵循项目约定):
     - KeyError  → 404(资源不存在)
@@ -272,6 +275,46 @@ async def search_products(
         return await _service.search(keyword, page=page, page_size=page_size)
     except ValueError as e:
         raise _map_value_error(e) from e
+
+
+# ============================================================
+#  搜索联想: GET /api/product/search/suggest(P2 体验增强)
+# ============================================================
+
+@router.get("/search/suggest")
+async def search_suggest(
+    keyword: str = Query(default="", description="输入前缀(空=热门搜索词)"),
+    limit: int = Query(default=8, ge=1, le=20, description="返回条数(1-20)"),
+):
+    """搜索联想(前缀/子串命中产品名/系列/标签/场景;
+    空 keyword 返回热门搜索词)"""
+    try:
+        return await _service.search_suggest(keyword, limit=limit)
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+# ============================================================
+#  产品对比: GET /api/product/compare(P2 体验增强)
+# ============================================================
+
+@router.get("/compare")
+async def compare_products(
+    ids: str = Query(..., description="产品ID列表(逗号分隔, 2-4 款)"),
+):
+    """产品对比(2-4 款, 维度对齐表格+差异高亮)
+
+    Raises:
+        409: 数量不在 2-4 / 产品重复
+        404: 任一产品不存在
+    """
+    id_list = [x.strip() for x in ids.split(",") if x.strip()]
+    try:
+        return await _service.compare_products(id_list)
+    except ValueError as e:
+        raise _map_value_error(e) from e
+    except KeyError as e:
+        raise _map_key_error(e) from e
 
 
 # ============================================================

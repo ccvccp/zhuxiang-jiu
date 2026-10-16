@@ -66,6 +66,52 @@ ANTI_CHANNEL_CROSS_CITY = "cross_city"
 logger = logging.getLogger("trace_service")
 
 
+# ============================================================
+# CRC 校验码(P2 正确性修复: 2026-10-12)
+#
+# 旧口径: format(abs(hash(raw)) % 0xFFFF, "04X") —— Python 内建 hash()
+#   受 PYTHONHASHSEED 随机化影响, 跨进程/跨服务不确定, 离线校验必失效。
+# 新口径: CRC16-CCITT(binascii.crc_hqx, 纯标准库, 跨进程确定性),
+#   同一 raw 任何环境重算一致, 支持离线防伪预检与外部系统复算。
+# 兼容: 存量 v1 码(无 crcVersion 字段)不做 CRC 拦截, 以库内记录为准;
+#   scan_trace 预检失败仅落观测(crcPrecheckFailed), TRACE_CRC_STRICT=on
+#   后升级为硬拦截(留给存量码消耗完成后启用)。
+# ============================================================
+
+import binascii
+import os
+
+
+def crc16_ccitt(raw: str) -> str:
+    """生命码校验位(CRC16-CCITT, 4 位 hex, 跨进程确定)"""
+    return format(binascii.crc_hqx(raw.encode("utf-8"), 0xFFFF), "04X")
+
+
+def verify_life_crc(life_code: str) -> bool:
+    """生命码离线 CRC 校验(解析码面重算, 不查库)
+
+    码面格式: BLC-{product_id}-{batch_no}-{seq}-{crc}
+    """
+    if not life_code or not life_code.startswith(f"{BRAND_PREFIX}-"):
+        return False
+    body, _, tail = life_code.rpartition("-")
+    if not tail or len(tail) != 4:
+        return False
+    # raw 与生成侧一致: {product_id}-{batch_no}-{seq}(剥品牌前缀)
+    raw = body[len(BRAND_PREFIX) + 1:]
+    return crc16_ccitt(raw) == tail.upper()
+
+
+def crc_strict_mode() -> bool:
+    """CRC 严格模式(预检失败硬拦截; 默认 off 观测)"""
+    return os.environ.get("TRACE_CRC_STRICT", "off") == "on"
+
+
+def legacy_crc4(raw: str) -> str:
+    """旧口径校验码(仅同进程内可复算, 供存量码对照/迁移工具用)"""
+    return format(abs(hash(raw)) % 0xFFFF, "04X")
+
+
 class TraceService:
     """双码追溯业务逻辑(双模式存储, 锁保护 RMW)"""
 
@@ -326,9 +372,10 @@ class TraceService:
             lifes = []
             for i in range(count):
                 seq = f"{i + 1:06d}"
-                # CRC4: 简单校验码(取hash前4位)
+                # CRC 校验位: CRC16-CCITT(跨进程确定, 支持离线校验;
+                # 旧内建 hash 口径受 PYTHONHASHSEED 影响已弃用, 见模块头)
                 raw = f"{product_id}-{batch_no}-{seq}"
-                crc = format(abs(hash(raw)) % 0xFFFF, "04X")
+                crc = crc16_ccitt(raw)
                 life_code = f"{BRAND_PREFIX}-{product_id}-{batch_no}-{seq}-{crc}"
                 life = {
                     "lifeCode": life_code,
@@ -342,6 +389,7 @@ class TraceService:
                     "userId": None,
                     "holderName": None,
                     "crcCode": crc,
+                    "crcVersion": 2,
                     "boxCodeId": None,
                     "createdAt": ts(),
                 }
@@ -427,9 +475,16 @@ class TraceService:
             激活结果(含激活日期/奖励积分)
 
         Raises:
-            KeyError: 生命码不存在
+            KeyError: 生命码不存在(或 CRC 严格模式校验失败)
             ValueError: 已激活/已回收/已冻结
         """
+        # CRC 离线预检(与 scan_trace 同口径: 观测留痕/严格拦截)
+        if life_code and life_code.startswith(f"{BRAND_PREFIX}-") \
+                and not verify_life_crc(life_code):
+            if crc_strict_mode():
+                raise KeyError(f"码校验失败(防伪拦截, code={life_code})")
+            logger.warning("crc_precheck_failed code=%s", life_code)
+
         lock_key = f"trace:activate:{life_code}"
         async with get_lock(lock_key):
             life = await self.repo.get_life_by_code(life_code)
@@ -549,6 +604,91 @@ class TraceService:
                            "err=%s", life_code, user_id, exc)
             return {"granted": False}
 
+    async def bind_nfc(self, life_code: str, nfc_uid: str = None,
+                        operator_id: int = None) -> dict:
+        """NFC 标签绑定(生产侧: UID↔生命码; P2 批次③)
+
+        nfc_uid 缺省时经 NFC 网关发码(mock 态确定性 UID=
+        NFCMOCK{crc16(生命码)}; real 厂商 API fail-hard)。
+
+        Raises:
+            KeyError: 生命码不存在
+            ValueError: 已被其他标签绑定 / UID 已占用
+        """
+        life = await self.repo.get_life_by_code(life_code)
+        if life is None:
+            raise KeyError(f"生命码不存在({life_code})")
+        from services.nfc_gateway_service import NfcGatewayService
+        if not nfc_uid:
+            issued = await NfcGatewayService().issue_uid(life_code)
+            nfc_uid = issued["nfcUid"]
+        existing_uid = await self.repo.get_nfc_by_life_code(life_code)
+        if existing_uid and existing_uid != nfc_uid:
+            raise ValueError(
+                f"生命码已绑定标签({existing_uid}), 不可重复绑定")
+        existing_life = await self.repo.get_life_code_by_nfc(nfc_uid)
+        if existing_life and existing_life != life_code:
+            raise ValueError(
+                f"标签已被生命码占用({existing_life})")
+        await self.repo.save_nfc_binding(nfc_uid, life_code)
+        logger.info("nfc_bound uid=%s life=%s operator=%s",
+                    nfc_uid, life_code, operator_id)
+        return {
+            "nfcUid": nfc_uid,
+            "lifeCode": life_code,
+            "productId": life.get("productId"),
+            "batchNo": life.get("batchNo"),
+            "boundAt": ts(),
+        }
+
+    async def verify_nfc(self, nfc_uid: str, user_id: int = None,
+                          longitude: float = None,
+                          latitude: float = None) -> dict:
+        """NFC 碰一碰验真(消费侧: UID 反查生命码+激活状态; 无外部调用)
+
+        Raises:
+            KeyError: 标签未绑定(无效标签)
+        """
+        life_code = await self.repo.get_life_code_by_nfc(
+            str(nfc_uid or "").strip())
+        if not life_code:
+            raise KeyError(f"NFC 标签未绑定({nfc_uid})")
+        life = await self.repo.get_life_by_code(life_code)
+        if life is None:
+            raise KeyError(f"标签绑定的生命码不存在({life_code})")
+        activated = life.get("status") in ("active", "transferred")
+        result = {
+            "nfcUid": nfc_uid,
+            "verified": True,   # 绑定关系存在即厂商唯一标签
+            "lifeCode": life_code,
+            "productId": life.get("productId"),
+            "productName": life.get("productName"),
+            "batchNo": life.get("batchNo"),
+            "status": life.get("status"),
+            "activated": activated,
+            "firstActivationDate": life.get("firstActivationDate"),
+            "holderName": life.get("holderName"),
+            "antiFakeLevel": "nfc+code",   # UID+码面 CRC 双重
+        }
+        # 防窜地理观测(可选: 与 anti_channel 链路同源, 仅留痕不拦截)
+        if longitude is not None and latitude is not None:
+            result["scanGeo"] = {"longitude": longitude,
+                                 "latitude": latitude}
+        # 写扫码记录(复用扫码日志, code=生命码, 类型 nfc)
+        scan_id = await self.repo.add_scan_log({
+            "code": life_code,
+            "codeType": CODE_TYPE_LIFE,
+            "userId": user_id,
+            "scanType": "nfc",
+            "longitude": longitude,
+            "latitude": latitude,
+            "province": None,
+            "city": None,
+            "createdAt": ts(),
+        })
+        result["scanId"] = scan_id
+        return result
+
     async def scan_trace(self, code: str, user_id: int = None,
                           longitude: float = None, latitude: float = None,
                           province: str = None, city: str = None,
@@ -557,6 +697,8 @@ class TraceService:
 
         规则:
             - 支持箱码/生命码扫码
+            - 生命码先做 CRC 离线预检(不匹配仅观测留痕 crcPrecheckFailed,
+              TRACE_CRC_STRICT=on 时硬拦截 404; 存量 v1 码以库为准)
             - 返回全链路追溯信息(赋码→激活→转让→回收)
             - 写入扫码记录
 
@@ -566,6 +708,15 @@ class TraceService:
         Raises:
             KeyError: 码不存在
         """
+        # CRC 离线预检(生命码格式)
+        crc_valid = None
+        if code and code.startswith(f"{BRAND_PREFIX}-"):
+            crc_valid = verify_life_crc(code)
+            if not crc_valid:
+                if crc_strict_mode():
+                    raise KeyError(f"码校验失败(防伪拦截, code={code})")
+                logger.warning("crc_precheck_failed code=%s", code)
+
         # 先尝试生命码
         life = await self.repo.get_life_by_code(code)
         if life is not None:
@@ -573,6 +724,10 @@ class TraceService:
             result = {
                 "code": code,
                 "codeType": CODE_TYPE_LIFE,
+                # v2 码反映离线校验结果; v1 存量码旧口径无法离线复算, 不适用(None)
+                "crcValid": crc_valid if life.get("crcVersion", 1) == 2
+                else None,
+                "crcVersion": life.get("crcVersion", 1),
                 "productId": life.get("productId"),
                 "productName": life.get("productName"),
                 "batchNo": life.get("batchNo"),

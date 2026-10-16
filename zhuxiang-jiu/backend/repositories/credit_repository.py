@@ -327,6 +327,54 @@ class CreditRepository:
         return self._mem_list_scores(status, role_type, limit)
 
     # ============================================================
+    # 月度快照(D-E: 审计可比, key = "{userId}:{YYYY-MM}")
+    # ============================================================
+
+    async def save_snapshot(self, snapshot: dict) -> None:
+        """保存/覆盖月度快照(重算语义)"""
+        key = f"{snapshot.get('userId')}:{snapshot.get('month')}"
+        snapshot["updatedAt"] = datetime.utcnow().isoformat()
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(
+                _k("credit", "snapshot", key),
+                json.dumps(snapshot, ensure_ascii=False))
+            return
+        self._ensure_store()
+        self.store["credit_score_snapshots"][key] = snapshot
+
+    async def get_snapshot(self, user_id: int, month: str) -> dict | None:
+        key = f"{user_id}:{month}"
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(_k("credit", "snapshot", key))
+            return json.loads(data) if data else None
+        self._ensure_store()
+        return self.store["credit_score_snapshots"].get(key)
+
+    async def list_snapshots(self, user_id: int = None, month: str = None,
+                             limit: int = 120) -> list[dict]:
+        """快照列表(按用户前缀/月份过滤, 倒序)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            keys = await client.keys(_k("credit", "snapshot", "*"))
+            items = []
+            for k in keys:
+                data = await client.get(k)
+                if data:
+                    items.append(json.loads(data))
+        else:
+            self._ensure_store()
+            items = list(self.store["credit_score_snapshots"].values())
+        if user_id is not None:
+            items = [s for s in items if s.get("userId") == user_id]
+        if month:
+            items = [s for s in items if s.get("month") == month]
+        items.sort(key=lambda s: (s.get("month", ""),
+                                  s.get("userId", 0)), reverse=True)
+        return items[:limit]
+
+    # ============================================================
     # 信用流水 CRUD
     # ============================================================
 
@@ -494,6 +542,9 @@ class CreditRepository:
             self.store["credit_reward_exchanges"] = {}       # exchangeId → exchange
             self.store["credit_exchanges_by_user"] = {}      # userId → [exchangeId, ...]
             self.store["_credit_exchange_seq"] = 0
+        if "credit_score_snapshots" not in self.store:
+            # 月度快照(D-E): key = "{userId}:{YYYY-MM}" → snapshot
+            self.store["credit_score_snapshots"] = {}
 
     # --- 账户 ---
 

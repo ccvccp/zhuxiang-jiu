@@ -95,6 +95,19 @@ class GenerateLifeRequest(PydBaseModel):
     productVolume: str = Field("500ml", description="容量")
 
 
+class NfcBindRequest(PydBaseModel):
+    lifeCode: str = Field(..., description="生命码")
+    nfcUid: str | None = Field(
+        None, description="NFC 标签 UID(缺省时经网关发码: mock 确定性/real 厂商 API)")
+    operatorId: int | None = Field(None, description="操作人ID")
+
+
+class NfcVerifyRequest(PydBaseModel):
+    nfcUid: str = Field(..., description="手机 NFC 读取的标签 UID")
+    longitude: float | None = Field(None, description="验真经度(可选)")
+    latitude: float | None = Field(None, description="验真纬度(可选)")
+
+
 class BindLifeRequest(PydBaseModel):
     lifeId: int = Field(..., description="生命码ID")
     boxId: int = Field(..., description="箱码ID")
@@ -295,6 +308,48 @@ async def activate_life_code(
             purchase_channel=data.purchaseChannel,
             purchase_price=data.purchasePrice,
             order_id=data.orderId,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/trace/nfc/bind", tags=["双码追溯模块"])
+async def bind_nfc(
+    data: NfcBindRequest,
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """NFC 标签绑定(生产侧 admin: UID↔生命码; P2 批次③)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.bind_nfc(
+            life_code=data.lifeCode,
+            nfc_uid=data.nfcUid,
+            operator_id=data.operatorId,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/trace/nfc/verify", tags=["双码追溯模块"])
+async def verify_nfc(
+    data: NfcVerifyRequest,
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
+):
+    """NFC 碰一碰验真(消费者公开: UID 反查生命码+激活状态)"""
+    user_id = None
+    if x_member_id:
+        try:
+            user_id = int(x_member_id)
+        except (TypeError, ValueError):
+            user_id = None
+    try:
+        result = await _service.verify_nfc(
+            nfc_uid=data.nfcUid,
+            user_id=user_id,
+            longitude=data.longitude,
+            latitude=data.latitude,
         )
         return {"success": True, "data": result}
     except Exception as e:

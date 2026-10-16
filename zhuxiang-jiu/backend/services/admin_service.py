@@ -19,6 +19,7 @@
     - ValueError → 409(业务冲突: 用户名重复/状态非法等)
 """
 
+import hmac
 import logging
 import re
 import secrets
@@ -32,6 +33,7 @@ from repositories.admin_repository import (
     AdminRepository,
     _hash_admin_pwd,
     _verify_admin_pwd,
+    is_legacy_admin_hash,
     ADMIN_STATUS_NORMAL, ADMIN_STATUS_DISABLED, ADMIN_STATUS_LOCKED,
     ROLE_STATUS_ACTIVE, ROLE_STATUS_DISABLED,
     CONFIG_STATUS_ACTIVE, LOGIN_FAIL_LIMIT, LOGIN_LOCK_MINUTES,
@@ -239,6 +241,10 @@ class AdminService:
             user["lastLoginAt"] = datetime.utcnow().isoformat()
             user["lastLoginIp"] = ip
             user["updatedAt"] = datetime.utcnow().isoformat()
+            # P1-21: 旧格式哈希(固定盐 SHA256)登录成功自动升级为
+            # PBKDF2(随机盐), 随本次 save_user 一并落库
+            if is_legacy_admin_hash(pwd_hash):
+                user["passwordHash"] = _hash_admin_pwd(password)
             await self.repo.save_user(user)
 
             # 查询权限列表
@@ -286,8 +292,10 @@ class AdminService:
 
             # 创建会话(30分钟滑动过期)
             # 仍在使用默认密码 → 会话标记"须改密"(除改密/登出外接口受限)
-            using_default_pwd = _verify_admin_pwd(
-                password, _hash_admin_pwd(DEFAULT_SUPER_PASSWORD))
+            # (P1-21: 改为明文常量时间比对——PBKDF2 每次随机盐,
+            #  原"重新哈希再比对"会永假, 默认密码检测失效)
+            using_default_pwd = hmac.compare_digest(
+                password, DEFAULT_SUPER_PASSWORD)
             token = secrets.token_urlsafe(32)
             now_dt = datetime.utcnow()
             session = {

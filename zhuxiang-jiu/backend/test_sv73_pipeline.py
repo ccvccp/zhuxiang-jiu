@@ -327,4 +327,5 @@ def test_r9_tier_routing(monkeypatch):
     assert lo["tier"] == "B"
     assert lo["storyboard"]["template"]["name"] == "vertical"
     # 归因冷启动: real 态过闸建短码 → nextSteps 注入 rLink 指引
-    assert "zxjiu.com/r/" in hi["nextSteps"]
+    # (域名断言对齐 sv73_pipeline_service 实际产出 zyjiu.com/r/)
+    assert "zyjiu.com/r/" in hi["nextSteps"]

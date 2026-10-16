@@ -663,7 +663,45 @@ function weatherIcon(w) {
 function loadScene() {
   fetch("/api/scene/context").then(function (r) { return r.json(); }).then(function (j) {
     if (!j || j.success === false) return;
-    var d = j.data || j, g = d.greeting || {}, w = d.weather || {}, loc = d.location || {};
+    renderScene(j.data || j);
+    refineSceneByGeo();   /* CGNAT 池修正: H5 坐标→高德逆地理刷新 */
+  }).catch(function () { /* 问候非关键路径 */ });
+}
+/* 坐标修正(2026-10-09 成都显示辽宁实证: ip2region 上游库对部分
+   运营商段标错省, 离线修不动——前端 H5 坐标走 /api/scene/geo
+   高德逆地理覆盖; 坐标 localStorage 缓存 30min; 拒绝授权保持现状 */
+var GEO_CACHE_KEY = "scene.geo.coord", GEO_TTL = 30 * 60 * 1000;
+function refineSceneByGeo() {
+  try {
+    var c = JSON.parse(localStorage.getItem(GEO_CACHE_KEY) || "null");
+    if (c && c.at && Date.now() - c.at < GEO_TTL && isFinite(c.lng)) {
+      fetchSceneGeo(c.lng, c.lat);
+      return;
+    }
+  } catch (e) { /* 忽略缓存解析 */ }
+  if (!navigator.geolocation || !window.isSecureContext) return;
+  navigator.geolocation.getCurrentPosition(function (pos) {
+    if (!isFinite(pos.coords.longitude)
+        || !isFinite(pos.coords.latitude)) return;
+    fetchSceneGeo(pos.coords.longitude, pos.coords.latitude);
+  }, function () { /* 拒绝授权/超时: 保持 IP 归属 */ },
+    { timeout: 8000, maximumAge: GEO_TTL });
+}
+function fetchSceneGeo(lng, lat) {
+  fetch("/api/scene/geo?lng=" + encodeURIComponent(lng)
+        + "&lat=" + encodeURIComponent(lat))
+    .then(function (r) { return r.json(); }).then(function (j) {
+      var d = j && j.success && j.data;
+      if (!d || !d.located) return;
+      try {
+        localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(
+          { lng: lng, lat: lat, at: Date.now() }));
+      } catch (e) { /* 忽略 */ }
+      renderScene(d);
+    }).catch(function () { /* 静默 */ });
+}
+function renderScene(d) {
+    var g = d.greeting || {}, w = d.weather || {}, loc = d.location || {};
     document.getElementById("greet").textContent = g.greeting || "您好，欢迎来到竹香网！";
     document.getElementById("greet").title = g.greeting || "";
     document.getElementById("wico").textContent = weatherIcon(w.weather);
@@ -672,7 +710,6 @@ function loadScene() {
       ' <span style="font-size:11px">(' + esc((loc.province || "") + (loc.city || "")) + ')</span>';
     if (g.weatherTip) showToast(g.weatherTip);
     document.body.setAttribute("data-bg", g.background || "day");
-  }).catch(function () { /* 问候非关键路径 */ });
 }
 
 /* ===== 角色上下文(等级/信值绑定) ===== */

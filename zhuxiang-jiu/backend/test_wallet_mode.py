@@ -29,6 +29,8 @@ import sys
 
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
+os.environ.setdefault("AUTH_MODE", "compat")
+os.environ.setdefault("AUTH_COMPAT_TRUST_HEADERS", "1")  # HTTP 面信任 X-Role 头
 
 from services.wallet_mode_service import (
     WalletModeService, MODE_VALUES,

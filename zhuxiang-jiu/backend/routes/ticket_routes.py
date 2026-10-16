@@ -1,8 +1,9 @@
-"""客服工单模块路由(14 端点)
+"""客服工单模块路由(19 端点)
 
 鉴权:
     - 用户端(5): 创建工单/确认+满意度/我的工单列表/我的工单详情/用户补充(X-Member-Id 头)
-    - 客服/管理端(9): 分配/回复/解决/关闭/列表/详情/统计/补偿方案/补偿执行
+    - 客服/管理端(14): 分配/回复/解决/关闭/列表/详情/统计/补偿方案/补偿执行
+      + AI 引擎四层(生成/分派/追踪/关闭)+自动化率观测(P2)
       (X-Role 头, 放行 admin 与 cs_staff, 对应权限码 ticket:view/ticket:reply)
 
 异常映射(遵循项目约定):
@@ -16,6 +17,8 @@
     - 确认(1):   confirm(用户, 含满意度)
     - 用户端(3): my-list / my-detail / my-reply(P3B 用户工单自助)
     - 补偿(2):   compensation-propose / compensation-execute(P1-9 三级补偿)
+    - AI 引擎(5): ai/generate / ai/dispatch / ai/sla-scan / ai/auto-close / ai/stats
+      (TICKET_AI_ENGINE=off 默认 → 四执行端点 409, 观测端点常开)
 """
 
 
@@ -23,6 +26,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
 
 from services.ticket_service import TicketService
+from services.ticket_ai_service import TicketAIService
 from repositories.ticket_repository import (
     PRIORITY_MEDIUM, SOURCE_USER,
 )
@@ -30,6 +34,7 @@ from repositories.ticket_repository import (
 
 router = APIRouter()
 _service = TicketService()
+_ai_service = TicketAIService()
 
 
 # ============================================================
@@ -369,6 +374,11 @@ class ProposeCompensationRequest(PydBaseModel):
     remark: str = Field("", max_length=500, description="方案备注")
 
 
+class AIGenerateRequest(PydBaseModel):
+    sessionId: str = Field(..., min_length=4, max_length=64,
+                           description="来源 chat 会话ID")
+
+
 @router.post("/api/ticket/{ticket_no}/compensation/propose", tags=["客服工单模块"])
 async def propose_compensation(
     ticket_no: str,
@@ -402,6 +412,91 @@ async def execute_compensation(
     _require_staff(x_role)
     try:
         result = await _service.execute_compensation(ticket_no=ticket_no)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# AI 工单引擎四层(P2: 智能生成/分派/追踪/关闭, 14→19 端点)
+# ============================================================
+
+def _require_ai_engine():
+    """引擎门控(TICKET_AI_ENGINE=off 默认 → 409, 对齐全站灰度范式)"""
+    from services.ticket_ai_service import ticket_ai_enabled
+    if not ticket_ai_enabled():
+        raise HTTPException(
+            status_code=409,
+            detail="TICKET_AI_ENGINE=off(env——AI工单引擎关闭, "
+                   "基础工单流转不受影响)")
+
+
+@router.post("/api/ticket/ai/generate", tags=["客服工单模块"])
+async def ai_generate_ticket(
+    data: AIGenerateRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """智能生成: 会话摘要+智能分类+智能标签 → source=ai 工单(幂等)"""
+    _require_staff(x_role)
+    _require_ai_engine()
+    try:
+        result = await _ai_service.generate_from_session(data.sessionId)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/ticket/ai/dispatch", tags=["客服工单模块"])
+async def ai_dispatch_tickets(
+    x_role: str = Header(None, alias="X-Role"),
+    limit: int = Query(20, ge=1, le=100, description="单批最大分派数"),
+):
+    """智能分派: 待分配工单批量派给最优客服(负载50%+满意度30%+技能20%)"""
+    _require_staff(x_role)
+    _require_ai_engine()
+    try:
+        result = await _ai_service.auto_dispatch(limit)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/ticket/ai/sla-scan", tags=["客服工单模块"])
+async def ai_sla_scan(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """智能追踪: SLA 超时预警+售后48h升级+催办站内信(每日至多一催)"""
+    _require_staff(x_role)
+    _require_ai_engine()
+    try:
+        result = await _ai_service.run_sla_scan()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/ticket/ai/auto-close", tags=["客服工单模块"])
+async def ai_auto_close(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """智能关闭: 已解决超48h未确认 → 自动确认(默认4星,不触发分润)+归档"""
+    _require_staff(x_role)
+    _require_ai_engine()
+    try:
+        result = await _ai_service.run_auto_close()
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/ticket/ai/stats", tags=["客服工单模块"])
+async def ai_stats(
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """AI 自动化率观测(生成/自动关闭占比, 目标 85%; 引擎关态也可观测)"""
+    _require_staff(x_role)
+    try:
+        result = await _ai_service.get_automation_stats()
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)

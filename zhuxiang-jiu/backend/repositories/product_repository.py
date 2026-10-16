@@ -9,6 +9,15 @@
                        (每个元素为 JSON 字符串, 形如 {"key": "series", ...})
         * 产品评价:   List  zhuxiang:product:reviews:{product_id}
                        (每个元素为 JSON 字符串)
+        * 评价索引(P1-14): String zhuxiang:product:review:owner:{review_id}
+                           (→ product_id, 点赞计数/删除定位免全量扫描)
+                           ZSet   zhuxiang:product:reviews:by:member:{member_id}
+                           (score=created_at epoch, 我的评价免全产品遍历)
+        * 举报索引(P1-14): ZSet   zhuxiang:product:review:report:index
+                           (score=created_at epoch → report_id 列表)
+                           String zhuxiang:product:review:report:flag:{review_id}:{reporter_id}
+                           (→ report_id, 重复举报判定免 KEYS 扫描)
+                           (旧数据无索引时自动回退全量扫描, 兼容平滑迁移)
 
 库存字段(stock/reserved)不在产品主信息中, 复用 InventoryRepository:
     - 内存: _mock_store["inventory"][product_id]
@@ -150,7 +159,7 @@ def _img(prompt: str, size: str = "1024x1024") -> str:
 
 # 便携小瓶真实产品图(2026-09-26 目录更新: 上传至 dist/images/products/,
 # 由 nginx 静态直出, 与占位图 URL 机制并存)
-_PROD_IMG_BASE = "https://zxjiu.com/images/products"
+_PROD_IMG_BASE = "https://zyjiu.com/images/products"
 
 
 def _build_product(pid, name, subtitle, series, alcohol, volume, price,
@@ -690,8 +699,14 @@ class ProductRepository:
 
     async def list_reviews_by_member(self, member_id: str,
                                       limit: int = 50) -> list:
-        """按会员查询评价历史"""
+        """按会员查询评价历史(P1-14: by-member ZSet 索引免全产品遍历;
+        旧数据无索引时回退全量遍历)"""
         if is_redis_mode():
+            indexed = await self._redis_list_reviews_by_member_index(
+                member_id, limit)
+            if indexed is not None:
+                return indexed
+            # 回退: 旧数据无索引, 全产品遍历
             all_products = await self._redis_list_all()
         else:
             all_products = self._mem_list_all()
@@ -710,6 +725,32 @@ class ProductRepository:
                     r["product_id"] = pid
                     result.append(r)
         # 按时间倒序
+        result.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+        return result[:limit]
+
+    async def _redis_list_reviews_by_member_index(
+            self, member_id: str, limit: int) -> list | None:
+        """索引路径: 完成标记存在(存量已回填)才走——ZSet 按时间倒序取
+        review_id → owner 定位产品 → 分组拉取列表匹配; 否则返回 None
+        触发回退(防部分索引态漏旧评价)"""
+        client = await get_redis_client()
+        zkey, done = self._member_index_keys(member_id)
+        if not await client.exists(done):
+            return None
+        rids = await client.zrevrange(zkey, 0, -1)
+        # review_id → product_id 分组(owner 索引)
+        groups: dict[str, set[str]] = {}
+        for rid in rids:
+            pid = await client.get(_k("product", "review", "owner", rid))
+            if pid:
+                groups.setdefault(pid, set()).add(rid)
+        result = []
+        for pid, want in groups.items():
+            for r in await self._redis_get_reviews(pid):
+                if r.get("review_id") in want:
+                    r = dict(r)
+                    r.setdefault("product_id", pid)
+                    result.append(r)
         result.sort(key=lambda r: r.get("created_at", ""), reverse=True)
         return result[:limit]
 
@@ -1059,8 +1100,11 @@ class ProductRepository:
         keys = await client.keys(_k("product", "*"))
         result = []
         for key in keys:
-            # 排除 categories / reviews:* 键
-            if key.endswith(":product:categories") or ":reviews:" in key:
+            # 排除 categories / reviews:* / review:*(回复/点赞/举报/索引) 键
+            # (2026-10-12 修复: 原过滤漏 ":review:" 单数键——回复 List/
+            #  点赞 Set/举报 String 会被 hgetall 命中 WRONGTYPE 崩溃)
+            if (key.endswith(":product:categories") or ":reviews:" in key
+                    or ":review:" in key):
                 continue
             data = await client.hgetall(key)
             if data:
@@ -1100,6 +1144,70 @@ class ProductRepository:
         client = await get_redis_client()
         await client.rpush(_k("product", "reviews", product_id),
                            json.dumps(review, ensure_ascii=False))
+        await self._redis_index_review(product_id, review)
+
+    # ---------- 评价索引(P1-14, 写入时维护, 消除读路径全量扫描) ----------
+
+    @staticmethod
+    def _member_index_keys(member_id) -> tuple[str, str]:
+        """会员评价索引键对: (ZSet 时间线, 完成标记)
+        完成标记 = 该会员存量评价已全部回填进索引(含旧数据),
+        读路径仅在标记存在时走索引, 防部分索引态漏旧评价。"""
+        base = _k("product", "reviews", "by", "member", str(member_id))
+        return base, base + ":done"
+
+    async def _redis_index_review(self, product_id: str, review: dict) -> None:
+        """评价写入时维护双索引:
+        owner(review_id→product_id) + by-member(ZSet, score=created_at epoch);
+        会员首次写入触发一次性存量回填(旧数据自愈)
+        """
+        client = await get_redis_client()
+        rid = review.get("review_id")
+        if not rid:
+            return
+        await client.set(_k("product", "review", "owner", rid), product_id)
+        mid = review.get("member_id")
+        if mid not in (None, ""):
+            zkey, done = self._member_index_keys(mid)
+            await client.zadd(
+                zkey, {rid: _iso_epoch(review.get("created_at", ""))})
+            if not await client.exists(done):
+                await self._redis_backfill_member_reviews(mid)
+
+    async def _redis_backfill_member_reviews(self, member_id) -> None:
+        """一次性回填会员全部存量评价进索引并落完成标记
+
+        触发: 该会员升级后首次产生新评价写入。此前读路径走全量
+        遍历回退(与旧行为一致), 回填后永久走索引。
+        """
+        client = await get_redis_client()
+        zkey, done = self._member_index_keys(member_id)
+        for p in await self._redis_list_all():
+            pid = p.get("product_id")
+            if not pid:
+                continue
+            for r in await self._redis_get_reviews(pid):
+                if str(r.get("member_id", "")) != str(member_id):
+                    continue
+                rid = r.get("review_id")
+                if not rid:
+                    continue
+                await client.set(_k("product", "review", "owner", rid), pid)
+                await client.zadd(
+                    zkey, {rid: _iso_epoch(r.get("created_at", ""))})
+        await client.set(done, 1)
+
+    async def _redis_unindex_review(self, review: dict) -> None:
+        """评价删除时清理索引(完成标记保留——删后仍一致)"""
+        client = await get_redis_client()
+        rid = review.get("review_id")
+        if not rid:
+            return
+        await client.delete(_k("product", "review", "owner", rid))
+        mid = review.get("member_id")
+        if mid not in (None, ""):
+            await client.zrem(
+                _k("product", "reviews", "by", "member", str(mid)), rid)
 
     async def _redis_update_rating_fields(self, product_id: str,
                                           avg: float, count: int) -> None:
@@ -1145,6 +1253,8 @@ class ProductRepository:
                 # 用占位值替换后删除(redis lrem 按值删除)
                 await client.lset(key, i, "__DELETED__")
                 await client.lrem(key, 1, "__DELETED__")
+                # 同步清理评价索引(P1-14)
+                await self._redis_unindex_review(review)
                 return True
         return False
 
@@ -1191,13 +1301,14 @@ class ProductRepository:
         return await client.scard(_k("product", "review", "likes", review_id))
 
     async def _redis_increment_like_count(self, review_id: str, delta: int):
-        """更新评价 like_count 字段(Redis 模式, 遍历产品 List 修改)"""
+        """更新评价 like_count 字段(P1-14: owner 索引直定位, 免全量扫描;
+        旧数据无索引时回退 KEYS 扫描, 兼容平滑迁移)"""
         client = await get_redis_client()
-        # 遍历所有产品评价列表, 找到对应 review_id 并更新 like_count
-        keys = await client.keys(_k("product", "reviews", "*"))
-        for key in keys:
-            if key.endswith(":product:reviews") or ":review:" in key:
-                continue
+        product_id = await client.get(
+            _k("product", "review", "owner", review_id))
+        if product_id:
+            # 定位成功: 单产品列表内更新 like_count
+            key = _k("product", "reviews", product_id)
             items = await client.lrange(key, 0, -1)
             for i, raw in enumerate(items):
                 try:
@@ -1210,14 +1321,69 @@ class ProductRepository:
                     await client.lset(
                         key, i, json.dumps(review, ensure_ascii=False))
                     return
+            return
+        # 回退: 旧数据无 owner 索引, KEYS 扫描定位
+        keys = await client.keys(_k("product", "reviews", "*"))
+        for key in keys:
+            if (key.endswith(":product:reviews") or ":review:" in key
+                    or ":by:member:" in key):
+                continue
+            items = await client.lrange(key, 0, -1)
+            for i, raw in enumerate(items):
+                try:
+                    review = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                if review.get("review_id") == review_id:
+                    current = review.get("like_count", 0)
+                    review["like_count"] = max(0, current + delta)
+                    await client.lset(
+                        key, i, json.dumps(review, ensure_ascii=False))
+                    # 补建索引(自愈: 扫到即写, 后续免扫)
+                    await client.set(
+                        _k("product", "review", "owner", review_id),
+                        key.rsplit(":", 1)[-1])
+                    return
 
     # ---------- 评价举报(Redis) ----------
 
     async def _redis_create_report(self, report_id: str, report: dict) -> None:
-        """创建举报(Redis 模式, String(JSON))"""
+        """创建举报(Redis 模式, String(JSON)); P1-14 同步维护
+        时间线索引(ZSet) + 重复举报判定索引(flag); 首次创建触发
+        存量举报一次性回填进时间线索引(旧数据自愈)"""
         client = await get_redis_client()
         await client.set(_k("product", "review", "report", report_id),
-                        json.dumps(report, ensure_ascii=False))
+                         json.dumps(report, ensure_ascii=False))
+        index_key = _k("product", "review", "report", "index")
+        done_key = index_key + ":done"
+        await client.zadd(
+            index_key, {report_id: _iso_epoch(report.get("created_at", ""))})
+        review_id = report.get("review_id")
+        reporter_id = report.get("reporter_id")
+        if review_id and reporter_id:
+            await client.set(
+                _k("product", "review", "report", "flag",
+                   str(review_id), str(reporter_id)),
+                report_id)
+        if not await client.exists(done_key):
+            # 一次性回填存量举报(升级前数据无索引)
+            keys = await client.keys(_k("product", "review", "report", "*"))
+            for key in keys:
+                if ":index" in key or ":flag:" in key:
+                    continue
+                raw = await client.get(key)
+                if not raw:
+                    continue
+                try:
+                    old = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                old_id = old.get("report_id")
+                if old_id:
+                    await client.zadd(
+                        index_key,
+                        {old_id: _iso_epoch(old.get("created_at", ""))})
+            await client.set(done_key, 1)
 
     async def _redis_get_report(self, report_id: str) -> dict | None:
         """查询举报(Redis 模式)"""
@@ -1232,11 +1398,32 @@ class ProductRepository:
 
     async def _redis_list_reports(self, status: str = None,
                                  limit: int = 50) -> list:
-        """举报列表(Redis 模式, 遍历 report:* 键)"""
+        """举报列表(P1-14: 完成标记存在(存量已回填)走时间线 ZSet 索引;
+        否则回退 KEYS 扫描——防部分索引态漏旧举报)"""
         client = await get_redis_client()
+        index_key = _k("product", "review", "report", "index")
+        if await client.exists(index_key + ":done"):
+            ids = await client.zrevrange(index_key, 0, -1)
+            reports = []
+            for rid in ids:
+                raw = await client.get(
+                    _k("product", "review", "report", rid))
+                if not raw:
+                    continue
+                try:
+                    report = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                if status and report.get("status") != status:
+                    continue
+                reports.append(report)
+            return reports[:limit]
+        # 回退: 旧数据无索引, KEYS 扫描(排除 index/flag 索引键)
         keys = await client.keys(_k("product", "review", "report", "*"))
         reports = []
         for key in keys:
+            if ":index" in key or ":flag:" in key:
+                continue
             raw = await client.get(key)
             if not raw:
                 continue
@@ -1268,10 +1455,19 @@ class ProductRepository:
 
     async def _redis_get_report_by_review_reporter(self, review_id: str,
                                                    reporter_id: str) -> dict | None:
-        """查询用户是否已举报某评价(Redis 模式, 遍历 report:* 键)"""
+        """查询用户是否已举报某评价(P1-14: flag 索引直达;
+        旧数据无索引时回退 KEYS 扫描)"""
         client = await get_redis_client()
+        flag_key = _k("product", "review", "report", "flag",
+                      str(review_id), str(reporter_id))
+        report_id = await client.get(flag_key)
+        if report_id:
+            return await self._redis_get_report(report_id)
+        # 回退: 旧数据无 flag 索引, KEYS 扫描(排除 index/flag 索引键)
         keys = await client.keys(_k("product", "review", "report", "*"))
         for key in keys:
+            if ":index" in key or ":flag:" in key:
+                continue
             raw = await client.get(key)
             if not raw:
                 continue
@@ -1346,3 +1542,12 @@ def _now_iso() -> str:
     """ISO8601 UTC 时间戳"""
     from datetime import datetime
     return datetime.now(UTC).isoformat()
+
+
+def _iso_epoch(iso: str) -> float:
+    """ISO8601 → epoch 秒(评价/举报索引 ZSET score 用; 解析失败回退当前时间)"""
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(iso).timestamp()
+    except (TypeError, ValueError):
+        return datetime.now(UTC).timestamp()

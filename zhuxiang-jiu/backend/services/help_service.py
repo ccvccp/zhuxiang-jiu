@@ -1595,7 +1595,7 @@ class HelpService:
         idx = await self.trust_index()
         return {
             "module": "AI智能叫帮(67号)",
-            "platform": "竹香酒 zxjiu.com",
+            "platform": "竹香酒 zyjiu.com",
             "metrics": {
                 "totalOrders": len(orders),
                 "completedOrders": len(completed),

@@ -10,3 +10,7 @@ lameenc>=1.7.0
 Pillow>=10.0.0
 
 fido2>=2.2  # 39号 WebAuthn 真实轨(2026-09-30): Fido2Server 注册/断言验签
+
+sqlalchemy>=2.0  # 85号 持久化层(2026-10-15 Day1): drama85 库 ORM
+pymysql>=1.1     # MySQL 驱动(cryptography 已随 python-jose 依赖引入)
+winsdk>=1.0b10; sys_platform == "win32"  # 85号 Day3: 新榜榜单图 OCR(Windows.Media.Ocr zh-CN)

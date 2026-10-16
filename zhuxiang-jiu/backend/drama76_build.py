@@ -108,7 +108,7 @@ def main() -> int:
     d = b.get("data") or {}
     print(f"[ok] 剧集上线: {d.get('drama_id')} 共{len(eps)}集 "
           f"免费{args.free}集")
-    print(f"[play] https://zxjiu.com/drama.html?d={args.drama_id}")
+    print(f"[play] https://zyjiu.com/drama.html?d={args.drama_id}")
     return 0
 
 

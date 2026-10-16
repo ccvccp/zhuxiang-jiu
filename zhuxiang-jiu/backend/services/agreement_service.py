@@ -38,6 +38,25 @@ logger = logging.getLogger(__name__)
 # 初始版本号
 INITIAL_VERSION = "v1.0"
 
+# ============================================================
+# 变更通知规则(P2: 7/30/14 天提前告知机制)
+# ============================================================
+
+# 变更分级: 重大(免责/违约金/价格/隐私等核心权利义务)/重要(一般
+# 权利义务调整)/一般(文字性表述优化)——提前通知期对应 30/14/7 天
+CHANGE_LEVEL_MAJOR = "major"
+CHANGE_LEVEL_IMPORTANT = "important"
+CHANGE_LEVEL_MINOR = "minor"
+CHANGE_NOTICE_DAYS = {
+    CHANGE_LEVEL_MAJOR: 30,
+    CHANGE_LEVEL_IMPORTANT: 14,
+    CHANGE_LEVEL_MINOR: 7,
+}
+# 通知状态: pending(通知期中) → effective(已生效) / cancelled(已撤回)
+NOTICE_STATUS_PENDING = "pending"
+NOTICE_STATUS_EFFECTIVE = "effective"
+NOTICE_STATUS_CANCELLED = "cancelled"
+
 
 class AgreementService:
     """网站条款及角色协议管理业务逻辑(双模式存储, 锁保护 RMW)"""
@@ -486,3 +505,200 @@ class AgreementService:
             "activeProtocols": active_protocols,
             "roleDistribution": role_dist,
         }
+
+    # ============================================================
+    # 7. 变更通知(P2: 7/30/14 天提前告知机制)
+    # ============================================================
+
+    async def create_change_notice(self, agreement_id: int,
+                                     change_level: str,
+                                     change_log: str = "",
+                                     effective_date: str = None) -> dict:
+        """登记条款变更通知(新版发布后)
+
+        规则:
+            - 变更分级合法(major/important/minor)
+            - 条款必须为 published(先完成 new_version+publish 再登记)
+            - 提前通知期: major=30 天 / important=14 天 / minor=7 天
+            - effectiveDate 缺省 = 登记时刻 + 通知期; 显式指定时
+              不得早于该下限(合规红线, 拒绝而非截断)
+            - 站内信触达已同意旧版会员(best-effort, system 必需类
+              不受静默时段/频率限制)
+
+        Raises:
+            KeyError: 条款不存在
+            ValueError: 分级非法/条款未发布/提前期不足
+        """
+        from datetime import datetime, timedelta
+
+        if change_level not in CHANGE_NOTICE_DAYS:
+            raise ValueError(
+                f"变更分级非法({change_level}), 应为 "
+                f"{'/'.join(CHANGE_NOTICE_DAYS)}")
+        notice_days = CHANGE_NOTICE_DAYS[change_level]
+
+        lock_key = f"agreement:notice:{agreement_id}"
+        async with get_lock(lock_key):
+            agreement = await self.repo.get_agreement(agreement_id)
+            if agreement is None:
+                raise KeyError(f"条款不存在(id={agreement_id})")
+            if agreement["status"] != AGREEMENT_STATUS_PUBLISHED:
+                raise ValueError(
+                    f"条款未发布(状态={agreement['status']}), "
+                    f"请先完成新版本发布再登记变更通知")
+
+            created_at = ts()
+            earliest = (datetime.fromisoformat(created_at)
+                        + timedelta(days=notice_days))
+            if effective_date:
+                try:
+                    eff = datetime.fromisoformat(effective_date)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        f"生效日期格式非法({effective_date}), 应为 ISO8601")
+                if eff < earliest:
+                    raise ValueError(
+                        f"{change_level} 级变更须提前至少 {notice_days} 天"
+                        f"通知(最早 {earliest.isoformat()})")
+            else:
+                effective_date = earliest.isoformat()
+
+            history = agreement.get("versionHistory") or []
+            # fromVersion = 最近一个不同于现行版本的归档版本
+            # (publish 也会归档当前版本, 直接取 history[-1] 可能与
+            #  toVersion 相同而失去"从哪版变更而来"的信息量)
+            from_version = INITIAL_VERSION
+            for h in reversed(history):
+                if h.get("version") != agreement["currentVersion"]:
+                    from_version = h["version"]
+                    break
+            notice = {
+                "agreementId": agreement_id,
+                "agreementNo": agreement.get("agreementNo"),
+                "name": agreement.get("name"),
+                "fromVersion": from_version,
+                "toVersion": agreement["currentVersion"],
+                "changeLevel": change_level,
+                "changeLog": change_log or agreement.get("changeLog", ""),
+                "noticeDays": notice_days,
+                "createdAt": created_at,
+                "effectiveDate": effective_date,
+                "status": NOTICE_STATUS_PENDING,
+                "notifiedCount": 0,
+            }
+            notice_id = await self.repo.next_change_notice_id()
+            notice["id"] = notice_id
+            await self.repo.save_change_notice(notice)
+
+        # 站内信触达已同意旧版会员(best-effort 不阻断)
+        notice["notifiedCount"] = await self._notify_consented_members(
+            notice)
+        await self.repo.save_change_notice(notice)
+        return notice
+
+    async def _notify_consented_members(self, notice: dict) -> int:
+        """给已同意该条款的会员发站内信(system 必需类, best-effort)
+
+        Returns:
+            触达人数(发送失败不影响主流程, 计数为成功数)
+        """
+        try:
+            from services.message_service import MessageService
+            from repositories.message_repository import (
+                CHANNEL_INMAIL, CATEGORY_SYSTEM,
+            )
+            consents = await self.repo.list_consents(
+                agreement_id=notice["agreementId"], limit=10000)
+            member_ids = list({c.get("userId") for c in consents
+                               if c.get("userId") is not None})
+            msg = MessageService()
+            title = (f"《{notice.get('name') or notice.get('agreementNo')}"
+                     f"》条款变更通知")
+            content = (f"条款 {notice.get('name')} 将由 "
+                       f"{notice['fromVersion']} 更新至 "
+                       f"{notice['toVersion']}(自 "
+                       f"{notice['effectiveDate'][:10]} 起生效), "
+                       f"变更说明: {notice.get('changeLog') or '见条款正文'}")
+            sent = 0
+            for mid in member_ids:
+                try:
+                    await msg.send_message(
+                        mid, CHANNEL_INMAIL, title, content, CATEGORY_SYSTEM)
+                    sent += 1
+                except Exception:
+                    continue
+            return sent
+        except Exception:
+            return 0
+
+    async def list_change_notices(self, status: str = None,
+                                    change_level: str = None,
+                                    agreement_id: int = None,
+                                    limit: int = 100) -> list[dict]:
+        """变更通知列表(查询时惰性推进到期状态)"""
+        notices = await self.repo.list_change_notices(
+            status, change_level, agreement_id, limit)
+        now = ts()
+        for n in notices:
+            if (n.get("status") == NOTICE_STATUS_PENDING
+                    and n.get("effectiveDate", "") <= now):
+                n["status"] = NOTICE_STATUS_EFFECTIVE
+                await self.repo.save_change_notice(n)
+        return notices
+
+    async def get_change_notice(self, notice_id: int) -> dict:
+        """变更通知详情(到期惰性推进)
+
+        Raises:
+            KeyError: 通知不存在
+        """
+        notice = await self.repo.get_change_notice(notice_id)
+        if notice is None:
+            raise KeyError(f"变更通知不存在(id={notice_id})")
+        if (notice.get("status") == NOTICE_STATUS_PENDING
+                and notice.get("effectiveDate", "") <= ts()):
+            notice["status"] = NOTICE_STATUS_EFFECTIVE
+            await self.repo.save_change_notice(notice)
+        return notice
+
+    async def cancel_change_notice(self, notice_id: int) -> dict:
+        """撤回变更通知(仅通知期中可撤回)
+
+        Raises:
+            KeyError: 通知不存在
+            ValueError: 已生效/已撤回
+        """
+        lock_key = f"agreement:notice-cancel:{notice_id}"
+        async with get_lock(lock_key):
+            notice = await self.repo.get_change_notice(notice_id)
+            if notice is None:
+                raise KeyError(f"变更通知不存在(id={notice_id})")
+            if notice.get("status") != NOTICE_STATUS_PENDING:
+                raise ValueError(
+                    f"当前状态({notice.get('status')})不可撤回, "
+                    f"仅通知期中(pending)可撤回")
+            # 已过生效时刻的不可撤回(合规: 已生效变更须走新变更流程)
+            if notice.get("effectiveDate", "") <= ts():
+                raise ValueError("变更已过生效时刻, 不可撤回")
+            notice["status"] = NOTICE_STATUS_CANCELLED
+            notice["updatedAt"] = ts()
+            await self.repo.save_change_notice(notice)
+            return notice
+
+    async def run_change_notice_scan(self) -> dict:
+        """变更通知到期扫描(批量 pending→effective, 可独立调用)
+
+        Returns:
+            {"scanned": 扫描数, "effective": 本次生效数}
+        """
+        notices = await self.repo.list_change_notices(
+            status=NOTICE_STATUS_PENDING, limit=10000)
+        now = ts()
+        effective = 0
+        for n in notices:
+            if n.get("effectiveDate", "") <= now:
+                n["status"] = NOTICE_STATUS_EFFECTIVE
+                n["updatedAt"] = now
+                await self.repo.save_change_notice(n)
+                effective += 1
+        return {"scanned": len(notices), "effective": effective}

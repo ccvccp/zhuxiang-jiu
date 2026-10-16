@@ -12,7 +12,7 @@
      档; 同热点撞幂等(scriptId 同)→ 标题加平台变体重试一次)
   4. 打印三审/GPU 跑批/发布 下一步清单
 
-配置: SV73_API(默认 https://zxjiu.com); 生产 token 经 SSH 容器
+配置: SV73_API(默认 https://zyjiu.com); 生产 token 经 SSH 容器
 管道自动获取(dh_batch.prod_token 同款)。
 """
 

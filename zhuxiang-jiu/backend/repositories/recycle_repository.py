@@ -797,3 +797,276 @@ class RecycleRepository:
             negs = [n for n in negs if n.get("status") == status]
         negs.sort(key=lambda n: n.get("createdAt", ""), reverse=True)
         return negs[:limit]
+
+
+# ============================================================
+# C2C 老酒交易市场(P2 Phase1: 会员↔会员挂单交易)
+# ============================================================
+
+# 挂单状态机: draft→on_sale→(买家锁定)locked→(卖家确认)sold(终态, Phase1 线下收款)
+#             on_sale→cancelled/expired(挂单TTL 30天)
+#             locked→(15分钟未确认)on_sale(自动回架, 惰性推进)
+# Phase2 托管(escrow): locked→(卖家确认过户)delivered→(买家确认收货/7天超时)settled(终态)
+C2C_STATUS_DRAFT = "draft"          # 草稿
+C2C_STATUS_ON_SALE = "on_sale"      # 在售
+C2C_STATUS_LOCKED = "locked"        # 已被买家锁定(待确认收款/托管冻结中)
+C2C_STATUS_SOLD = "sold"            # 已成交(线下收款过户完成, Phase1 终态)
+C2C_STATUS_CANCELLED = "cancelled"  # 已撤单
+C2C_STATUS_EXPIRED = "expired"      # 已过期(TTL)
+C2C_STATUS_DELIVERED = "delivered"  # 已过户待收货(Phase2 托管: 卖家已确认, 资金托管中)
+C2C_STATUS_SETTLED = "settled"      # 已结算(Phase2 托管终态: 收货确认, 货款划转卖家+平台抽佣)
+
+# 结算通道(挂单字段 payChannel)
+C2C_PAY_OFFLINE = "offline"         # 线下收款(Phase1 默认: 买卖双方线下交易)
+C2C_PAY_ESCROW = "escrow"           # 平台托管(Phase2: 买家付款冻结→过户→收货结算)
+
+# 托管单状态机: holding→settled(收货结算)/refunded(回架/撤锁退款)
+C2C_ESCROW_HOLDING = "holding"
+C2C_ESCROW_SETTLED = "settled"
+C2C_ESCROW_REFUNDED = "refunded"
+
+
+class RecycleC2CRepository(RecycleRepository):
+    """C2C 挂单数据访问(继承主仓库序列/存储底座, Phase1)"""
+
+    def _ensure_store(self) -> None:
+        super()._ensure_store()
+        if "recycle_c2c_listings" not in self.store:
+            self.store["recycle_c2c_listings"] = {}            # id → listing
+            self.store["recycle_c2c_listings_by_no"] = {}       # listingNo → id
+            self.store["recycle_c2c_listings_by_seller"] = {}   # sellerId → [id]
+            self.store["recycle_c2c_active_lifes"] = {}         # lifeCode → 1(在售位)
+            self.store["_recycle_c2c_listing_seq"] = 0
+        if "recycle_c2c_escrows" not in self.store:
+            self.store["recycle_c2c_escrows"] = {}              # escrowNo → escrow
+            self.store["recycle_c2c_escrows_by_listing"] = {}   # listingNo → escrowNo
+            self.store["_recycle_c2c_escrow_seq"] = 0
+
+    async def next_c2c_listing_id(self) -> int:
+        if is_redis_mode():
+            return await self._redis_next_id("recycle_c2c_listing")
+        return await self._mem_next_id("_recycle_c2c_listing_seq")
+
+    async def create_c2c_listing(self, listing: dict) -> int:
+        """新增挂单(返回挂单ID; listingNo=C2C+日期+3位)"""
+        listing_id = await self.next_c2c_listing_id()
+        listing["id"] = listing_id
+        now = datetime.utcnow().isoformat()
+        listing.setdefault("createdAt", now)
+        listing.setdefault("updatedAt", now)
+        listing.setdefault("listingNo",
+                           f"C2C{now.replace('-', '').replace('T', '')[:8]}"
+                           f"{listing_id:03d}")
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("recycle", "c2c_listing", listing_id),
+                             json.dumps(listing, ensure_ascii=False))
+            await client.set(_k("recycle", "c2c_listing_no",
+                                listing["listingNo"]), listing_id)
+            await client.lpush(_k("recycle", "c2c_listings_by_seller",
+                                  listing.get("sellerId")), listing_id)
+        else:
+            self._ensure_store()
+            self.store["recycle_c2c_listings"][listing_id] = listing
+            self.store["recycle_c2c_listings_by_no"][
+                listing["listingNo"]] = listing_id
+            self.store["recycle_c2c_listings_by_seller"].setdefault(
+                listing.get("sellerId"), []).insert(0, listing_id)
+        return listing_id
+
+    async def get_c2c_listing(self, listing_id: int) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(_k("recycle", "c2c_listing", listing_id))
+            return json.loads(data) if data else None
+        self._ensure_store()
+        return self.store["recycle_c2c_listings"].get(listing_id)
+
+    async def get_c2c_by_no(self, listing_no: str) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            lid = await client.get(_k("recycle", "c2c_listing_no", listing_no))
+            if not lid:
+                return None
+            return await self.get_c2c_listing(int(lid))
+        self._ensure_store()
+        lid = self.store["recycle_c2c_listings_by_no"].get(listing_no)
+        return self.store["recycle_c2c_listings"].get(lid) if lid else None
+
+    async def update_c2c_listing(self, listing_id: int, updates: dict) -> None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(_k("recycle", "c2c_listing", listing_id))
+            if not data:
+                return
+            listing = json.loads(data)
+            listing.update(updates)
+            listing["updatedAt"] = datetime.utcnow().isoformat()
+            await client.set(_k("recycle", "c2c_listing", listing_id),
+                             json.dumps(listing, ensure_ascii=False))
+            return
+        self._ensure_store()
+        listing = self.store["recycle_c2c_listings"].get(listing_id)
+        if listing:
+            listing.update(updates)
+            listing["updatedAt"] = datetime.utcnow().isoformat()
+
+    async def list_c2c_listings(self, seller_id: int = None, buyer_id: int = None,
+                                status: str = None, limit: int = 50) -> list[dict]:
+        """挂单列表(卖家视角 seller_id / 买家视角 buyer_id / 市场全量)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            if seller_id is not None:
+                ids = await client.lrange(
+                    _k("recycle", "c2c_listings_by_seller", seller_id), 0, -1)
+                items = []
+                for lid in ids:
+                    data = await client.get(_k("recycle", "c2c_listing", lid))
+                    if data:
+                        items.append(json.loads(data))
+            elif buyer_id is not None:
+                items = []
+                keys = await client.keys(_k("recycle", "c2c_listing", "*"))
+                for key in keys:
+                    data = await client.get(key)
+                    if data:
+                        obj = json.loads(data)
+                        if obj.get("buyerId") == buyer_id:
+                            items.append(obj)
+            else:
+                items = []
+                keys = await client.keys(_k("recycle", "c2c_listing", "*"))
+                for key in keys:
+                    data = await client.get(key)
+                    if data:
+                        items.append(json.loads(data))
+        else:
+            self._ensure_store()
+            if seller_id is not None:
+                ids = self.store["recycle_c2c_listings_by_seller"].get(
+                    seller_id, [])
+                items = [self.store["recycle_c2c_listings"][lid] for lid in ids
+                         if lid in self.store["recycle_c2c_listings"]]
+            elif buyer_id is not None:
+                items = [l for l in self.store["recycle_c2c_listings"].values()
+                         if l.get("buyerId") == buyer_id]
+            else:
+                items = list(self.store["recycle_c2c_listings"].values())
+        if status:
+            items = [l for l in items if l.get("status") == status]
+        items.sort(key=lambda l: l.get("createdAt", ""), reverse=True)
+        return items[:limit]
+
+    # ---- 一瓶一挂单(在售唯一索引) ----
+
+    async def try_set_c2c_active_life(self, life_code: str) -> bool:
+        """占用生命码在售位(SETNX 语义: 已占用返回 False)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return bool(await client.set(
+                _k("recycle", "c2c_active_life", life_code), 1, nx=True))
+        self._ensure_store()
+        if life_code in self.store["recycle_c2c_active_lifes"]:
+            return False
+        self.store["recycle_c2c_active_lifes"][life_code] = 1
+        return True
+
+    async def clear_c2c_active_life(self, life_code: str) -> None:
+        """释放生命码在售位(撤单/成交/过期)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.delete(_k("recycle", "c2c_active_life", life_code))
+            return
+        self._ensure_store()
+        self.store["recycle_c2c_active_lifes"].pop(life_code, None)
+
+    # ---- Phase2 托管单(escrow) ----
+
+    async def _next_c2c_escrow_seq(self) -> int:
+        if is_redis_mode():
+            return await self._redis_next_id("recycle_c2c_escrow")
+        return await self._mem_next_id("_recycle_c2c_escrow_seq")
+
+    async def create_c2c_escrow(self, escrow: dict) -> str:
+        """新增托管单(escrowNo=ESC+日期+3位; 每挂单同时至多一张 holding)"""
+        seq = await self._next_c2c_escrow_seq()
+        now = datetime.utcnow().isoformat()
+        if not escrow.get("escrowNo"):
+            escrow["escrowNo"] = (
+                f"ESC{now.replace('-', '').replace('T', '')[:8]}{seq:03d}")
+        escrow.setdefault("createdAt", now)
+        escrow.setdefault("updatedAt", now)
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("recycle", "c2c_escrow", escrow["escrowNo"]),
+                             json.dumps(escrow, ensure_ascii=False))
+            await client.set(
+                _k("recycle", "c2c_escrow_listing",
+                   escrow.get("listingNo", "")), escrow["escrowNo"])
+        else:
+            self._ensure_store()
+            self.store["recycle_c2c_escrows"][escrow["escrowNo"]] = escrow
+            self.store["recycle_c2c_escrows_by_listing"][
+                escrow.get("listingNo", "")] = escrow["escrowNo"]
+        return escrow["escrowNo"]
+
+    async def get_c2c_escrow(self, escrow_no: str) -> dict | None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            data = await client.get(
+                _k("recycle", "c2c_escrow", escrow_no))
+            return json.loads(data) if data else None
+        self._ensure_store()
+        return self.store["recycle_c2c_escrows"].get(escrow_no)
+
+    async def get_c2c_escrow_by_listing(self, listing_no: str) -> dict | None:
+        """挂单关联的最新托管单(回架重锁后取当前一张)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            no = await client.get(
+                _k("recycle", "c2c_escrow_listing", listing_no))
+            return await self.get_c2c_escrow(no) if no else None
+        self._ensure_store()
+        no = self.store["recycle_c2c_escrows_by_listing"].get(listing_no)
+        return self.store["recycle_c2c_escrows"].get(no) if no else None
+
+    async def update_c2c_escrow(self, escrow_no: str, updates: dict) -> None:
+        if is_redis_mode():
+            client = await get_redis_client()
+            key = _k("recycle", "c2c_escrow", escrow_no)
+            data = await client.get(key)
+            if not data:
+                return
+            escrow = json.loads(data)
+            escrow.update(updates)
+            escrow["updatedAt"] = datetime.utcnow().isoformat()
+            await client.set(key, json.dumps(escrow, ensure_ascii=False))
+            return
+        self._ensure_store()
+        escrow = self.store["recycle_c2c_escrows"].get(escrow_no)
+        if escrow:
+            escrow.update(updates)
+            escrow["updatedAt"] = datetime.utcnow().isoformat()
+
+    async def list_c2c_escrows(self, user_id: int = None,
+                               status: str = None,
+                               limit: int = 50) -> list[dict]:
+        """托管单列表(买家/卖家视角: 买卖任一方匹配)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            items = []
+            keys = await client.keys(_k("recycle", "c2c_escrow", "*"))
+            for key in keys:
+                data = await client.get(key)
+                if data:
+                    items.append(json.loads(data))
+        else:
+            self._ensure_store()
+            items = list(self.store["recycle_c2c_escrows"].values())
+        if user_id is not None:
+            items = [e for e in items
+                     if user_id in (e.get("buyerId"), e.get("sellerId"))]
+        if status:
+            items = [e for e in items if e.get("status") == status]
+        items.sort(key=lambda e: e.get("createdAt", ""), reverse=True)
+        return items[:limit]

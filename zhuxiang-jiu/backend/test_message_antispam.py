@@ -19,6 +19,10 @@ from datetime import datetime
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ["AUTH_MODE"] = "compat"
+# standalone 裸头自举(对齐 test_support/flashsale_http 惯例):
+# 46+1 安全修复后 compat 默认剥离 X-Member-Id, 本文件 HTTP 段
+# 依赖裸头访问受保护路径, 须显式信任(仅本测试进程内生效)
+os.environ.setdefault("AUTH_COMPAT_TRUST_HEADERS", "1")
 
 from services.message_service import MessageService, MANDATORY_CATEGORIES
 from repositories.message_repository import MessageRepository

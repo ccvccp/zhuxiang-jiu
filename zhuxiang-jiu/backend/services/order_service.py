@@ -770,6 +770,26 @@ class OrderService:
                 logs.append({"step": "评价同步", "level": "WARN",
                              "msg": f"商品评价同步失败: {sync_err}"})
 
+            # 竹信分 C 端因子(best-effort, 竹信分决策会材料 §四)
+            # C1 订单完成 +2(评价后 COMPLETED, 每单一次)
+            # C5 优质评价 +1(≥4星且≥50字, 日限1次)
+            credit_logged = ""
+            try:
+                from services.role_service import (
+                    RoleService,
+                    BEHAVIOR_ORDER_COMPLETED, BEHAVIOR_REVIEW_QUALITY,
+                )
+                await RoleService().publish_member_credit_event(
+                    int(order["memberId"]), BEHAVIOR_ORDER_COMPLETED,
+                    "order", ref_id=order_id)
+                if rating >= 4 and len((content or "").strip()) >= 50:
+                    await RoleService().publish_member_credit_event(
+                        int(order["memberId"]), BEHAVIOR_REVIEW_QUALITY,
+                        "order", ref_id=f"{order_id}:quality")
+                credit_logged = "bamboo_score_linked"
+            except Exception as exc:
+                logger.warning("order_review_bamboo_failed: %s", exc)
+
             return {
                 "success": True,
                 "orderId": order_id,
@@ -777,6 +797,7 @@ class OrderService:
                 "statusName": STATUS_CN[COMPLETED],
                 "rewardPoints": reward_points,
                 "reviewSynced": synced,
+                "creditLogged": credit_logged,
                 "logs": logs,
             }
 

@@ -1,8 +1,9 @@
-"""老酒兑换及回收模块路由(21 端点)
+"""老酒兑换及回收模块路由(36 端点)
 
 鉴权:
-    - 用户端: X-Member-Id 头标识当前会员(估价/申请/查询)
+    - 用户端: X-Member-Id 头标识当前会员(估价/申请/查询/C2C 交易)
     - 管理端: X-Role: admin 头(审核/状态流转/完成/库存/统计)
+    - 公开: C2C 市场列表/详情、部分查询
 
 端点分布:
     - 老酒估价(3):     submit-valuation / get-valuation / my-valuations
@@ -16,6 +17,12 @@
     - 议价(5):          get-negotiation / list-negotiations / user-propose / ai-counter / accept
     - 议价拒绝(1):      reject-negotiation
     - 新酒回收(1):      complete-new-wine-recycle
+    - C2C 市场(15):     listings(挂单/市场列表) / my-listings / my-buys /
+                        listings/{no} 详情 / buy / confirm / cancel / relist /
+                        release(买家撤锁) / receipt(确认收货) / my-escrows(托管单) /
+                        market-stats(行情看板) / price-suggestion(定价建议) /
+                        recommendations(撮合推荐)
+                        (Phase1 挂单 9 + Phase2 托管 3 + Phase3 行情 3)
 """
 
 
@@ -23,6 +30,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel as PydBaseModel, Field
 
 from services.recycle_service import RecycleService
+from services.recycle_c2c_service import RecycleC2CService
 from repositories.recycle_repository import (
     GRADE_A,
 )
@@ -30,6 +38,7 @@ from repositories.recycle_repository import (
 
 router = APIRouter()
 _service = RecycleService()
+_c2c_service = RecycleC2CService()
 
 
 # ============================================================
@@ -525,6 +534,247 @@ async def complete_new_wine_recycle(
             payout_account=data.payoutAccount,
         )
         return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# C2C 老酒交易市场(P2 Phase1: 9 端点, 21→30)
+# ============================================================
+
+class C2CCreateListingRequest(PydBaseModel):
+    lifeCode: str = Field(..., min_length=8, description="生命码(须本人持有且已激活满3年)")
+    askPrice: float = Field(..., gt=0, le=1000000, description="挂单价(须在自动估值0.5~1.5倍区间)")
+    conditionGrade: str = Field(GRADE_A, description="品质分级(A/B/C/D)")
+    payChannel: str = Field("offline", description="结算通道: offline=线下收款 / escrow=平台托管(须卖家已开通钱包)")
+
+
+class C2CBuyRequest(PydBaseModel):
+    buyerName: str = Field("", max_length=50, description="买家称呼(可选)")
+
+
+class C2CRelistRequest(PydBaseModel):
+    askPrice: float | None = Field(None, gt=0, le=1000000,
+                                   description="新挂单价(可选, 仍受锚定区间约束)")
+
+
+@router.post("/api/recycle/c2c/listings", tags=["老酒兑换及回收模块"])
+async def c2c_create_listing(
+    data: C2CCreateListingRequest,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """卖家挂单(老酒资格+估值锚定+一瓶一挂单; escrow 通道须卖家开通钱包)"""
+    user_id = _require_member_id(x_member_id)
+    try:
+        result = await _c2c_service.create_listing(
+            int(user_id), data.lifeCode, data.askPrice,
+            condition_grade=data.conditionGrade,
+            pay_channel=data.payChannel)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/recycle/c2c/listings", tags=["老酒兑换及回收模块"])
+async def c2c_market_list(
+    status: str = Query(None, description="状态筛选: on_sale/locked/sold/cancelled/expired"),
+    limit: int = Query(50, ge=1, le=200, description="查询条数"),
+):
+    """C2C 市场挂单列表(公开, 含惰性超时回架/过期推进)"""
+    try:
+        result = await _c2c_service.market_list(status=status, limit=limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/recycle/c2c/my-listings", tags=["老酒兑换及回收模块"])
+async def c2c_my_listings(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    status: str = Query(None, description="状态筛选"),
+    limit: int = Query(50, ge=1, le=200, description="查询条数"),
+):
+    """我的挂单(卖家视角)"""
+    user_id = _require_member_id(x_member_id)
+    try:
+        result = await _c2c_service.market_list(
+            status=status, limit=limit, seller_id=int(user_id))
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/recycle/c2c/my-buys", tags=["老酒兑换及回收模块"])
+async def c2c_my_buys(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    limit: int = Query(50, ge=1, le=200, description="查询条数"),
+):
+    """我的购买(买家视角)"""
+    user_id = _require_member_id(x_member_id)
+    try:
+        result = await _c2c_service.my_buys(int(user_id), limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/recycle/c2c/listings/{listing_no}", tags=["老酒兑换及回收模块"])
+async def c2c_get_listing(listing_no: str):
+    """挂单详情(公开)"""
+    try:
+        result = await _c2c_service.get_listing(listing_no)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/recycle/c2c/listings/{listing_no}/buy", tags=["老酒兑换及回收模块"])
+async def c2c_buy_listing(
+    listing_no: str,
+    data: C2CBuyRequest = None,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """买家锁定挂单(15 分钟内卖家确认收款, 超时自动回架)"""
+    user_id = _require_member_id(x_member_id)
+    try:
+        result = await _c2c_service.buy_listing(
+            listing_no, int(user_id),
+            buyer_name=(data.buyerName if data else ""))
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/recycle/c2c/listings/{listing_no}/confirm", tags=["老酒兑换及回收模块"])
+async def c2c_confirm_sale(
+    listing_no: str,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """卖家确认线下收款成交(生命码过户+平台佣金5%, Phase1 线下收款)"""
+    user_id = _require_member_id(x_member_id)
+    try:
+        result = await _c2c_service.confirm_sale(listing_no, int(user_id))
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/recycle/c2c/listings/{listing_no}/cancel", tags=["老酒兑换及回收模块"])
+async def c2c_cancel_listing(
+    listing_no: str,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """卖家撤单(仅在售中可撤; 锁定中须等超时回架或确认成交)"""
+    user_id = _require_member_id(x_member_id)
+    try:
+        result = await _c2c_service.cancel_listing(listing_no, int(user_id))
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/recycle/c2c/listings/{listing_no}/relist", tags=["老酒兑换及回收模块"])
+async def c2c_relist_listing(
+    listing_no: str,
+    data: C2CRelistRequest = None,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """重新上架(仅已撤单/已过期; 价格可选更新仍受锚定区间)"""
+    user_id = _require_member_id(x_member_id)
+    try:
+        result = await _c2c_service.relist_listing(
+            listing_no, int(user_id),
+            ask_price=(data.askPrice if data else None))
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/recycle/c2c/listings/{listing_no}/release", tags=["老酒兑换及回收模块"])
+async def c2c_release_lock(
+    listing_no: str,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """买家撤销锁定(Phase2 托管: 托管退款+回架; 仅 escrow 通道锁定中)"""
+    user_id = _require_member_id(x_member_id)
+    try:
+        result = await _c2c_service.release_lock(listing_no, int(user_id))
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/recycle/c2c/listings/{listing_no}/receipt", tags=["老酒兑换及回收模块"])
+async def c2c_confirm_receipt(
+    listing_no: str,
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+):
+    """买家确认收货(Phase2 托管: 货款结算卖家+平台抽佣5%, delivered→settled)"""
+    user_id = _require_member_id(x_member_id)
+    try:
+        result = await _c2c_service.confirm_receipt(listing_no, int(user_id))
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/recycle/c2c/my-escrows", tags=["老酒兑换及回收模块"])
+async def c2c_my_escrows(
+    x_member_id: str = Header(None, alias="X-Member-Id"),
+    status: str = Query(None, description="托管状态筛选: holding/settled/refunded"),
+    limit: int = Query(50, ge=1, le=200, description="查询条数"),
+):
+    """我的托管单(买家/卖家视角)"""
+    user_id = _require_member_id(x_member_id)
+    try:
+        result = await _c2c_service.list_escrows(
+            int(user_id), status=status, limit=limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/recycle/c2c/market-stats", tags=["老酒兑换及回收模块"])
+async def c2c_market_stats(
+    days: int = Query(30, ge=1, le=365, description="行情统计窗口(天)"),
+):
+    """C2C 市场行情看板(公开): 在售量/近N天成交量/均价/溢价率中位数"""
+    try:
+        result = await _c2c_service.market_stats(days=days)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/recycle/c2c/price-suggestion", tags=["老酒兑换及回收模块"])
+async def c2c_price_suggestion(
+    life_code: str = Query(..., min_length=8, alias="lifeCode",
+                           description="生命码(已激活且含购买原价)"),
+    condition_grade: str = Query(GRADE_A, alias="conditionGrade",
+                                 description="品质分级(A/B/C/D)"),
+):
+    """定价建议(公开, 挂单前决策): 锚定值+三档建议(快速/平衡/惜售)+同档行情参考"""
+    try:
+        result = await _c2c_service.price_suggestion(
+            life_code, condition_grade=condition_grade)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/recycle/c2c/recommendations", tags=["老酒兑换及回收模块"])
+async def c2c_recommendations(
+    budget: float = Query(None, gt=0, le=1000000,
+                          description="买家预算上限(过滤要价)"),
+    wine_age_min: int = Query(None, ge=3, le=50, alias="wineAgeMin",
+                              description="最低酒龄过滤"),
+    limit: int = Query(10, ge=1, le=50, description="推荐条数"),
+):
+    """买家撮合推荐(公开): 在售单按性价比(锚定/要价)降序"""
+    try:
+        result = await _c2c_service.recommendations(
+            budget=budget, wine_age_min=wine_age_min, limit=limit)
+        return {"success": True, "data": result, "count": len(result)}
     except Exception as e:
         _handle(e)
 

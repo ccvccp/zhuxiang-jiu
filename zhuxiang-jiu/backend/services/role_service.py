@@ -57,6 +57,10 @@ from repositories.role_repository import (
     BEHAVIOR_CS_SLA_OVERDUE, BEHAVIOR_CS_ESCALATED,
     BEHAVIOR_CLAIM_APPROVED, BEHAVIOR_DELTAS,
     BEHAVIOR_WORKER_QUALITY_PREMIUM, BEHAVIOR_WORKER_QUALITY_ACCIDENT,
+    BEHAVIOR_ORDER_COMPLETED, BEHAVIOR_PAYLATER_REPAID_ON_TIME,
+    BEHAVIOR_REFUND_USER_CLAIMED, BEHAVIOR_REVIEW_QUALITY,
+    BEHAVIOR_COMPLAINT_CONFIRMED, BEHAVIOR_C2C_TRADE_SETTLED,
+    BEHAVIOR_MEMBER_LIMITS, ROLE_MEMBER,
 )
 from services.ticket_service import TicketService, SLA_HOURS
 from services.credit_service import CreditService
@@ -1562,6 +1566,55 @@ class RoleService:
     async def list_my_credit_events(self, user_id: int) -> list[dict]:
         """我的信用行为记录"""
         return await self.repo.list_events(user_id=user_id)
+
+    async def publish_member_credit_event(self, user_id: int,
+                                          behavior: str,
+                                          source_module: str,
+                                          ref_id: str = "") -> dict:
+        """发布 C 端消费行为因子事件(竹信分决策会材料 §四)
+
+        与 publish_credit_event 的差异:
+            - 幂等: 同 userId+behaviorCode+refId 已存在 → 跳过(recorded=False)
+            - 时间窗上限: BEHAVIOR_MEMBER_LIMITS(月/日)超限 → 跳过
+            - best-effort: 全程不抛错(因子失败不阻塞业务主流程)
+
+        Returns:
+            {recorded: bool, reason: "", event: {...}|None}
+        """
+        try:
+            if not ref_id:
+                return {"recorded": False, "reason": "missing_ref_id",
+                        "event": None}
+            # 幂等: 同业务号已记
+            dup = await self.repo.list_events(
+                user_id=user_id, behavior_code=behavior,
+                ref_id=ref_id, limit=1)
+            if dup:
+                return {"recorded": False, "reason": "duplicate",
+                        "event": dup[0]}
+            # 时间窗上限
+            limit_cfg = BEHAVIOR_MEMBER_LIMITS.get(behavior)
+            if limit_cfg:
+                window, max_times = limit_cfg
+                now = ts()
+                prefix = now[:7] if window == "month" else now[:10]
+                recent = await self.repo.list_events(
+                    user_id=user_id, behavior_code=behavior, limit=500)
+                in_window = [e for e in recent
+                             if str(e.get("ts", "")).startswith(prefix)]
+                if len(in_window) >= max_times:
+                    return {"recorded": False,
+                            "reason": f"limit_{window}",
+                            "event": in_window[0] if in_window else None}
+            event = await self.publish_credit_event(
+                user_id, ROLE_MEMBER, behavior, source_module, ref_id)
+            return {"recorded": True, "reason": "", "event": event}
+        except Exception as exc:
+            logger.warning("member_credit_event_failed user=%s "
+                           "behavior=%s ref=%s err=%s",
+                           user_id, behavior, ref_id, exc)
+            return {"recorded": False, "reason": f"error:{exc}",
+                    "event": None}
 
     # ============================================================
     # 7. 收益查询 / 管理端

@@ -1,15 +1,16 @@
-"""网站条款及角色协议管理模块路由(15 端点)
+"""网站条款及角色协议管理模块路由(19 端点)
 
 鉴权:
     - 用户端(2 接口): 同意条款/检查同意(X-Member-Id)
-    - 管理端(8 接口): X-Role: admin 头(条款CRUD/发布/角色协议/统计)
+    - 管理端(10 接口): X-Role: admin 头(条款CRUD/发布/角色协议/
+      统计/变更通知登记+撤回)
 
 大模型二代·三态灰度(AGREEMENT_MODE, 全站范式):
-    - 决策面(4 POST): @/_decision 门控——off 拒绝(409)
+    - 决策面(6 POST): @/_decision 门控——off 拒绝(409)
       + shadow/assist 响应标记(agreementMode)
     - 用户同意权豁免(1): consent——永不关停
       (签署条款是用户法律行为)
-    - 观测面(6 GET): 永不关停
+    - 观测面(7 GET): 永不关停
     - 控制面(4): mode/override/guard/resume
 
 异常映射:
@@ -24,7 +25,15 @@
     - 角色协议(2): 创建/列表
     - 历史(1):  条款历史版本
     - 统计(1):  管理端统计
+    - 变更通知(3): 登记变更/通知列表/撤回
     - 控制面(4): mode/override/guard/resume
+
+变更通知(P2: 7/30/14 天提前告知):
+    - 分级提前期: major=30 天(核心权利义务)/important=14 天
+      (一般权利义务)/minor=7 天(文字性优化)
+    - 生效日缺省 = 登记+通知期; 显式指定不得早于下限(409 拒绝)
+    - 登记时站内信触达已同意旧版会员(best-effort)
+    - 到期 pending→effective 惰性推进(查询/扫描)
 """
 
 
@@ -166,6 +175,12 @@ class CreateProtocolRequest(PydBaseModel):
     role: str = Field(..., description="角色: user/member/agent/merchant")
     agreementId: int = Field(..., description="条款ID")
     required: bool = Field(True, description="是否必须同意")
+
+
+class CreateChangeNoticeRequest(PydBaseModel):
+    changeLevel: str = Field(..., description="变更分级: major/important/minor")
+    changeLog: str = Field("", description="变更说明")
+    effectiveDate: str | None = Field(None, description="生效日期(ISO8601, 缺省=登记+通知期)")
 
 
 # ============================================================
@@ -458,6 +473,70 @@ async def agreement_mode_resume(
     except ValueError as e:
         raise HTTPException(status_code=409,
                              detail=str(e)) from e
+
+
+# ============================================================
+# 变更通知接口(3, P2: 7/30/14 天提前告知机制)
+# ============================================================
+
+@router.post("/api/agreements/{agreement_id}/change-notice", tags=["条款协议模块"])
+@_decision
+async def create_change_notice(
+    agreement_id: int,
+    data: CreateChangeNoticeRequest,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """登记条款变更通知(管理端, 新版发布后)
+
+    分级提前期: major=30 天/important=14 天/minor=7 天;
+    生效日显式指定不得早于登记+通知期(合规红线 409);
+    登记时站内信触达已同意旧版会员(best-effort)。
+    """
+    _require_admin(x_role)
+    try:
+        result = await _service.create_change_notice(
+            agreement_id, data.changeLevel,
+            change_log=data.changeLog,
+            effective_date=data.effectiveDate,
+        )
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/agreements/change-notices", tags=["条款协议模块"])
+async def list_change_notices(
+    status: str = Query(None, description="按状态筛选: pending/effective/cancelled"),
+    level: str = Query(None, description="按变更分级筛选: major/important/minor"),
+    agreement_id: int = Query(None, alias="agreement_id", description="按条款筛选"),
+    limit: int = Query(100, ge=1, le=500, description="查询条数"),
+):
+    """变更通知列表(公开, 变更预告公示; 到期状态惰性推进)
+
+    注: 本路由须先于 /{agreement_id} 注册——防 int 路径
+    参数吞字面量(路由遮蔽, 对齐 consents/role-protocols 范式)。
+    """
+    try:
+        result = await _service.list_change_notices(
+            status, level, agreement_id, limit)
+        return {"success": True, "data": result, "count": len(result)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/agreements/change-notices/{notice_id}/cancel", tags=["条款协议模块"])
+@_decision
+async def cancel_change_notice(
+    notice_id: int,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """撤回变更通知(管理端, 仅通知期中且未过生效时刻)"""
+    _require_admin(x_role)
+    try:
+        result = await _service.cancel_change_notice(notice_id)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
 
 
 @router.get("/api/agreements/{agreement_id}", tags=["条款协议模块"])

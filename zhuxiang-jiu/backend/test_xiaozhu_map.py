@@ -113,7 +113,8 @@ async def main():
            "竹香酒" in str(r.get("reply")) or "门店" in str(
                r.get("reply")),
            str(r.get("reply"))[:60])
-    record("指令计数 28", len(COMMANDS) == 28,
+    # (48号招商 agent.faq/agent.apply 上线后指令数 28→29)
+    record("指令计数 29", len(COMMANDS) == 29,
            str(len(COMMANDS)))
     record("FC 注册表对齐", "map.nearby" in TOOL_REGISTRY)
 
@@ -122,4 +123,5 @@ async def main():
     sys.exit(1 if FAIL else 0)
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

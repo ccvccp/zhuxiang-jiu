@@ -30,6 +30,7 @@ from routes.activity_routes import register_activity_routes
 from routes.traffic_routes import register_traffic_routes
 from routes.message_routes import register_message_routes
 from routes.chat_routes import register_chat_routes
+from routes.chat_ws_routes import register_chat_ws_routes
 from routes.ad_routes import register_ad_routes
 from routes.cooperation_routes import register_cooperation_routes
 from routes.agreement_routes import register_agreement_routes
@@ -39,6 +40,7 @@ from routes.compliance_routes import register_compliance_routes
 from routes.location_routes import register_location_routes
 from routes.admin_routes import register_admin_routes
 from routes.venue_routes import register_venue_routes
+from routes.designated_driving_routes import register_designated_driving_routes
 from routes.maintenance_routes import register_maintenance_routes
 from routes.monitor_routes import register_monitor_routes
 # 智能后台管理模型(74号·IBMS 巡检总线+LLM 诊断)
@@ -145,6 +147,7 @@ __all__ = [
     "register_traffic_routes",
     "register_message_routes",
     "register_chat_routes",
+    "register_chat_ws_routes",
     "register_ad_routes",
     "register_cooperation_routes",
     "register_agreement_routes",
@@ -154,6 +157,7 @@ __all__ = [
     "register_location_routes",
     "register_admin_routes",
     "register_venue_routes",
+    "register_designated_driving_routes",
     "register_monitor_routes",
     "register_maintenance_routes",
     "register_ibms_routes",

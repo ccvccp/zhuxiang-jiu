@@ -101,15 +101,48 @@ PAYOUT_STATUS_NAMES = {
 PAY_EXPIRE_SECONDS = 30 * 60
 
 # 支持的支付渠道
-SUPPORTED_CHANNELS = {"wechat", "alipay", "unionpay", "bank", "aggregate"}
+SUPPORTED_CHANNELS = {"wechat", "alipay", "unionpay", "bank", "aggregate",
+                      "huabei", "baitiao"}
+
+# 消费信贷分期渠道(P2 批次②③): 费率/每期还款额由渠道预下单返回,
+# 后端只透传展示; mock 态生成确定性方案(planSource=mock)
+INSTALLMENT_CHANNELS = {"huabei", "baitiao"}
+SUPPORTED_INSTALLMENTS = (3, 6, 12)
+# Mock 分期费率表(接近花呗实况, 确定性可断言; real 由渠道返回覆盖)
+MOCK_INSTALLMENT_FEE_RATES = {3: 0.023, 6: 0.045, 12: 0.088}
 
 # 支持的支付方式(按渠道细分; wap 为支付宝手机网站支付)
 SUPPORTED_METHODS = {"native", "jsapi", "h5", "wap", "page", "transfer"}
 
 
 def default_pay_method(pay_channel: str) -> str:
-    """渠道默认支付方式(H5 端): 支付宝→wap(手机网站), 其余→h5"""
-    return "wap" if (pay_channel or "").lower() == "alipay" else "h5"
+    """渠道默认支付方式(H5 端): 支付宝/花呗→wap(手机网站),
+    白条→page(京东收银台), 其余→h5"""
+    ch = (pay_channel or "").lower()
+    if ch == "alipay" or ch == "huabei":
+        return "wap"
+    if ch == "baitiao":
+        return "page"
+    return "h5"
+
+
+def mock_installment_plans(total_amount: float) -> list[dict]:
+    """Mock 分期方案快照(3/6/12 期确定金额; 展示用, 渠道透传勿自算口径
+    ——real 态由预下单响应覆盖, planSource 标注来源)"""
+    plans = []
+    for term in SUPPORTED_INSTALLMENTS:
+        rate = MOCK_INSTALLMENT_FEE_RATES[term]
+        total_fee = round(total_amount * rate, 2)
+        per = round((total_amount + total_fee) / term, 2)
+        plans.append({
+            "term": term,
+            "perAmount": per,
+            "totalFee": total_fee,
+            "feeRate": rate,
+            "totalRepay": round(per * term, 2),
+            "planSource": "mock",
+        })
+    return plans
 
 # 场景类型(与已有模块联动; guest_order_pay 为游客扫码付免登录场景)
 SUPPORTED_SCENES = {"order_pay", "wallet_deposit", "agent_purchase",
@@ -170,7 +203,8 @@ class PaymentService:
                           discount_amount: float = 0.0,
                           points_amount: float = 0.0,
                           guest_phone: str = None,
-                          age_confirmed: bool = False) -> dict:
+                          age_confirmed: bool = False,
+                          installments: int = None) -> dict:
         """创建支付订单(幂等: 同一订单只能有一个活跃支付单)
 
         Args:
@@ -178,13 +212,14 @@ class PaymentService:
             order_id: 关联订单号
             order_type: 订单类型 retail/groupbuy/custom/wallet_deposit
             total_amount: 订单总金额
-            pay_channel: 支付渠道 wechat/alipay/...
+            pay_channel: 支付渠道 wechat/alipay/huabei/baitiao/...
             pay_method: 支付方式 native/jsapi/h5/page/transfer
             scene_type: 场景 order_pay/wallet_deposit/agent_purchase/guest_order_pay
             discount_amount: 优惠抵扣
             points_amount: 积分抵扣
             guest_phone: 游客手机号(游客场景必填)
             age_confirmed: 已满18周岁声明(游客场景必填, 酒类合规)
+            installments: 分期期数(3/6/12; huabei/baitiao 渠道必传)
 
         游客扫码付规则(设计文档 2.7.3/2.7.8, P0 一期):
             - 手机号必填(11 位) + 年龄声明必填(酒类合规)
@@ -208,6 +243,20 @@ class PaymentService:
             raise ValueError(f"场景类型非法: {scene_type}")
         if discount_amount < 0 or points_amount < 0:
             raise ValueError("优惠/积分抵扣不能为负")
+
+        # 消费信贷分期渠道校验(P2 批次②③·花呗/白条)
+        is_installment = pay_channel in INSTALLMENT_CHANNELS
+        if is_installment:
+            if installments not in SUPPORTED_INSTALLMENTS:
+                raise ValueError(
+                    f"分期渠道({pay_channel})须指定期数"
+                    f"({'/'.join(map(str, SUPPORTED_INSTALLMENTS))}), "
+                    f"当前: {installments}")
+            if is_guest:
+                raise ValueError("游客支付不支持消费信贷分期渠道")
+        elif installments is not None:
+            raise ValueError(
+                f"非分期渠道不支持 installments 参数({pay_channel})")
 
         # 游客扫码付规则校验(P0-3)
         if is_guest:
@@ -276,6 +325,11 @@ class PaymentService:
                 # 游客扫码付标识(设计文档 2.7.8: is_guest_order/guest_phone)
                 "isGuest": is_guest,
                 "guestPhone": str(guest_phone) if is_guest else "",
+                # 分期快照(P2 批次②③): mock 态生成确定方案(planSource=mock),
+                # real 态由渠道预下单响应覆盖; installments 为选中档
+                "installments": installments if is_installment else None,
+                "installmentPlans": (mock_installment_plans(actual_amount)
+                                     if is_installment else []),
                 "createdAt": ts(),
                 "updatedAt": ts(),
             }
@@ -307,6 +361,9 @@ class PaymentService:
                 "payMethod": pay_method,
                 "sceneType": scene_type,
                 "actualAmount": actual_amount,
+                "installments": installments if is_installment else None,
+                "installmentPlans": (order_data["installmentPlans"]
+                                     if is_installment else []),
                 "status": PAY_STATUS_PENDING,
                 "statusName": PAY_STATUS_NAMES[PAY_STATUS_PENDING],
                 "expireTime": expire_time,
@@ -880,6 +937,18 @@ class PaymentService:
                 "auditRemark": audit_remark,
                 "auditTime": ts(),
             })
+            # 竹信分 C4 用户退款 -2(best-effort, 月度至多 3 次计分)
+            if decision == "approved" and refund.get("userId"):
+                try:
+                    from services.role_service import (
+                        RoleService, BEHAVIOR_REFUND_USER_CLAIMED,
+                    )
+                    await RoleService().publish_member_credit_event(
+                        int(refund["userId"]),
+                        BEHAVIOR_REFUND_USER_CLAIMED,
+                        "payment", ref_id=refund_no)
+                except Exception:
+                    pass
             logger.info("refund_audited refundNo=%s decision=%s auditor=%s",
                         refund_no, decision, auditor)
             return {

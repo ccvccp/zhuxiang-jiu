@@ -74,6 +74,11 @@ class AgreementRepository:
             return await self._redis_next_id("protocol")
         return self._mem_next_id("_agreement_protocol_seq")
 
+    async def next_change_notice_id(self) -> int:
+        if is_redis_mode():
+            return await self._redis_next_id("change_notice")
+        return self._mem_next_id("_agreement_notice_seq")
+
     def _mem_next_id(self, seq_key: str) -> int:
         self._ensure_store()
         seq = self.store.get(seq_key, 0) + 1
@@ -177,6 +182,31 @@ class AgreementRepository:
         return None
 
     # ============================================================
+    # 变更通知(P2: 7/30/14 天提前告知机制)
+    # ============================================================
+
+    async def get_change_notice(self, notice_id: int) -> dict | None:
+        if is_redis_mode():
+            return await self._redis_get_change_notice(notice_id)
+        return self._mem_get_change_notice(notice_id)
+
+    async def save_change_notice(self, notice: dict) -> None:
+        if is_redis_mode():
+            await self._redis_save_change_notice(notice)
+        else:
+            self._mem_save_change_notice(notice)
+
+    async def list_change_notices(self, status: str = None,
+                                   change_level: str = None,
+                                   agreement_id: int = None,
+                                   limit: int = 100) -> list[dict]:
+        if is_redis_mode():
+            return await self._redis_list_change_notices(
+                status, change_level, agreement_id, limit)
+        return self._mem_list_change_notices(
+            status, change_level, agreement_id, limit)
+
+    # ============================================================
     # 内存模式实现
     # ============================================================
 
@@ -188,9 +218,11 @@ class AgreementRepository:
             self.store["agreement_consents_by_user"] = {}  # userId → [consentId]
             self.store["agreement_consents_by_agreement"] = {}  # agreementId → [consentId]
             self.store["role_protocols"] = {}             # protocolId → protocol
+            self.store["agreement_change_notices"] = {}   # noticeId → notice
             self.store["_agreement_seq"] = 0
             self.store["_agreement_consent_seq"] = 0
             self.store["_agreement_protocol_seq"] = 0
+            self.store["_agreement_notice_seq"] = 0
 
     # --- 条款 ---
 
@@ -262,6 +294,37 @@ class AgreementRepository:
             protocols = [p for p in protocols if p.get("status") == status]
         protocols.sort(key=lambda p: p.get("createdAt", ""), reverse=True)
         return protocols[:limit]
+
+    # --- 变更通知 ---
+
+    def _mem_get_change_notice(self, notice_id: int) -> dict | None:
+        self._ensure_store()
+        # setdefault 防御: 旧进程/测试 store 已初始化但缺新键
+        return self.store.setdefault(
+            "agreement_change_notices", {}).get(notice_id)
+
+    def _mem_save_change_notice(self, notice: dict) -> None:
+        self._ensure_store()
+        self.store.setdefault(
+            "agreement_change_notices", {})[notice["id"]] = notice
+
+    def _mem_list_change_notices(self, status: str = None,
+                                  change_level: str = None,
+                                  agreement_id: int = None,
+                                  limit: int = 100) -> list[dict]:
+        self._ensure_store()
+        notices = list(self.store.setdefault(
+            "agreement_change_notices", {}).values())
+        if status:
+            notices = [n for n in notices if n.get("status") == status]
+        if change_level:
+            notices = [n for n in notices
+                       if n.get("changeLevel") == change_level]
+        if agreement_id:
+            notices = [n for n in notices
+                       if n.get("agreementId") == agreement_id]
+        notices.sort(key=lambda n: n.get("createdAt", ""), reverse=True)
+        return notices[:limit]
 
     # ============================================================
     # Redis 模式实现
@@ -390,3 +453,47 @@ class AgreementRepository:
             protocols = [p for p in protocols if p.get("status") == status]
         protocols.sort(key=lambda p: p.get("createdAt", ""), reverse=True)
         return protocols[:limit]
+
+    # --- 变更通知 ---
+
+    async def _redis_get_change_notice(self, notice_id: int) -> dict | None:
+        client = await get_redis_client()
+        data = await client.get(
+            _k("agreement", "change_notice", notice_id))
+        if not data:
+            return None
+        return json.loads(data)
+
+    async def _redis_save_change_notice(self, notice: dict) -> None:
+        client = await get_redis_client()
+        await client.set(
+            _k("agreement", "change_notice", notice["id"]),
+            json.dumps(notice, ensure_ascii=False))
+
+    async def _redis_list_change_notices(self, status: str = None,
+                                          change_level: str = None,
+                                          agreement_id: int = None,
+                                          limit: int = 100) -> list[dict]:
+        client = await get_redis_client()
+        keys = await client.keys(_k("agreement", "change_notice", "*"))
+        notices = []
+        for key in keys:
+            data = await client.get(key)
+            if not data:
+                continue
+            try:
+                n = json.loads(data)
+            except (TypeError, ValueError):
+                continue
+            # P0 防御: 同 _redis_list_agreements(键空间污染 fail-soft)
+            if not isinstance(n, dict):
+                continue
+            if status and n.get("status") != status:
+                continue
+            if change_level and n.get("changeLevel") != change_level:
+                continue
+            if agreement_id and n.get("agreementId") != agreement_id:
+                continue
+            notices.append(n)
+        notices.sort(key=lambda n: n.get("createdAt", ""), reverse=True)
+        return notices[:limit]

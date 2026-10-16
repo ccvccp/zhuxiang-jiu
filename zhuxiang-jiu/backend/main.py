@@ -60,6 +60,7 @@ from routes import (
     register_traffic_routes,
     register_message_routes,
     register_chat_routes,
+    register_chat_ws_routes,  # 聊天 WebSocket 实时通道(P2)
     register_ad_routes,
     register_cooperation_routes,
     register_agreement_routes,
@@ -69,6 +70,7 @@ from routes import (
     register_location_routes,
     register_admin_routes,
     register_venue_routes,
+    register_designated_driving_routes,  # 免费代驾域(P2)
     register_monitor_routes,
     register_maintenance_routes,
     # 智能后台管理模型(74号·IBMS 巡检总线+LLM 诊断)
@@ -264,6 +266,7 @@ register_activity_routes(app)
 register_traffic_routes(app)
 register_message_routes(app)
 register_chat_routes(app)
+register_chat_ws_routes(app)  # 聊天 WebSocket 实时通道(P2: 15 事件)
 register_ad_routes(app)
 register_cooperation_routes(app)
 register_agreement_routes(app)
@@ -273,6 +276,7 @@ register_compliance_routes(app)
 register_location_routes(app)
 register_admin_routes(app)
 register_venue_routes(app)
+register_designated_driving_routes(app)  # 免费代驾域(P2: 合作商消费≥1瓶→30km内代付¥200)
 register_monitor_routes(app)
 register_maintenance_routes(app)
 register_ibms_routes(app)
@@ -421,6 +425,12 @@ register_drama76_routes(app)
 # 真缺口: 多集 bible+节拍表+多角色分镜, 供 76号消费端引流)
 from routes.drama84_routes import register_drama84_routes
 register_drama84_routes(app)
+
+# 短剧智能研判引擎(85号, 2026-10-12 外部方案《短剧智能数据搜集
+# 预判决策大模型》工程化落地: 采集(mock 源)→清洗标签→知识库四库
+# →爆款指数→改编A/B→对接84号生成→回流进化; 为本站引流服务)
+from routes.drama85_routes import register_drama85_routes
+register_drama85_routes(app)
 
 # NexusFlow智枢·流 AI智能全域发布大模型(74号 P1 规则中枢)
 from routes.nexus74_routes import register_nexus74_routes

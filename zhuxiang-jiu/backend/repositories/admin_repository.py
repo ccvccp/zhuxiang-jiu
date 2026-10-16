@@ -13,9 +13,12 @@
 """
 
 import hashlib
+import hmac
 import json
 from datetime import datetime
 
+from core.auth import hash_password as _pbkdf2_hash
+from core.auth import verify_password as _pbkdf2_verify
 from repositories.backend import is_redis_mode, get_redis_client, get_in_memory_store, _k
 
 
@@ -44,14 +47,32 @@ SESSION_TIMEOUT_MINUTES = 30
 
 
 def _hash_admin_pwd(password: str) -> str:
-    """管理员密码哈希(Mock, 与 member_repository 风格一致)"""
-    salt = "zhuxiang_admin_salt_v1"
-    return hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+    """管理员密码哈希(P1-21: PBKDF2-HMAC-SHA256 12万轮+每次独立随机盐,
+    复用 core/auth 会员侧实现, 存储格式 pbkdf2_sha256$iter$salt$hash)"""
+    return _pbkdf2_hash(password)
+
+
+# PBKDF2 格式前缀(与 core/auth 一致)
+_PBKDF2_PREFIX = "pbkdf2_sha256"
+# 旧格式固定盐(P1-21 之前的管理员哈希, 登录校验通过后自动升级)
+_ADMIN_LEGACY_SALT = "zhuxiang_admin_salt_v1"
 
 
 def _verify_admin_pwd(password: str, password_hash: str) -> bool:
-    """校验管理员密码"""
-    return _hash_admin_pwd(password) == password_hash
+    """校验管理员密码(兼容 PBKDF2 新格式 + 固定盐 SHA256 旧格式)"""
+    if not password_hash:
+        return False
+    if password_hash.startswith(f"{_PBKDF2_PREFIX}$"):
+        return _pbkdf2_verify(password, password_hash)
+    legacy = hashlib.sha256(
+        f"{_ADMIN_LEGACY_SALT}:{password}".encode()).hexdigest()
+    return hmac.compare_digest(legacy, password_hash)
+
+
+def is_legacy_admin_hash(password_hash: str) -> bool:
+    """是否为旧格式哈希(登录校验通过后应自动升级为 PBKDF2)"""
+    return bool(password_hash) and not password_hash.startswith(
+        f"{_PBKDF2_PREFIX}$")
 
 
 class AdminRepository:

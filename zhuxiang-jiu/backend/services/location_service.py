@@ -69,6 +69,38 @@ class LocationService:
             if is_default:
                 await self.repo.clear_default_address(user_id)
 
+            # 地理编码回填(P2 批次②·高德 LBS): 坐标缺省时
+            # geocode(address) 回填经纬度+adcode, best-effort
+            # 不阻断(失败降级无坐标现状语义, 留 geocodeError)
+            geocode_source = "manual" if longitude else None
+            geocode_error = None
+            if longitude is None or latitude is None:
+                full_address = (
+                    f"{province}{city}{district or ''}{detail_address}")
+                cache_key = self.repo.geocode_cache_key(full_address)
+                try:
+                    geo = await self.repo.get_geocode_cache(cache_key)
+                    cached = geo is not None
+                    if not cached:
+                        from services.amap_gateway_service import (
+                            AmapGatewayService,
+                        )
+                        geo = await AmapGatewayService().geocode(
+                            full_address, city=city)
+                        await self.repo.set_geocode_cache(
+                            cache_key, geo)
+                    if longitude is None:
+                        longitude = geo.get("longitude")
+                    if latitude is None:
+                        latitude = geo.get("latitude")
+                    if not adcode and geo.get("adcode"):
+                        adcode = geo["adcode"]
+                    geocode_source = (
+                        "cache" if cached
+                        else (geo.get("source") or "mock"))
+                except Exception as exc:
+                    geocode_error = str(exc)[:200]
+
             address = {
                 "userId": user_id,
                 "receiverName": receiver_name,
@@ -82,6 +114,8 @@ class LocationService:
                 "adcode": adcode,
                 "label": label,
                 "isDefault": is_default,
+                "geocodeSource": geocode_source,
+                "geocodeError": geocode_error,
                 "createdAt": ts(),
             }
             address_id = await self.repo.create_address(address)
@@ -102,6 +136,11 @@ class LocationService:
                 "userId": user_id,
                 "receiverName": receiver_name,
                 "isDefault": is_default,
+                "longitude": longitude,
+                "latitude": latitude,
+                "adcode": adcode,
+                "geocodeSource": geocode_source,
+                "geocodeError": geocode_error,
                 "evidenceId": evidence_id,
                 "evidenceHash": evidence_hash,
             }
@@ -471,7 +510,11 @@ class LocationService:
     # ============================================================
 
     async def add_evidence(self, evidence_type: str, evidence_data: str = "") -> dict:
-        """新增区块链存证"""
+        """新增区块链存证(落台账后 best-effort 上链回填——P2 批次③)
+
+        上链策略: 哈希上链、原文留库; 上链失败不阻断(台账已闭合),
+        记录保持 pending 由 chain_pending_scan 惰性重试。
+        """
         valid_types = (EVIDENCE_TYPE_ADDRESS, EVIDENCE_TYPE_LOCATION,
                         EVIDENCE_TYPE_LOGISTICS, EVIDENCE_TYPE_DELIVERY,
                         EVIDENCE_TYPE_HEATMAP, EVIDENCE_TYPE_SITE)
@@ -486,25 +529,101 @@ class LocationService:
             "evidenceHash": evidence_hash,
             "txId": tx_id,
             "blockHeight": 0,
+            "chainStatus": "local",   # local→pending→onchain
             "createdAt": ts(),
         }
         evidence_id = await self.repo.create_evidence(evidence)
         evidence["id"] = evidence_id
 
+        # 上链回填(best-effort: mock 默认即时 onchain; real 未确认
+        # 保持 pending; 失败保持 local 由扫描重试——不阻断台账闭合)
+        try:
+            await self._chain_evidence(evidence)
+        except Exception:
+            pass
+
         return evidence
 
+    async def _chain_evidence(self, evidence: dict) -> dict:
+        """单条存证上链回填(add_evidence 与 pending 扫描共用)"""
+        from services.chain_gateway_service import (
+            ChainGatewayService, CHAIN_STATUS_ONCHAIN,
+        )
+        r = await ChainGatewayService().evidence(
+            evidence["evidenceHash"],
+            payload_meta=str(evidence.get("evidenceType") or ""))
+        fields = {
+            "chainStatus": r.get("chainStatus"),
+            "chainVendor": r.get("chainVendor"),
+        }
+        if r.get("txHash"):
+            fields["txHash"] = r["txHash"]
+        if r.get("blockHeight") is not None:
+            fields["blockHeight"] = r["blockHeight"]
+        if r.get("chainAt"):
+            fields["chainAt"] = r["chainAt"]
+        updated = await self.repo.update_evidence(
+            evidence["id"], fields)
+        if updated:
+            evidence.update(fields)
+        return evidence
+
+    async def chain_pending_scan(self, limit: int = 100) -> dict:
+        """pending/local 存证惰性重试上链(调度入口; real 未确认轮询收据)"""
+        from services.chain_gateway_service import (
+            CHAIN_STATUS_ONCHAIN,
+        )
+        evidences = await self.repo.list_evidence(limit=limit)
+        pending = [e for e in evidences
+                   if e.get("chainStatus") in (None, "local",
+                                               "pending")]
+        promoted = 0
+        failed = 0
+        for e in pending:
+            try:
+                # 已有 txHash 的 pending: 仅轮询收据不重复提交
+                if e.get("txHash") and e.get("chainStatus") == "pending":
+                    from services.chain_gateway_service import (
+                        ChainGatewayService,
+                    )
+                    receipt = await ChainGatewayService()._execute(
+                        "query_receipt", e["txHash"])
+                    if receipt.get("status") == CHAIN_STATUS_ONCHAIN:
+                        await self.repo.update_evidence(e["id"], {
+                            "chainStatus": CHAIN_STATUS_ONCHAIN,
+                            "blockHeight": receipt.get("blockHeight"),
+                            "chainAt": ts(),
+                        })
+                        promoted += 1
+                    else:
+                        failed += 1
+                    continue
+                await self._chain_evidence(e)
+                promoted += 1
+            except Exception:
+                failed += 1
+        return {"scanned": len(pending), "promoted": promoted,
+                "failed": failed}
+
     async def verify_evidence_by_hash(self, evidence_hash: str) -> dict:
-        """按哈希验证存证"""
+        """按哈希验证存证(附链上状态; onchain 时含 txHash/blockHeight)"""
         evidence = await self.repo.get_evidence_by_hash(evidence_hash)
         if evidence is None:
             raise KeyError(f"存证哈希不存在(hash={evidence_hash})")
-        return {
+        result = {
             "verified": True,
             "evidenceId": evidence.get("id"),
             "evidenceHash": evidence_hash,
             "evidenceType": evidence.get("evidenceType"),
             "txId": evidence.get("txId"),
+            "chainStatus": evidence.get("chainStatus") or "local",
         }
+        if evidence.get("chainStatus") == "onchain":
+            result["txHash"] = evidence.get("txHash")
+            result["blockHeight"] = evidence.get("blockHeight")
+            result["chainAt"] = evidence.get("chainAt")
+            result["chainVendor"] = evidence.get("chainVendor")
+        return result
 
     async def get_evidence(self, evidence_id: int) -> dict:
         """查询存证详情"""
@@ -523,15 +642,39 @@ class LocationService:
     # ============================================================
 
     async def calculate_distance(self, lng1: float, lat1: float,
-                                    lng2: float, lat2: float) -> dict:
-        """计算两点间距离"""
+                                    lng2: float, lat2: float,
+                                    routing: str = "straight") -> dict:
+        """计算两点间距离(routing=driving 走高德驾车路网距离,
+        real 失败/mock_fallback 降级直线距离留痕——影响运费最后开)"""
         distance = haversine_km(lng1, lat1, lng2, lat2)
-        return {
+        result = {
             "origin": {"longitude": lng1, "latitude": lat1},
             "destination": {"longitude": lng2, "latitude": lat2},
             "distance": round(distance, 2),
             "unit": "km",
+            "routing": "straight",
         }
+        if (routing or "straight") != "driving":
+            return result
+        result["routing"] = "driving"
+        result["straightDistance"] = round(distance, 2)
+        try:
+            from services.amap_gateway_service import (
+                AmapGatewayService,
+            )
+            r = await AmapGatewayService().driving_distance(
+                f"{lng1},{lat1}", f"{lng2},{lat2}")
+            result["distance"] = r.get("distanceKm")
+            result["durationMin"] = r.get("durationMin")
+            result["routeSource"] = r.get("source", "mock")
+            if r.get("fallback"):
+                result["fallback"] = True
+                result["fallbackReason"] = r.get("fallbackReason")
+        except Exception as exc:
+            # 路网距离失败不阻断: 降级直线距离留痕
+            result["routeSource"] = "straight_fallback"
+            result["fallbackReason"] = str(exc)[:200]
+        return result
 
     # ============================================================
     # 8. 统计

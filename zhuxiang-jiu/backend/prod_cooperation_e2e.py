@@ -46,8 +46,8 @@ resp = c.post("/api/cooperation/applications", headers=M4, json={
     "partnerName": f"{MARK}合作方", "partnerType": "enterprise",
     "type": "new", "businessScope": "LT测试业务范围",
     "estimatedAmount": 20000, "contactName": "LT联系人",
-    "contactPhone": "13800000000", "contactEmail": "lt@zxjiu.com",
-    "qualificationFiles": ["https://zxjiu.com/lt/qual1.pdf"]})
+    "contactPhone": "13800000000", "contactEmail": "lt@zyjiu.com",
+    "qualificationFiles": ["https://zyjiu.com/lt/qual1.pdf"]})
 app = resp.json().get("data") or {}
 aid = app.get("id")
 ano = app.get("applicationNo")

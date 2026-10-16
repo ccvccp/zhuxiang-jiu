@@ -27,6 +27,13 @@ PASS = 0
 FAIL = 0
 RESULTS = []
 
+# 记录导入时环境快照(main() 结束时还原, 防止应急开关泄漏污染同进程测试)
+_ENV_BEFORE = {
+    "AUTH_MODE": os.environ.get("AUTH_MODE"),
+    "AUTH_COMPAT_TRUST_HEADERS":
+        os.environ.get("AUTH_COMPAT_TRUST_HEADERS"),
+}
+
 # 管理端靶点(main 应用既有路由, 路由层读 X-Role 鉴权)
 ADMIN_EP = "/api/hub/ops/overview"
 
@@ -92,8 +99,14 @@ def main():
           r.status_code == 403, f"status={r.status_code}")
 
     # 恢复测试默认环境(避免污染同进程后续用例)
-    os.environ["AUTH_MODE"] = "compat"
-    os.environ["AUTH_COMPAT_TRUST_HEADERS"] = "1"
+    # (2026-10-12 修复: 还原到导入前原值而非硬编码 "1"——
+    #  原实现会把应急回滚开关永久泄漏给 pytest 同进程后续测试)
+    os.environ["AUTH_MODE"] = _ENV_BEFORE.get("AUTH_MODE", "compat")
+    if _ENV_BEFORE.get("AUTH_COMPAT_TRUST_HEADERS") is None:
+        os.environ.pop("AUTH_COMPAT_TRUST_HEADERS", None)
+    else:
+        os.environ["AUTH_COMPAT_TRUST_HEADERS"] = \
+            _ENV_BEFORE["AUTH_COMPAT_TRUST_HEADERS"]
 
     print("\n".join(RESULTS))
     print("-" * 64)

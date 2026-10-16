@@ -174,6 +174,15 @@ BEHAVIOR_CLAIM_APPROVED = "claim_approved"                # 认领通过 +3
 BEHAVIOR_WORKER_QUALITY_PREMIUM = "worker_quality_premium"  # 优质批次 +5
 BEHAVIOR_WORKER_QUALITY_ACCIDENT = "worker_quality_accident"  # 质量事故 -15
 
+# ---- C 端消费行为因子(竹信分决策会材料 §四, 2026-10-12 拍板实施) ----
+# 注: 逾期还款惩罚不设因子——repay_paylater_order 已有 -20/次在产, 避免双罚
+BEHAVIOR_ORDER_COMPLETED = "order_completed"              # C1 订单完成(评价后) +2
+BEHAVIOR_PAYLATER_REPAID_ON_TIME = "paylater_repaid_on_time"  # C2 按时还款 +3
+BEHAVIOR_REFUND_USER_CLAIMED = "refund_user_claimed"      # C4 退款审核通过 -2
+BEHAVIOR_REVIEW_QUALITY = "review_quality"                # C5 优质评价(≥4星且≥50字) +1
+BEHAVIOR_COMPLAINT_CONFIRMED = "complaint_confirmed"      # C6 投诉工单结案成立 -10
+BEHAVIOR_C2C_TRADE_SETTLED = "c2c_trade_settled"          # C7 C2C守约成交(双方) +2
+
 BEHAVIOR_DELTAS = {
     BEHAVIOR_CS_SATISFACTION_GOOD: 5,
     BEHAVIOR_CS_SATISFACTION_BAD: -5,
@@ -182,6 +191,18 @@ BEHAVIOR_DELTAS = {
     BEHAVIOR_CLAIM_APPROVED: 3,
     BEHAVIOR_WORKER_QUALITY_PREMIUM: 5,
     BEHAVIOR_WORKER_QUALITY_ACCIDENT: -15,
+    BEHAVIOR_ORDER_COMPLETED: 2,
+    BEHAVIOR_PAYLATER_REPAID_ON_TIME: 3,
+    BEHAVIOR_REFUND_USER_CLAIMED: -2,
+    BEHAVIOR_REVIEW_QUALITY: 1,
+    BEHAVIOR_COMPLAINT_CONFIRMED: -10,
+    BEHAVIOR_C2C_TRADE_SETTLED: 2,
+}
+
+# C 端因子时间窗上限(防刷): {行为码: (窗口, 次数)}  窗口= month/day
+BEHAVIOR_MEMBER_LIMITS = {
+    BEHAVIOR_REFUND_USER_CLAIMED: ("month", 3),   # 月度至多 3 次计分
+    BEHAVIOR_REVIEW_QUALITY: ("day", 1),          # 每日至多 1 次
 }
 
 # ============================================================
@@ -640,6 +661,7 @@ class RoleRepository:
         return event["id"]
 
     async def list_events(self, user_id: int = None, role_code: str = None,
+                          behavior_code: str = None, ref_id: str = None,
                           limit: int = 100) -> list[dict]:
         if is_redis_mode():
             client = await get_redis_client()
@@ -656,6 +678,11 @@ class RoleRepository:
             events = [e for e in events if e.get("userId") == user_id]
         if role_code:
             events = [e for e in events if e.get("roleCode") == role_code]
+        if behavior_code:
+            events = [e for e in events
+                      if e.get("behaviorCode") == behavior_code]
+        if ref_id:
+            events = [e for e in events if e.get("refId") == ref_id]
         events.sort(key=lambda e: e.get("ts", ""), reverse=True)
         return events[:limit]
 

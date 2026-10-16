@@ -2,7 +2,7 @@
 
 用法(算力机: AutoDL RTX 5090D 等, SV73_SADTALKER_DIR 必配):
     python build_dh_dev.py <scriptId>
-        [--api https://zxjiu.com]
+        [--api https://zyjiu.com]
         [--host root@47.236.61.117]
         [--container zhuxiang-backend-1]
         [--token <accessToken>](或 SV73_TOKEN env; 缺省走 SSH 容器管道)
@@ -108,7 +108,7 @@ def main():
                     "(拉 storyboard→TTS→SadTalker→attach)")
     ap.add_argument("scriptId",
                     help="剧本号(dh_oral 模板, 如 sv73_xxx)")
-    ap.add_argument("--api", default="https://zxjiu.com",
+    ap.add_argument("--api", default="https://zyjiu.com",
                     help="生产 API 基址")
     ap.add_argument("--host", default="root@47.236.61.117",
                     help="SSH 管道主机(token 获取用)")

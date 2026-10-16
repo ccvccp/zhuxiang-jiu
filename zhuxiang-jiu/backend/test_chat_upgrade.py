@@ -24,6 +24,10 @@ import sys
 os.environ["LOCK_MODE"] = "asyncio"
 os.environ["STORE_MODE"] = "asyncio"
 os.environ["AUTH_MODE"] = "compat"
+# standalone 裸头自举(对齐 test_message_antispam 惯例):
+# 安全收紧后 compat 默认剥离 X-Member-Id/X-Role, HTTP 段
+# 依赖裸头访问受保护路径, 须显式信任(仅本测试进程内生效)
+os.environ.setdefault("AUTH_COMPAT_TRUST_HEADERS", "1")
 
 from fastapi.testclient import TestClient
 
@@ -86,7 +90,9 @@ async def seed_human_session(client, user_id=USER_A):
 # P0 越权加固
 # ============================================================
 
-async def test_p0_authorization(client):
+# 注意: 以下函数名用 run_ 前缀(非 test_), 避免被 pytest 误收集
+# (standalone 直调签名为 run_xx(client), pytest 无 client fixture)
+async def run_p0_authorization(client):
     print("[P0 越权加固]")
     session = await seed_session(client, USER_A)
     sid = session["sessionId"]
@@ -128,7 +134,7 @@ async def test_p0_authorization(client):
 # P1 实时: since 增量 + read
 # ============================================================
 
-async def test_p1_incremental(client):
+async def run_p1_incremental(client):
     print("[P1 实时增量轮询]")
     session = await seed_session(client, USER_A)
     sid = session["sessionId"]
@@ -178,7 +184,7 @@ async def test_p1_incremental(client):
 # P2 客服工作台
 # ============================================================
 
-async def test_p2_cs_workbench(client):
+async def run_p2_cs_workbench(client):
     print("[P2 客服工作台]")
     sid = await seed_human_session(client, USER_A)
 
@@ -260,7 +266,7 @@ async def make_fake_rag():
     return fake_rag
 
 
-async def test_p3_mode(client):
+async def run_p3_mode(client):
     print("[P3 三态灰度+护栏]")
     svc = ChatService()
     mode_svc = ChatModeService()
@@ -365,7 +371,7 @@ async def test_p3_mode(client):
 # P4 调度异常留痕
 # ============================================================
 
-async def test_p4_dispatch_error():
+async def run_p4_dispatch_error():
     print("[P4 调度异常留痕]")
     svc = ChatService()
 
@@ -401,23 +407,23 @@ async def main():
     client = TestClient(app)
 
     reset_store()
-    await test_p0_authorization(client)
+    await run_p0_authorization(client)
     print()
 
     reset_store()
-    await test_p1_incremental(client)
+    await run_p1_incremental(client)
     print()
 
     reset_store()
-    await test_p2_cs_workbench(client)
+    await run_p2_cs_workbench(client)
     print()
 
     reset_store()
-    await test_p3_mode(client)
+    await run_p3_mode(client)
     print()
 
     reset_store()
-    await test_p4_dispatch_error()
+    await run_p4_dispatch_error()
 
     print()
     print("-" * 64)

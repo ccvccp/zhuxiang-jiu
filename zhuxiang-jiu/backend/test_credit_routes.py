@@ -736,9 +736,10 @@ class TestPaylaterOrder:
                f"expected 10/{expected_fees}/{expected_penalty}, got {repay}")
 
         account = await svc.get_score(USER_ID_1)
+        # 550 基准: test_81 按时还款已获竹信分 C2 因子 +3(553), 逾期再 -20
         record("test_84_overdue_credit_penalty",
-               account["bambooScore"] == 550 - PAYLATER_OVERDUE_SCORE_PENALTY,
-               f"expected {550 - PAYLATER_OVERDUE_SCORE_PENALTY}, "
+               account["bambooScore"] == 553 - PAYLATER_OVERDUE_SCORE_PENALTY,
+               f"expected {553 - PAYLATER_OVERDUE_SCORE_PENALTY}, "
                f"got {account['bambooScore']}")
         quota = await svc.get_paylater_quota(USER_ID_1)
         record("test_85_overdue_repay_restores_quota",

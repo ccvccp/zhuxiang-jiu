@@ -18,7 +18,7 @@ import sys
 import urllib.error
 import urllib.request
 
-BASE = "https://zxjiu.com"
+BASE = "https://zyjiu.com"
 NODE = r"d:\网站架构设计\nodejs\node-v20.18.2-win-x64\node.exe"
 # 本机 npm 全局包(Windows 口径: {prefix}/node_modules)
 ENTRY = (r"d:\网站架构设计\nodejs\node-v20.18.2-win-x64"

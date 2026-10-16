@@ -2,7 +2,7 @@
 
 用法:
     python build_sv73_dev.py <scriptId>
-        [--api https://zxjiu.com]
+        [--api https://zyjiu.com]
         [--host root@47.236.61.117]
         [--container zhuxiang-backend-1]
         [--token <accessToken>](或 SV73_TOKEN env; 缺省走 SSH 容器管道)
@@ -105,8 +105,8 @@ def main():
                     "(拉 storyboard→本地渲染→attach)")
     ap.add_argument("scriptId",
                     help="剧本号(pipeline 产出, 如 sv73_xxx)")
-    ap.add_argument("--api", default="https://zxjiu.com",
-                    help="生产 API 基址(默认 https://zxjiu.com)")
+    ap.add_argument("--api", default="https://zyjiu.com",
+                    help="生产 API 基址(默认 https://zyjiu.com)")
     ap.add_argument("--host", default="root@47.236.61.117",
                     help="SSH 管道主机(token 获取用)")
     ap.add_argument("--container",

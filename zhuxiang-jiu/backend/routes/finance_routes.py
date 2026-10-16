@@ -1,7 +1,7 @@
-"""财务管理路由(22 端点)
+"""财务管理路由(26 端点)
 
 鉴权:
-    - 管理端(21 接口): X-Role: admin 头
+    - 管理端(25 接口): X-Role: admin 头
     - 用户端(1 接口):  发票开具使用 X-Member-Id(普通会员可开具本人订单发票)
 
 异常映射(遵循项目约定):
@@ -15,7 +15,7 @@
     - 税务管理: 4 个(list/detail/calc/declare)
     - 资金对账: 3 个(list/daily/resolve)
     - 付款管理: 3 个(list/apply/approve)
-    - 财务报表: 2 个(profit/management)
+    - 财务报表: 6 个(profit/management + P2 补齐 balance-sheet/cash-flow/tax-filing/audit)
 """
 
 from typing import Annotated
@@ -439,6 +439,58 @@ async def management_report(
     _require_admin(x_role)
     try:
         return await _service.management_report(date)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/finance/report/balance-sheet/{period}", tags=["财务管理"])
+async def balance_sheet(
+    period: str,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """资产负债表(月末时点, 资产=负债+权益 恒等式, P2 报表体系)"""
+    _require_admin(x_role)
+    try:
+        return await _service.balance_sheet(period)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/finance/report/cash-flow/{period}", tags=["财务管理"])
+async def cash_flow_statement(
+    period: str,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """现金流量表(月度收付实现制, 经营/投资/筹资三活动, P2 报表体系)"""
+    _require_admin(x_role)
+    try:
+        return await _service.cash_flow_statement(period)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/finance/report/tax-filing/{period}", tags=["财务管理"])
+async def tax_filing_report(
+    period: str,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """税务申报表(月度四税种申报汇总, P2 报表体系)"""
+    _require_admin(x_role)
+    try:
+        return await _service.tax_filing_report(period)
+    except Exception as e:
+        raise _handle(e) from e
+
+
+@router.get("/api/finance/report/audit/{year}", tags=["财务管理"])
+async def audit_report(
+    year: str,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """审计报表(年度利润汇总+内控观察+审计意见, P2 报表体系)"""
+    _require_admin(x_role)
+    try:
+        return await _service.audit_report(year)
     except Exception as e:
         raise _handle(e) from e
 

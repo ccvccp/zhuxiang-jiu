@@ -437,6 +437,19 @@ class TicketService:
             }
             await self.repo.update_ticket(ticket_no, updates)
             ticket.update(updates)
+            # 竹信分 C6 投诉成立 -10(best-effort, 投诉工单结案即成立, 每单一次)
+            if ticket.get("type") == TICKET_TYPE_COMPLAINT \
+                    and ticket.get("userId"):
+                try:
+                    from services.role_service import (
+                        RoleService, BEHAVIOR_COMPLAINT_CONFIRMED,
+                    )
+                    await RoleService().publish_member_credit_event(
+                        int(ticket["userId"]),
+                        BEHAVIOR_COMPLAINT_CONFIRMED,
+                        "ticket", ref_id=ticket_no)
+                except Exception:
+                    pass
             return self._public(ticket)
 
     def _over_48h(self, ticket: dict) -> bool:
