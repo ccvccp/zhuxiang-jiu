@@ -1,4 +1,4 @@
-# P4-10 生产部署脚本(在 ECS 上经云助手执行; 由 aliyun-ecs-rpc.ps1 Send 投递)
+﻿# P4-10 生产部署脚本(在 ECS 上经云助手执行; 由 aliyun-ecs-rpc.ps1 Send 投递)
 # 流程: 备份 -> 下载新代码 -> 解压覆盖 -> import 冒烟(失败自动回滚, 服务不停)
 #       -> .env 追加 DPO 块(幂等) -> nssm 环境注入(保留既有项) -> 重启 -> 健康与日志验证
 $ProgressPreference = 'SilentlyContinue'

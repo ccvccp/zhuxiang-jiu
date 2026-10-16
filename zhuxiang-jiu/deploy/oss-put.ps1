@@ -1,4 +1,4 @@
-# OSS PUT 上传(本地执行; 需 $env:ALIYUN_AK_ID / ALIYUN_AK_SECRET)
+﻿# OSS PUT 上传(本地执行; 需 $env:ALIYUN_AK_ID / ALIYUN_AK_SECRET)
 # 用途: P4-10 生产部署——上传 backend-code-v4.tgz 到迁移基线同目录
 #   OSS: zxjiu-videos.oss-cn-hangzhou.aliyuncs.com/deploy/backend-migrate/
 # 签名: OSS V1 (HMAC-SHA1), 对齐 aliyun-ecs-rpc.ps1 的手工签名风格

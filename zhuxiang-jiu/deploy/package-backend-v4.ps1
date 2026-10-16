@@ -1,4 +1,4 @@
-# P4-10 生产代码包打包(本地执行, 无需 AK)
+﻿# P4-10 生产代码包打包(本地执行, 无需 AK)
 # 产物: deploy/dist/backend-code-v4.tgz —— 仅运行时代码(*.py + requirements.txt)
 $ErrorActionPreference = 'Stop'
 $backendDir = (Resolve-Path (Join-Path $PSScriptRoot '..\backend')).Path
