@@ -962,8 +962,15 @@ class KnowledgeService:
 
 
     async def rag_answer(self, question: str,
-                          provider: str = "rule") -> dict:
+                          provider: str = "rule",
+                          category: str = None) -> dict:
         """RAG 问答(P3.1, D-18): 检索增强问答统一入口
+
+        L3 category 专属检索(直播等消费方): category 非空时检索范围
+        限定该类条目(直播高频问题与通用 FAQ 隔离, 降噪提准); 该类
+        零命中自动回退全库重试一次(fail-soft), 结果带
+        categoryFallback=True 标记。category=None 全库检索——既有
+        调用方零变化(缓存 key 与返回结构均维持旧形态)。
 
         置信分级路由(按 top-1 相似度, 阈值分轨):
             - direct(语义轨≥0.72 / n-gram 轨≥0.50):
@@ -999,15 +1006,22 @@ class KnowledgeService:
             raise ValueError("问题不能为空")
         if provider not in ("rule", "llm", "dual"):
             raise ValueError(f"非法 provider({provider}), 须为 rule/llm/dual")
+        # L3: category 归一化(空串视同 None 全库, 防误过滤成空类)
+        category = (category or "").strip() or None
         # P4.2 结果缓存命中: 复用未过期结果(引用溯源结构一并缓存)
+        # L3: 缓存 key 加 category 维度——同问题不同类答案不同,
+        # 防跨类污染; category=None 维持旧 key 形态 "{question}|{provider}",
+        # 既有缓存命中不受影响
         from core.metrics import rag_cache_hits_total
         cache = _CACHES["result"]
-        key = f"{question}|{provider}"
+        key = (f"{question}|{provider}|{category}" if category
+               else f"{question}|{provider}")
         cached = cache.get(key)
         if cached is not None and cached[0] > time.time():
             rag_cache_hits_total.inc({"layer": "result", "hit": "yes"})
             return cached[1]
-        result = await self._rag_answer_uncached(question, provider)
+        result = await self._rag_answer_uncached(question, provider,
+                                                 category)
         cache[key] = (time.time() + KnowledgeService._RESULT_CACHE_TTL,
                       result)
         if len(cache) > KnowledgeService._RESULT_CACHE_MAX:
@@ -1015,19 +1029,56 @@ class KnowledgeService:
                 cache.pop(k, None)
         return result
 
+    async def _rag_recall(self, question: str, query_vec: dict,
+                          q_emb: list[float] | None,
+                          category: str | None
+                          ) -> list[tuple[dict, float]]:
+        """RAG top-k 召回(检索落点: repo.search_published; P3.7 重排精排)
+
+        L3: category 非空时限定该类条目, None 全库(既有口径)。
+        """
+        results = await self.repo.search_published(
+            query_vec, category,
+            max(self.RAG_TOP_K, self.RERANK_POOL_K),
+            query_embedding=q_emb)
+        return self._rerank_results(question, results, self.RAG_TOP_K)
+
+    @staticmethod
+    def _category_flagged(result: dict, category: str | None,
+                          fallback: bool) -> dict:
+        """L3: category 专属检索结果打回退标记
+
+        仅 category 非空时附加 categoryFallback 键(True=该类零命中
+        已回退全库); category=None 不加键——既有调用返回结构零变化。
+        """
+        if category is not None:
+            result["categoryFallback"] = fallback
+        return result
+
     async def _rag_answer_uncached(self, question: str,
-                                    provider: str) -> dict:
-        """RAG 问答主链路(rag_answer 的无缓存实现)"""
+                                    provider: str,
+                                    category: str = None) -> dict:
+        """RAG 问答主链路(rag_answer 的无缓存实现)
+
+        L3: category 非空时先按该类检索; 该类零命中自动回退全库
+        重试一次(fail-soft——专属语料缺失时行为与全库检索一致),
+        回退发生时结果带 categoryFallback=True。既有 rerank/置信
+        分级/citations 逻辑对 category 维度完全一致。
+        """
         # top-k 召回(不过滤阈值, 由分级路由判定; P3.7 重排精排)
         query_vec = tokenize(question)
         # 语义轨判定: 查询向量化成功 → embedding 分级阈值,
         # 失败/关闭(None → 2-gram) → n-gram 分级阈值(量纲不同)
         q_emb = self._query_embedding(question)
-        results = await self.repo.search_published(
-            query_vec, None,
-            max(self.RAG_TOP_K, self.RERANK_POOL_K),
-            query_embedding=q_emb)
-        results = self._rerank_results(question, results, self.RAG_TOP_K)
+        results = await self._rag_recall(question, query_vec, q_emb,
+                                         category)
+        category_fallback = False
+        if category and not results:
+            # L3 检索空回退: 该类零命中 → 全库重试一次(fail-soft,
+            # 不崩不阻断); 该类有候选(即使低置信)不回退
+            results = await self._rag_recall(question, query_vec, q_emb,
+                                             None)
+            category_fallback = True
         if q_emb is not None:
             direct_th = self.RAG_DIRECT_SIMILARITY_EMB
             synth_th = self.RAG_SYNTH_SIMILARITY_EMB
@@ -1035,14 +1086,18 @@ class KnowledgeService:
             direct_th = self.RAG_DIRECT_SIMILARITY
             synth_th = self.RAG_SYNTH_SIMILARITY
         if not results:
-            return {"answer": "", "mode": "unsolved",
-                    "citations": [], "confidence": 0.0}
+            return self._category_flagged(
+                {"answer": "", "mode": "unsolved",
+                 "citations": [], "confidence": 0.0},
+                category, category_fallback)
         top_entry, top_sim = results[0]
         if top_sim < synth_th:
             # 低置信: 最近邻计 miss, 不融合
             await self.repo.record_miss(top_entry["id"])
-            return {"answer": "", "mode": "unsolved",
-                    "citations": [], "confidence": 0.0}
+            return self._category_flagged(
+                {"answer": "", "mode": "unsolved",
+                 "citations": [], "confidence": 0.0},
+                category, category_fallback)
         # 过滤低于融合下限的候选
         hits = [{"entryId": e["id"], "question": e["question"],
                  "answer": e["answer"], "similarity": round(sim, 4),
@@ -1067,7 +1122,8 @@ class KnowledgeService:
                 dual_result = await self.rag_answer_dual(question, hits)
                 if dual_result is not None:
                     await self.repo.record_hit(top_entry["id"])
-                    return dual_result
+                    return self._category_flagged(dual_result, category,
+                                                  category_fallback)
                 logger.info("knowledge_dual_fallback_single_track")
             if provider == "llm":
                 answer = self._rag_llm_synthesize(question, hits)
@@ -1079,8 +1135,10 @@ class KnowledgeService:
             confidence = round(
                 sum(h["similarity"] for h in hits) / len(hits), 4)
         await self.repo.record_hit(top_entry["id"])
-        return {"answer": answer, "mode": mode,
-                "citations": citations, "confidence": confidence}
+        return self._category_flagged(
+            {"answer": answer, "mode": mode,
+             "citations": citations, "confidence": confidence},
+            category, category_fallback)
 
     # ============================================================
     # 3. 知识缺口队列

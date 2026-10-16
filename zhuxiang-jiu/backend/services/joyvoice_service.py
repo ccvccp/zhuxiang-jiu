@@ -153,6 +153,50 @@ def mood_context_line(user_mood: str) -> str:
 
 
 # ------------------------------------------------------------
+# P2·情绪→音色路由(蓝图 #15 千人千面"音色轴"): 播报 mood →
+# cogtts 音色三档映射, 纯表驱动确定性(零 LLM)。observe 默认
+# 只留痕 wouldVoice 不改实际合成音色——对齐 wake EMA 轨
+# off 态 emaWould* 影子观测范式(不拦截只留痕)。
+# 三档选择(从 JOYVOICE_PROFILES 六档实际档位中选, 档名即
+# cogtts voice id——未知名 cogtts 400 硬拒):
+#   care→chuichui(锤锤·低沉温和·沉稳暖男)——care 是用户
+#     负面/识别失败的安抚场景, 六档中唯一"温和+沉稳"双占
+#     (female 偏知性、male 偏大气, 安抚力都不如锤锤贴);
+#   steady→tongtong(悦悦·亲切甜暖·默认)——steady(侍酒师
+#     问话/高敏确认)语速系数 0.95 是最轻微语调档, 音色保持
+#     默认档灰度幅度最小(稳重感由语速系数承载, 不惊扰已
+#     习惯默认音色的存量用户);
+#   cheerful→luodo(乐乐·活泼灵动·活力达人)——活泼档唯一。
+# mood 为 ""(执行轮)不映射——数字事实播报不加人格渲染
+# (红线同 mood_for_turn 的执行轮空档)。
+# ------------------------------------------------------------
+MOOD_VOICE = {
+    "care": "chuichui",
+    "steady": "tongtong",
+    "cheerful": "luodo",
+}
+
+
+def voice_route_mode() -> str:
+    """P2·情绪→音色路由模式闸(默认 observe——零行为上线)
+
+    off→零痕迹(turn/响应体无 wouldVoice 字段, 合成音色
+    不变); observe→只留痕 wouldVoice(映射结果, mood 为 ""
+    时为 "")不改实际合成; enforce→服务端预合成链实际切
+    mood 映射音色。非法值按 observe 降级(非 off 即留痕、
+    非 enforce 不实切)。
+    """
+    return os.environ.get(
+        "XIAOZHU_JOYVOICE_VOICE_MODE", "observe"
+    ).strip().lower()
+
+
+def mood_voice(mood: str) -> str:
+    """情绪→音色映射(纯表驱动; ""或未知 mood→"")"""
+    return MOOD_VOICE.get(str(mood or ""), "")
+
+
+# ------------------------------------------------------------
 # P1.5·竹语: TTS 首声延迟优化(resp→play 1.1~1.5s 压至亚秒)
 # ------------------------------------------------------------
 

@@ -34,6 +34,15 @@ unsolved 闭环(L1/L2, 依据 docs/复购预测与直播QA模块优化建议.md 
     - L2 缺口闭环: list_gaps 拉取 live_qa 来源缺口(sessionId 前缀
       匹配), gap_to_draft 转知识草稿(status=pending 进候选池——
       先审后显铁律, 绝不直接 publish)。
+
+L3 直播专属知识源(category 优先检索):
+    - answer 经 rag_answer(category=直播类) 优先检索直播语料,
+      该类零命中自动回退全库(fail-soft), 结果 categoryFallback
+      标记透传至返回体;
+    - 直播类名 env LIVE_QA_KB_CATEGORY 可配(默认 live);
+    - 语料录入: 不新增录入代码——运营经 knowledge 既有
+      create_entry 以 category="live" 录入直播语料(价格口径/
+      当日活动规则/配送时效等), 先审后显(review→publish)铁律照旧。
 """
 
 import contextlib
@@ -97,6 +106,16 @@ def live_qa_mode() -> str:
     mode = os.environ.get("LIVE_QA_MODE", "on")
     mode = mode.strip().lower()
     return mode if mode in ("off", "on") else "on"
+
+
+def _live_kb_category() -> str:
+    """直播专属知识库 category(L3)
+
+    env LIVE_QA_KB_CATEGORY 可配(默认 live); 运营按该 category
+    录入直播语料(价格口径/活动规则/配送时效等)。
+    """
+    return ((os.environ.get("LIVE_QA_KB_CATEGORY", "live") or "live")
+            .strip() or "live")
 
 
 def _norm_question(question: str) -> str:
@@ -245,8 +264,12 @@ class LiveQaService:
             return cached_result
 
         # ④ RAG 问答(确定性 rule 轨; LLM 轨不进关键路径)
+        # L3: category=直播类优先检索直播语料, 该类零命中由
+        # knowledge 侧自动回退全库(fail-soft)
+        rag: dict = {}
         try:
-            rag = await self._knowledge.rag_answer(q, "rule")
+            rag = await self._knowledge.rag_answer(
+                q, "rule", category=_live_kb_category())
             rag_mode = str(rag.get("mode", "unsolved"))
             confidence = float(rag.get("confidence") or 0.0)
             answer_text = str(rag.get("answer") or "").strip()
@@ -270,6 +293,10 @@ class LiveQaService:
 
         result = {**base, "answer": final_answer,
                   "confidence": final_conf, "ragMode": rag_mode, "ts": ts}
+        # L3: category 检索空回退标记透传(knowledge 结果带键才透传,
+        # ragMode 口径不变)
+        if "categoryFallback" in rag:
+            result["categoryFallback"] = bool(rag["categoryFallback"])
 
         # 去重缓存登记(超限淘汰最旧一半, 对齐 knowledge 结果缓存策略)
         self._recent[key] = (time.time() + LIVE_QA_DEDUP_TTL, result)

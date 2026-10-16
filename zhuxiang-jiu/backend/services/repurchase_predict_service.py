@@ -3,7 +3,9 @@
 
 IMTM f(Q_user) × 消耗周期 → 建议书留痕 + 人工确认后推送:
     - 消耗周期: 有效订单(状态 ∈ PAID/SHIPPED/RECEIVED/COMPLETED)按支付
-      时间排序, 相邻间隔天数的中位数; ≥2 笔才可预测(<2 不可预测)
+      时间排序, 相邻间隔经 R3 规格归一化(间隔/前一单数量, 数量缺失
+      回退原始间隔)与 R4 送礼异常剔除(>2×中位数, 剔后剩余<2 回退
+      不剔)后取中位数; ≥2 笔才可预测(<2 不可预测)
     - 预测下次购买日 = 末单支付时间 + 周期; dueInDays = 今日距预测日
       天数(负数 = 已过期未回购)
     - qFactor(IMTM f(Q_user) hint, observe only 留痕, 不接定价链):
@@ -53,6 +55,9 @@ QF_VOLATILE = 0.8    # 波动型: CV > 0.6
 CV_REGULAR_LINE = 0.3
 CV_VOLATILE_LINE = 0.6
 QF_MIN_INTERVALS = 4   # 间隔样本 <4 跳过(小样本防抖)
+
+# R4 送礼季异常间隔剔除阈值: 间隔 > 2×初始中位数 → 送礼异常候选
+GIFT_OUTLIER_FACTOR = 2.0
 
 # qFactor 数值 → stats 分桶键(stats 口径, 数值不在此表 → "skipped")
 _QF_KEYS = {QF_REGULAR: "1.2", QF_NORMAL: "1.0", QF_VOLATILE: "0.8"}
@@ -119,6 +124,64 @@ def _qfactor_of(intervals: list[float]) -> tuple[float, float]:
     return QF_VOLATILE, cv
 
 
+def _order_qty(order: dict) -> "float | None":
+    """订单购买数量(件, R3 归一化分母)——现场核实口径:
+
+    主链路 order_service.create_order 落 items[].quantity(与
+    finance_service 消费税从量计征同口径); checkout 链路落
+    items[].qty —— 两种命名皆支持, quantity 优先;
+    数量缺失/字段非列表/全部非法/合计≤0 → None
+    (fail-soft: 调用方回退原始间隔, 既有无数量的订单行为零变化)
+    """
+    try:
+        items = order.get("items")
+        if not isinstance(items, (list, tuple)):
+            return None
+        total = 0.0
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            raw = it.get("quantity")
+            if raw is None:
+                raw = it.get("qty")
+            if raw is None:
+                continue
+            try:                       # 行级容错: 单行非法仅跳过该行
+                qty = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if qty > 0:
+                total += qty
+        return total if total > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _drop_gift_outliers(
+        intervals: list[float]) -> tuple[list[float], list[float]]:
+    """R4 送礼季异常间隔剔除(一轮迭代, 确定性规则可解释)
+
+    规则: 间隔 > GIFT_OUTLIER_FACTOR×初始中位数 → 送礼异常候选剔除,
+    周期与 CV 用剩余样本重算; 保护: 剔除后剩余样本 <2 → 整体回退
+    不剔(全原样, outliers=[])——不足 2 个样本无中位数可言。
+    数学注(保护分支为何自然数据打不进): 非负间隔序列排序后, 不超
+    中位数的样本至少 ⌈n/2⌉ 个, 而超限样本(>2×median0)只可能来自
+    大于 median0 的上半区, 至多 ⌊n/2⌋ 个 → 剔后剩余恒 ≥⌈n/2⌉≥2
+    (n≥3); n=2 时 v2 ≤ v1+v2 = 2×median0 恒不超限 —— 保护分支为
+    阈值未来收紧/脏数据(负间隔)的防御兜底。
+
+    Returns: (kept, outliers) —— outliers 保留标记供留痕运营复核
+    """
+    median0 = _median(intervals)
+    outliers = [v for v in intervals
+                if v > GIFT_OUTLIER_FACTOR * median0]
+    if not outliers or len(intervals) - len(outliers) < 2:
+        return list(intervals), []   # 无候选/剔后剩余<2 → 回退不剔
+    kept = [v for v in intervals
+            if v <= GIFT_OUTLIER_FACTOR * median0]
+    return kept, outliers
+
+
 class RepurchasePredictService:
     """无感复购预测(消耗周期中位数 × IMTM f(Q_user) hint, 建议书引擎)"""
 
@@ -137,31 +200,47 @@ class RepurchasePredictService:
         """单会员消耗周期预测
 
         口径: 有效订单按支付时间(paidAt 优先, createdAt 兜底)升序,
-        消耗周期 = 相邻间隔天数的中位数; 预测日 = 末单 + 周期;
-        dueInDays = 今日距预测日(负数 = 已过期未回购)。
+        相邻间隔经 R3 规格归一化(间隔/前一单数量, 基准量 1 件——
+        上一单买 N 件喝到下次购买, 每件消耗≈间隔/N; 数量缺失回退
+        原始间隔)后, 再经 R4 送礼异常剔除(>2×中位数标记剔除,
+        剔后剩余<2 回退不剔), 消耗周期 = 剩余间隔的中位数;
+        预测日 = 末单 + 周期; dueInDays = 今日距预测日(负=已过期)。
         """
         mid = member["id"]
         valid = [o for o in (orders or [])
                  if o.get("status") in VALID_ORDER_STATUSES]
-        paid = sorted(
-            (_parse_ts(order_paid_at(o)) for o in valid),
-            key=lambda dt: dt)
-        if len(paid) < PREDICT_MIN_ORDERS:
+        # 按支付时间升序(保留订单本体, 供 R3 数量提取; 稳定排序)
+        valid.sort(key=lambda o: _parse_ts(order_paid_at(o)))
+        if len(valid) < PREDICT_MIN_ORDERS:
             return {
                 "memberId": mid,
                 "predictable": False,
-                "orderCount": len(paid),
-                "reason": f"有效订单 {len(paid)} 笔(<{PREDICT_MIN_ORDERS}"
+                "orderCount": len(valid),
+                "reason": f"有效订单 {len(valid)} 笔(<{PREDICT_MIN_ORDERS}"
                           " 笔, 无间隔可测)",
                 "computedAt": _now_iso(),
             }
 
         now = datetime.now(UTC)
-        intervals = [
-            (paid[i] - paid[i - 1]).total_seconds() / 86400.0
-            for i in range(1, len(paid))]
-        cycle_days = _round2(_median(intervals))
-        q_factor, cv = _qfactor_of(intervals)
+        paid = [_parse_ts(order_paid_at(o)) for o in valid]
+        # R3 规格归一化: interval_normalized = raw_interval / 前一单数量;
+        # 数量缺失/0/非法 → 该样本回退原始间隔(向后兼容, normalized=False)
+        normalized = True
+        normalized_intervals: list[float] = []
+        for i in range(1, len(paid)):
+            raw = (paid[i] - paid[i - 1]).total_seconds() / 86400.0
+            qty = _order_qty(valid[i - 1])
+            if qty is not None:
+                normalized_intervals.append(raw / qty)
+            else:
+                normalized_intervals.append(raw)
+                normalized = False
+        # R4 送礼剔除(基于归一化后间隔: 囤货量干扰已被 R3 消除,
+        # 剩下的超长间隔才是送礼信号——文档语义)
+        kept, gift_outliers = _drop_gift_outliers(normalized_intervals)
+
+        cycle_days = _round2(_median(kept))
+        q_factor, cv = _qfactor_of(kept)
         predicted_at = paid[-1] + timedelta(days=cycle_days)
         due_in_days = _round2(
             (predicted_at - now).total_seconds() / 86400.0)
@@ -175,8 +254,14 @@ class RepurchasePredictService:
             "dueInDays": due_in_days,
             "qFactor": q_factor,          # IMTM f(Q_user) hint(observe only)
             "cv": _round2(cv) if cv is not None else None,
-            "formula": (f"消耗周期=相邻间隔天数中位数({len(intervals)} 个"
-                        f"间隔)={cycle_days} 天; 预测日=末单+周期; "
+            # R3/R4 留痕(observe only): 归一化开关/样本明细/剔除标记
+            "normalized": normalized,
+            "normalizedIntervals": [_round2(v) for v in normalized_intervals],
+            "giftOutliers": [_round2(v) for v in gift_outliers],
+            "formula": (f"消耗周期={'规格归一化后' if normalized else ''}"
+                        f"间隔中位数(样本 {len(kept)}/{len(normalized_intervals)}"
+                        f" 个, 送礼异常剔除 {len(gift_outliers)} 条"
+                        f">2×中位数)={cycle_days} 天; 预测日=末单+周期; "
                         f"dueInDays={due_in_days}(负=已逾期); qFactor 按"
                         f"CV 分档(≤{CV_REGULAR_LINE}→{QF_REGULAR}, "
                         f"≤{CV_VOLATILE_LINE}→{QF_NORMAL}, "

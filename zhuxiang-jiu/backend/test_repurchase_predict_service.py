@@ -4,7 +4,8 @@
 覆盖: 周期中位数 / <2 笔不可预测 / qFactor 三档+小样本跳过 /
 窗口命中与逾期判定 / 幂等(同日重复扫描) / observe 拒派发 /
 enforce 派发成功(打桩 MessageService 断言参数)+状态流转 /
-fail-soft(单会员订单异常不中断) / 模式闸 / 路由冒烟(X-Role)。
+fail-soft(单会员订单异常不中断) / 模式闸 / 路由冒烟(X-Role) /
+R3 规格归一化(生效/数量缺失回退) / R4 送礼异常剔除+剔除保护。
 
 运行:
     python -m pytest test_repurchase_predict_service.py -q
@@ -20,7 +21,8 @@ os.environ.setdefault("STORE_MODE", "asyncio")
 import pytest  # noqa: E402
 
 from services.repurchase_predict_service import (  # noqa: E402
-    RepurchasePredictService, repurchase_push_mode, SUGGESTION_TABLE)
+    RepurchasePredictService, repurchase_push_mode, SUGGESTION_TABLE,
+    _drop_gift_outliers, _order_qty)
 from repositories.message_repository import (  # noqa: E402
     CATEGORY_MEMBER, CHANNEL_INMAIL)
 
@@ -41,11 +43,23 @@ def _member(mid: int, **extra) -> dict:
     return data
 
 
-def _order(paid_days_ago: float, status: str = "PAID") -> dict:
-    """订单 dict(字段名对齐织物口径: payment.paidAt / status)"""
-    return {"id": int(paid_days_ago * 1000), "status": status,
-            "payment": {"paidAt": _days_ago(paid_days_ago)},
-            "priceDetail": {"actualAmount": 128.0}}
+def _order(paid_days_ago: float, status: str = "PAID",
+           quantity: int = None) -> dict:
+    """订单 dict(字段名对齐织物口径: payment.paidAt / status)
+
+    quantity 给定时按主链路 order_service 口径落数量
+    (items[].quantity 合计, R3 归一化分母); 缺省不落数量字段
+    ——既有 T1-T13 造数形态与行为零变化。
+    """
+    order = {"id": int(paid_days_ago * 1000), "status": status,
+             "payment": {"paidAt": _days_ago(paid_days_ago)},
+             "priceDetail": {"actualAmount": 128.0}}
+    if quantity is not None:
+        order["items"] = [{"productId": "ZX42-2026B01",
+                           "productName": "竹香酒·经典42°",
+                           "quantity": int(quantity),
+                           "unitPrice": 128.0}]
+    return order
 
 
 class _StubFabric:
@@ -555,5 +569,131 @@ def test_t13_scheduler_auto_on_scans(monkeypatch):
         rss.start_scan_loop()             # 事件循环内 → create_task
         await asyncio.sleep(0.1)          # 让首轮 run_once 执行完
         assert calls == [3]               # 启动立即扫一轮, 窗口 3 天
+
+    asyncio.run(run())
+
+
+# ---------- T14 R3 规格归一化生效 ----------
+
+def test_t14_normalized_cycle():
+    """R3: A(2件)→40天→B(1件)→20天→C(1件) → 归一化间隔
+    [40/2, 20/1]=[20,20] → 周期 20(原始口径 median(40,20)=30);
+    normalized=True 留痕, normalizedIntervals 样本明细正确"""
+
+    async def run():
+        svc = _svc()
+        pred = await svc.predict_member(_member(1), [
+            _order(60, quantity=2),   # A: 2 件(囤货), 40 天后复购
+            _order(20, quantity=1),   # B: 1 件, 20 天后复购
+            _order(0, quantity=1)])   # C: 1 件(末单)
+        assert pred["predictable"] is True
+        assert pred["normalized"] is True
+        assert pred["normalizedIntervals"] == [20.0, 20.0]
+        assert pred["cycleDays"] == 20.0        # 原始口径会是 median(40,20)=30
+        assert pred["giftOutliers"] == []       # median0=20, 2×20=40, 无超限
+        assert pred["dueInDays"] == pytest.approx(20.0, abs=0.2)
+        assert "规格归一化后" in pred["formula"]
+
+    asyncio.run(run())
+
+
+# ---------- T15 R3 数量缺失回退(fail-soft, 向后兼容) ----------
+
+def test_t15_qty_missing_fallback():
+    """R3 fail-soft: 同形态造数但无数量字段 → 逐样本回退原始间隔,
+    周期=median(40,20)=30(与 T1 旧行为一致); _order_qty 非法值
+    (0/负数/非列表/非数字串)一律 None 不崩"""
+
+    async def run():
+        svc = _svc()
+        pred = await svc.predict_member(_member(1), [
+            _order(60), _order(20), _order(0)])
+        assert pred["normalized"] is False
+        assert pred["normalizedIntervals"] == [40.0, 20.0]
+        assert pred["cycleDays"] == 30.0        # 原始口径, 旧行为零变化
+        assert pred["giftOutliers"] == []       # median0=30, 2×30=60, 无超限
+        # _order_qty 直测: 数量字段异常全回退 None(fail-soft)
+        assert _order_qty({}) is None                       # 无 items
+        assert _order_qty({"items": "not-a-list"}) is None  # 非列表
+        assert _order_qty({"items": [
+            {"quantity": 0}, {"qty": -2}]}) is None         # 全非法(≤0)
+        assert _order_qty({"items": [
+            {"quantity": "abc"}]}) is None                  # 非数字
+        # 合法与非法混行: 只累计合法行; quantity 优先, qty 兜底
+        assert _order_qty({"items": [
+            {"quantity": 2}, {"qty": "x"}]}) == 2.0
+        assert _order_qty({"items": [{"qty": 3}]}) == 3.0   # checkout 口径
+
+    asyncio.run(run())
+
+
+# ---------- T16 R4 送礼异常剔除 ----------
+
+def test_t16_gift_outlier_dropped():
+    """R4: 归一化间隔 [20,20,100](100>2×20) → 剔除后周期 20,
+    giftOutliers=[100] 留痕; 5 间隔增强对照 [20,20,20,20,100]:
+    不剔 CV≈0.889(0.8 档), 剔后 [20×4] CV=0 → qFactor=1.2
+    (送礼异常不再拉低档位)"""
+
+    async def run():
+        svc = _svc()
+        # 3 间隔(全 1 件, 归一化=原始): [20,20,100]
+        pred = await svc.predict_member(_member(1), [
+            _order(140, quantity=1), _order(120, quantity=1),
+            _order(100, quantity=1), _order(0, quantity=1)])
+        assert pred["normalized"] is True
+        assert pred["normalizedIntervals"] == [20.0, 20.0, 100.0]
+        assert pred["giftOutliers"] == [100.0]   # 100 > 2×median0=40
+        assert pred["cycleDays"] == 20.0         # 剩余 [20,20] 中位数
+        # 间隔样本 3<4 → qFactor 小样本跳过 1.0(而非被拉到 0.8 档)
+        assert pred["qFactor"] == 1.0 and pred["cv"] is None
+
+        # 5 间隔对照 [20,20,20,20,100]: 剔后剩 4 样本 → CV 可算且=0
+        pred5 = await svc.predict_member(_member(1), [
+            _order(180, quantity=1), _order(160, quantity=1),
+            _order(140, quantity=1), _order(120, quantity=1),
+            _order(100, quantity=1), _order(0, quantity=1)])
+        assert pred5["giftOutliers"] == [100.0]
+        assert pred5["cycleDays"] == 20.0
+        # 不剔时 mean=36, pstdev=32 → CV≈0.889>0.6(0.8 档);
+        # 剔后 [20×4] CV=0 → 1.2 规律型(档位不被送礼异常拉降)
+        assert pred5["qFactor"] == 1.2 and pred5["cv"] == 0.0
+
+    asyncio.run(run())
+
+
+# ---------- T17 R4 剔除保护(剔后剩余<2 回退不剔) ----------
+
+def test_t17_gift_guard_fallback():
+    """R4 保护分支: 剔除后剩余样本 <2 → 整体回退不剔(全原样, [])。
+
+    构造推导(为何用负间隔脏数据直测): 非负间隔序列排序后, 不超
+    median0 的样本至少 ⌈n/2⌉ 个, 而超限样本(>2×median0)只可能来自
+    大于 median0 的上半区, 至多 ⌊n/2⌋ 个 → 剔后剩余恒 ≥⌈n/2⌉≥2
+    (n≥3); n=2 时 v2 ≤ v1+v2=2×median0 恒不超限 —— 故自然序列
+    (含 [10,10,300] 系候选例: median0=10, 300 剔后恰剩 2≥2 不触发;
+    [10,10,10,300,400]: median0=10, 300/400 均剔后剩 3 仍不触发)
+    打不进保护分支, 唯有 median0<0 的脏数据(全样本>负阈值均成候选,
+    剔后剩余 0<2)可达 —— 保护分支即为此类异常与阈值未来收紧兜底。"""
+
+    # 负间隔脏数据: median0=-100 → 阈值 2×(-100)=-200,
+    # 三个样本全部 >-200 均成候选, 剔后剩余 0<2 → 保护生效原样返回
+    kept, outliers = _drop_gift_outliers([-100.0, -100.0, 5.0])
+    assert kept == [-100.0, -100.0, 5.0] and outliers == []
+
+    # 对照(任务候选例 [10,10,300]): median0=10, 300>20 被剔后
+    # 恰剩 2 个 ≥2 → 不触发保护, 正常剔除
+    kept2, outliers2 = _drop_gift_outliers([10.0, 10.0, 300.0])
+    assert kept2 == [10.0, 10.0] and outliers2 == [300.0]
+
+    # 全链路对照: [10,10,300] 形态订单 → 保护不误伤正常剔除
+    async def run():
+        svc = _svc()
+        pred = await svc.predict_member(_member(1), [
+            _order(320, quantity=1), _order(310, quantity=1),
+            _order(300, quantity=1), _order(0, quantity=1)])
+        assert pred["giftOutliers"] == [300.0]
+        assert pred["normalizedIntervals"] == [10.0, 10.0, 300.0]
+        assert pred["cycleDays"] == 10.0       # median(10,10)=10
 
     asyncio.run(run())

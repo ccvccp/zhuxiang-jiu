@@ -18,6 +18,10 @@
     T13 L1 跌回阈值解除 armed → 再连续 3 桶可再告警
     T14 L2 gaps 按 live_qa 来源过滤(频次倒序/含最近时间)
     T15 L2 to-draft 落 knowledge 待审 status=pending 且不 publish
+    T16 L3 answer 传参验证(打桩断言 rag_answer 收到 category=live,
+       env LIVE_QA_KB_CATEGORY 可配; categoryFallback 透传)
+    T17 L3 真实链路(种 live 条目→直播问法优先命中 live 答案;
+       live 语料缺失→回退全库泛条目+categoryFallback=True)
 
 打桩说明: T1-T7 以桩对象替换 KnowledgeService(计数 rag_answer /
 record_gap 调用), 避免依赖真实知识库内容; T8/T14/T15 走真实链路;
@@ -54,8 +58,9 @@ class _StubKnowledge:
         self.rag_calls = []
         self.gap_calls = []
 
-    async def rag_answer(self, question, provider="rule"):
-        self.rag_calls.append((question, provider))
+    async def rag_answer(self, question, provider="rule", category=None):
+        # L3: 签名同步加 category 参数(透传记录三元组供传参断言)
+        self.rag_calls.append((question, provider, category))
         if self.error is not None:
             raise self.error
         return dict(self.result)
@@ -68,9 +73,11 @@ class _StubKnowledge:
 @pytest.fixture(autouse=True)
 def _isolated(monkeypatch, tmp_path):
     """每用例隔离: 留痕目录重定向 tmp + 模式闸回默认 on
-    + RAG 固定 n-gram 确定性轨(不依赖外部 embedding 配置)"""
+    + 直播知识类名回默认 live + RAG 固定 n-gram 确定性轨
+    (不依赖外部 embedding 配置)"""
     monkeypatch.setattr(live_qa_module, "LIVE_QA_LOG_DIR", tmp_path)
     monkeypatch.delenv("LIVE_QA_MODE", raising=False)
+    monkeypatch.delenv("LIVE_QA_KB_CATEGORY", raising=False)
     monkeypatch.setenv("KNOWLEDGE_EMBEDDING", "off")
 
 
@@ -571,5 +578,82 @@ def test_t15_gap_to_draft_pending_not_published():
         await ks.record_gap("直播物流几天能到货", session_id="live_qa:room-2")
         r3 = await svc.gap_to_draft(question="直播物流几天能到货")
         assert r3["entryStatus"] == "pending"
+
+    asyncio.run(run())
+
+
+# ---------- T16 L3 category 传参验证(打桩) ----------
+
+def test_t16_answer_passes_live_category(monkeypatch):
+    """answer 调 rag_answer 收到 category=live(env 可配)
+    + 打桩结果的 categoryFallback 透传"""
+
+    async def run():
+        stub = _StubKnowledge()
+        svc = LiveQaService(knowledge=stub)
+        r = await svc.answer("room-1", "竹香酒直播间今晚多少钱")
+        assert r["ragMode"] == "direct"
+        # 默认直播知识类名 live, 位置参数 provider="rule" 照旧
+        assert stub.rag_calls == [("竹香酒直播间今晚多少钱",
+                                   "rule", "live")]
+        # env 重定向直播知识类名
+        monkeypatch.setenv("LIVE_QA_KB_CATEGORY", "live_vip")
+        stub2 = _StubKnowledge()
+        svc2 = LiveQaService(knowledge=stub2)
+        await svc2.answer("room-1", "竹香酒直播间今晚多少钱")
+        assert stub2.rag_calls == [("竹香酒直播间今晚多少钱",
+                                    "rule", "live_vip")]
+        # 打桩结果带 categoryFallback → answer 返回体透传
+        stub3 = _StubKnowledge(result={
+            "answer": "全库回退答案。", "mode": "direct",
+            "citations": [], "confidence": 0.8,
+            "categoryFallback": True,
+        })
+        svc3 = LiveQaService(knowledge=stub3)
+        r3 = await svc3.answer("room-x", "回退标记透传验证问题")
+        assert r3["ragMode"] == "direct"
+        assert r3["categoryFallback"] is True
+
+    asyncio.run(run())
+
+
+# ---------- T17 L3 真实链路: live 语料优先命中 ----------
+
+def test_t17_live_corpus_priority_real_chain():
+    """真实检索链路: live 语料缺失→回退全库泛条目+标记 True;
+    运营录入 live 条目后→直播问法优先命中 live 答案+标记 False"""
+
+    async def run():
+        from repositories.store import reset_store
+        from services.knowledge_service import _reset_knowledge_caches
+        reset_store()
+        _reset_knowledge_caches()   # 清模块级 RAG 缓存(跨用例隔离)
+        svc = LiveQaService()      # 真实 KnowledgeService(内存 store)
+        ks = svc._knowledge
+        # ① live 语料缺失: 全库只有 faq 泛条目 → 回退全库命中
+        faq = await ks.create_entry(
+            question="竹香酒下单后几天能到货",
+            answer="全库口径: 默认快递三天内送达。",
+            keywords="到货 物流", category="faq", source="manual")
+        await ks.review_entry(faq["id"], approve=True, reviewer_id=1)
+        await ks.publish_entry(faq["id"], publisher_id=1)
+        r_fallback = await svc.answer(
+            "room-live", "竹香酒下单后几天能到货")
+        assert r_fallback["ragMode"] == "direct"
+        assert r_fallback["answer"] == "全库口径: 默认快递三天内送达。"
+        assert r_fallback["categoryFallback"] is True
+        # ② 运营按 category="live" 录入直播语料(既有 create_entry,
+        #    先审后显链路照旧) → 直播问法优先命中 live 答案
+        live = await ks.create_entry(
+            question="直播间今晚下单什么时候能送到",
+            answer="直播口径: 今晚下单次日内送达。",
+            keywords="直播 下单 送达", category="live", source="manual")
+        await ks.review_entry(live["id"], approve=True, reviewer_id=1)
+        await ks.publish_entry(live["id"], publisher_id=1)
+        r_live = await svc.answer(
+            "room-live", "直播间今晚下单什么时候能送到")
+        assert r_live["ragMode"] == "direct"
+        assert r_live["answer"] == "直播口径: 今晚下单次日内送达。"
+        assert r_live["categoryFallback"] is False
 
     asyncio.run(run())

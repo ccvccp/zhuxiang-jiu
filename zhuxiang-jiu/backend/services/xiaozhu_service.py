@@ -64,6 +64,15 @@ def _vision_mode_enabled() -> bool:
                                                  "true")
 
 
+def _persona_mode_enabled() -> bool:
+    """P2·动态 Persona 引擎开关(默认 on; off 时 persona 行
+    不注入 context_desc 且 turn 留痕 personaLine 置空——
+    保留一键关闭路径, 对齐本模块既有开关写法)"""
+    return os.environ.get(
+        "XIAOZHU_PERSONA_MODE", "on").lower() \
+        not in ("off", "0", "false")
+
+
 # G2 推理强度分级·复杂问句信号(小竹Agent方案真缺口 G2):
 # 比较类/推荐理由类/长文本走深度档 XIAOZHU_LLM_MODEL_DEEP
 # (未配该 env 时全走快速档, 零影响); 简单 FAQ 保持快速档
@@ -922,6 +931,58 @@ LEVEL_TITLES = {
     1: "", 2: "竹叶会员", 3: "竹林会员",
     4: "竹海贵宾", 5: "竹海至尊",
 }
+
+
+def _persona_line(ctx: dict, mood: str) -> str:
+    """P2·动态 Persona 引擎最小版: 画像三因子组装单行 persona
+
+    ctx 为 build_context 产物(level/levelTitle/preferenceTags),
+    mood 为本轮用户情绪(userMood 四态; 空串省略情绪段——
+    joyvoice off 时无情绪源)。纯函数确定性(零 LLM 零 IO),
+    fail-soft——ctx 缺字段逐段降级不崩, 空段省略, 全空
+    返回空串(空串不注入 context_desc)。
+
+    行为边界论证(规则轨零变化): 本行唯一消费方是 LLM 轨
+    _llm_dialog_intent 的 context_desc 拼装, 而
+    XIAOZHU_LLM_MODE 默认 off 且 Redis 运时开关未开时
+    context_desc 无任何消费方——规则轨/执行轨数字与话术
+    零行为变化; turn 留痕(personaLine)不受此影响, 供
+    验证与后续开闸复盘。
+
+    组装形态(等级段,偏好段,情绪段):
+        对话对象:竹海贵宾(L5),偏好:竹筒酒/礼盒/酱香,情绪:负面(先关怀再办事)
+    """
+    try:
+        c = ctx if isinstance(ctx, dict) else {}
+        segs = []
+        # 等级段: 称号取 levelTitle(与话术前缀同源), L1 无
+        # 称号降级「会员」(新会员亦有对话对象定位); ctx 缺
+        # level 字段则整段省略(fail-soft)
+        lv = c.get("level")
+        if isinstance(lv, int) and 1 <= lv <= 5:
+            title = (str(c.get("levelTitle") or "")
+                     or LEVEL_TITLES.get(lv, "")
+                     or "会员")
+            segs.append(f"对话对象:{title}(L{lv})")
+        # 偏好段: 近 30 单类目 top3(空则省略)
+        prefs = [str(p) for p in
+                 (c.get("preferenceTags") or [])[:3]
+                 if str(p or "").strip()]
+        if prefs:
+            segs.append("偏好:" + "/".join(prefs))
+        # 情绪段: 四态话术指引(与 mood_context_line 同语义,
+        # 压缩为 persona 行内标签); 空串/未知省略
+        mood_seg = {
+            "negative": "情绪:负面(先关怀再办事)",
+            "hesitant": "情绪:犹豫(主动帮挑降低犹豫)",
+            "positive": "情绪:积极(轻快互动)",
+            "neutral": "情绪:中性(温和引导)",
+        }.get(str(mood or ""), "")
+        if mood_seg:
+            segs.append(mood_seg)
+        return ",".join(segs)
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def match_command(text: str) -> dict | None:
@@ -1902,6 +1963,21 @@ class XiaozhuService:
                     _jv.detect_user_mood(command_text))
                 if _mood_line:
                     context_desc += "\n" + _mood_line
+            # P2·动态 Persona 引擎(蓝图 #4/#15): 画像三因子
+            # (等级/偏好/情绪)组装 persona 行注入——画像从
+            # 排序层(话术前缀/商品重排)进入表达层(LLM prompt),
+            # 与上 mood_context_line 直接同构先例; 组装结果
+            # 暂存供 _save_turn 落痕 personaLine(LLM 轨 on 时
+            # 本轮只组装一次防双查; XIAOZHU_PERSONA_MODE=off
+            # 返回空串不注入; joyvoice off 时情绪段省略,
+            # 等级/偏好段独立注入)
+            _p_mood = (_jv.detect_user_mood(command_text)
+                       if _jv.joyvoice_mode_enabled() else "")
+            _persona = await self._persona_for_turn(
+                session.get("memberId"), _p_mood)
+            self._turn_persona_cached = _persona
+            if _persona:
+                context_desc += "\n" + _persona
             # v81 全站商品定位前置注入: 用户话含商品词→检索
             # 命中注入该款完整属性(优先于"当前款"); miss 注入
             # 全站清单事实——LLM 只能据实回答"没有这个商品",
@@ -4976,6 +5052,24 @@ class XiaozhuService:
             logger.debug("voice48_ctx_pref_skip: %s", exc)
         return context
 
+    async def _persona_for_turn(self, member_id,
+                                user_mood: str) -> str:
+        """组装本轮 persona 行(画像三因子→单行; fail-soft)
+
+        XIAOZHU_PERSONA_MODE=off 或组装异常返回空串——空串
+        不注入 context_desc 且 personaLine 留空, 关闭路径
+        零残留。数据源 build_context 全 fail-soft(等级/信值/
+        偏好任一失败降级空值), persona 组装不崩不阻断轮次。
+        """
+        try:
+            if not _persona_mode_enabled():
+                return ""
+            ctx = await self.build_context(member_id)
+            return _persona_line(ctx, user_mood)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice48_persona_skip: %s", exc)
+            return ""
+
     async def _try_voice_confirmation(self, session: dict,
                                       command_text: str
                                       ) -> dict | None:
@@ -5133,6 +5227,19 @@ class XiaozhuService:
                 return
             text = _jv.split_speech(reply)[0]
             voice = os.environ.get("TTS_VOICE", "tongtong")
+            # P2·情绪→音色路由 enforce 态: mood 映射音色实切
+            # (observe 默认态维持 TTS_VOICE 默认——wouldVoice
+            # 仅留痕; mood 为 "" 执行轮映射空回落默认)。voice
+            # 注入层论证: 本预合成是服务端唯一自决 voice 的
+            # TTS 合成点(turn 带 mood 上下文); /api/xiaozhu/tts
+            # 的 voice 取值链是前端请求参数主权→synthesize
+            # per-call 透传(链路已就绪, enforce 期前端按响应
+            # mood/wouldVoice 请求对应 voice 即可, 服务端不覆
+            # 盖用户自选音色); 缓存键 tts_cache_key(text|voice|
+            # speed) 已含 voice 维度, 键随音色同步无需改
+            if _jv.voice_route_mode() == "enforce":
+                voice = _jv.mood_voice(
+                    turn.get("mood") or "") or voice
             speed = _jv.MOOD_SPEED.get(
                 turn.get("mood") or "", 1.0)
             key = _jv.tts_cache_key(text, voice, speed)
@@ -5142,8 +5249,11 @@ class XiaozhuService:
             import asyncio as _aio
             import base64 as _b64
             from services.llm_client import provider_client
+            # voice 显式透传(原仅按 env 默认合成——行为等价;
+            # enforce 态映射音色经此入合成链)
             audio = await _aio.to_thread(
-                provider_client.synthesize_mp3, text, 1.0)
+                provider_client.synthesize_mp3, text, 1.0,
+                voice)
             if not audio:
                 return
             await client.set(
@@ -5172,6 +5282,25 @@ class XiaozhuService:
                 _um)
         else:
             _um, _mood = "", ""
+        # P2·动态 Persona 引擎: persona 行落 turn 留痕
+        # (personaLine 原样落——供验证与开闸复盘; LLM 轨
+        # _llm_dialog_intent 已组装则复用暂存防双查, 规则轨
+        # 轮次此处兜底组装, 观测口径每轮必有值; 开关 off
+        # 留空)
+        _persona_cached = getattr(
+            self, "_turn_persona_cached", None)
+        if _persona_cached is not None:
+            _persona = _persona_cached
+            self._turn_persona_cached = None
+        else:
+            _persona = await self._persona_for_turn(
+                session.get("memberId"), _um)
+        # P2·情绪→音色路由: mood→voice 三档映射留痕——
+        # observe(默认)/enforce 落 wouldVoice(映射结果, mood
+        # 为 "" 执行轮时为 ""), off 零字段零痕迹; 对齐 wake
+        # EMA off 态 emaWould* 影子观测范式(不拦截只留痕)
+        _would_voice = (None if _jv.voice_route_mode() == "off"
+                        else _jv.mood_voice(_mood))
         _suggest = (result.get("suggest")
                     or extras.get("suggest"))
         # 48号P3-1/P3-2: 唤醒分值落 turn 留痕(extras 透传
@@ -5217,9 +5346,15 @@ class XiaozhuService:
             # 78号: 情绪标签 + 选项引导(观测/回放全留痕)
             "mood": _mood,
             "userMood": _um,
+            # P2·动态 Persona 引擎: persona 行原样留痕(off 空串)
+            "personaLine": _persona,
             "suggest": _suggest,
             "ts": ts(),
         }
+        # P2·情绪→音色路由: off 态不落字段(零痕迹), observe/
+        # enforce 态落 wouldVoice(执行轮 mood="" 时为 "")
+        if _would_voice is not None:
+            turn["wouldVoice"] = _would_voice
         await self.repo.save_turn(turn)
         session["lastActiveAt"] = ts()
         await self.repo.save_session(session)
@@ -5230,7 +5365,7 @@ class XiaozhuService:
             _aio.create_task(self._preheat_tts_first_chunk(turn))
         except Exception:
             pass
-        return {
+        resp = {
             "success": True,
             "sessionId": session_id,
             "turn": turn,
@@ -5262,3 +5397,9 @@ class XiaozhuService:
             # 静默轮标记(免提无语境闲聊门控)——前端入流不播报
             "silent": result.get("silent", False),
         }
+        # P2·情绪→音色路由: 响应体留 wouldVoice(off 态零字段;
+        # 前端 enforce 灰度期可按此(或 mood)映射请求 voice——
+        # /tts 的 voice 取值链已 per-call 透传, 无需服务端改)
+        if _would_voice is not None:
+            resp["wouldVoice"] = _would_voice
+        return resp
