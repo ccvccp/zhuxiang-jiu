@@ -287,11 +287,11 @@ authBadge: 页头登录态 UI(昵称+管理员标识+退出); requireLogin() 未
 
 | 页面 | 对应模块 | 说明 |
 |---|---|---|
-| attract72-dashboard | 引流大模型(72号) | 纯静态展示 |
-| synapse-dashboard | 织智(76号人格) | 品牌资产公示（后端观测面 GET 公开已就绪，前端暂静态） |
-| zjian-dashboard | 竹鉴(77号) | 质检典藏公示（同上） |
-| zyh-dashboard | 竹韵智衡(75号) | 工艺宪法/图谱公示（product-detail 已 live 消费 `/api/zyh/knowledge`） |
-| xx64-delivery-dashboard | 智能模块(64号) | 交付看板静态版 |
+| attract72-dashboard | 引流大模型(72号) | 纯静态展示（⛔ T2.4 依赖登记：待模块观测面端点开放后按 T2.1 同法接入） |
+| synapse-dashboard | 织智(76号人格) | **live ✅ T2.2**：`/api/synapse/*` 六端点观测面（人格经线/日记流/织补进化）+ 失败回落静态文案 |
+| zjian-dashboard | 竹鉴(77号) | **live ✅ T2.3**：`/api/zjian/*` 五端点观测面（质检报告/指标目录）+ 失败回落静态文案 |
+| zyh-dashboard | 竹韵智衡(75号) | **live ✅ T2.1**：`/api/zyh/*` 五端点观测面（工艺宪法/图谱/守门统计）+ 失败回落静态文案（product-detail 另消费 `/api/zyh/knowledge`） |
+| xx64-delivery-dashboard | 智能模块(64号) | 交付看板静态版（⛔ T2.4 依赖登记：同 attract72） |
 
 ### 5.2 module-test.html — 模块初测仪表盘
 
@@ -362,7 +362,7 @@ authBadge: 页头登录态 UI(昵称+管理员标识+退出); requireLogin() 未
 |---|---|---|---|
 | ~~高~~ ✅ | products / news-detail | data.js → `/api/product/*`、`/api/community/posts`（公开GET）——T1.1/T1.4 已完成 | ✅ 已接 |
 | ~~中~~ ✅ | cart | 本地计价 → `POST /api/order/price/preview`——T1.3 已完成 | ✅ 已接 |
-| 中 | 5 个静态观测页 | 接各自模块公开观测 GET（`/api/zyh/` `/api/synapse/` `/api/zjian/` 已公开GET） | ✅ |
+| ~~中~~ ✅ | 5 个静态观测页 | 3 页（zyh/synapse/zjian）T2.1-T2.3 已接观测面 GET + 失败回落；attract72/xx64-delivery **T2.4 依赖登记**：待后端观测面开放 | ✅ 3/5 |
 | 低 | alliance-mall / index | 商户维度增强 | ✅ |
 
 > 维护说明：本文映射由脚本扫描前端源码生成（fetch 调用 + API 字面量 → 模块接口文档反查标注方法/鉴权）。新增页面或接口接线后重跑扫描即可刷新；页面标题取自各 HTML `<title>`。

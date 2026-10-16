@@ -28,6 +28,24 @@
         bar.style.display = 'block';
     }
 
+    // 观测面失败回落(T2.3): 区块渲染静态文案——不编造数据, 提示手动刷新
+    var FALLBACK_TEXT = '观测面暂不可达 · 点击「手动刷新」重试';
+
+    function fallback(ids) {
+        ids.forEach(function (id) {
+            var el = $(id);
+            if (!el) { return; }
+            if (el.tagName === 'TBODY') {
+                var cols = el.closest('table')
+                    .querySelectorAll('thead th').length || 1;
+                el.innerHTML = '<tr><td colspan="' + cols
+                    + '" class="dash-empty">' + FALLBACK_TEXT + '</td></tr>';
+            } else {
+                el.innerHTML = '<div class="dash-empty">' + FALLBACK_TEXT + '</div>';
+            }
+        });
+    }
+
     function getJSON(path) {
         return fetch(apiBase() + path).then(function (r) {
             if (!r.ok) { throw new Error(path + ' → HTTP ' + r.status); }
@@ -180,19 +198,34 @@
         err('');
         $('apiBase').value = apiBase();
         getJSON('/api/zjian/mode').then(renderMode)
-            .catch(function (e) { err('灰度态加载失败: ' + e.message); });
+            .catch(function (e) {
+                err('灰度态加载失败: ' + e.message);
+                fallback(['ovMode', 'modeDetail']);
+            });
         getJSON('/api/zjian/metrics').then(function (d) {
             renderStats(d);
             renderMetricHits(d.metricHits);
-        }).catch(function (e) { err('统计加载失败: ' + e.message); });
+        }).catch(function (e) {
+            err('统计加载失败: ' + e.message);
+            fallback(['ovStats', 'ovMetricHits']);
+        });
         getJSON('/api/zjian/asks').then(function (d) {
             renderAsks(d.items);
-        }).catch(function (e) { err('留痕加载失败: ' + e.message); });
+        }).catch(function (e) {
+            err('留痕加载失败: ' + e.message);
+            fallback(['askRows']);
+        });
         getJSON('/api/zjian/reports').then(function (d) {
             renderReports(d.items);
-        }).catch(function (e) { err('典藏加载失败: ' + e.message); });
+        }).catch(function (e) {
+            err('典藏加载失败: ' + e.message);
+            fallback(['reportRows']);
+        });
         getJSON('/api/zjian/catalog').then(renderCatalog)
-            .catch(function (e) { err('目录加载失败: ' + e.message); });
+            .catch(function (e) {
+                err('目录加载失败: ' + e.message);
+                fallback(['catalogRows']);
+            });
         $('lastUpdate').textContent = '更新于 '
             + new Date().toLocaleTimeString();
     }
