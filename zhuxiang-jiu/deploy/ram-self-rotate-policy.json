@@ -7,7 +7,7 @@
         "ram:ListAccessKeys",
         "ram:UpdateAccessKey"
       ],
-      "Resource": "acs:ram::*:user/<RAM用户名>"
+      "Resource": "acs:ram::*:user/power-application-user"
     }
   ]
 }
