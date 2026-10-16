@@ -289,6 +289,24 @@ TOOL_REGISTRY = {
         "requiresConsent": False,
         "safeMessage": "智搜暂时不可用, 请稍后再试。",
     },
+    # 满减最优测算(全只读——确定性引擎, 零 LLM 产数)
+    "coupon.best_combo": {
+        "operationId": "calc_best_coupon_combo",
+        "summary": "满减最优测算(怎么买最划算)",
+        "description": "【只读】当用户说「满减最优/怎么买"
+                      "最划算/凑单/优惠组合」时调用, 由"
+                      "确定性引擎按 等级折扣→满减券→积分→"
+                      "运费 口径链枚举积分三方案(不用/用满/"
+                      "保免邮线)取实付最小并给凑单提示。"
+                      "❌ LLM 只负责选择本指令, 所有金额数字"
+                      "由确定性引擎计算, 禁止 LLM 编造或心算"
+                      "任何金额。🔒 privacy_cost: 0(纯函数"
+                      "测算零数据读取成本)。",
+        "tier": TIER_READONLY,
+        "privacyCost": 0.0,
+        "requiresConsent": False,
+        "safeMessage": "测算服务开小差了, 请稍后再试。",
+    },
     # ---------- 写(2) ----------
     "trust.bind": {
         "operationId": "bind_trust_profile",

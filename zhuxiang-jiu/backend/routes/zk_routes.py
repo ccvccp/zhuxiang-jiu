@@ -12,6 +12,9 @@
                    / wakeup-suggest / wakeups
     - P3 进化闭环: feedback / feedbacks / params / detect
                    / memo / memos
+    - 无感复购(蓝图近期项②): repurchase/scan / repurchase/suggestions
+                   / repurchase/dispatch(建议书留痕, 派发须管理员
+                   逐条确认且仅 enforce 模式解锁)
 
 铁律: 全部确定性规则引擎(LLM 禁入); 建议书永不自动执行;
 不输出信值五维与 TV 资产(68 号雷达域)。
@@ -27,6 +30,7 @@ from services.zk_insight_service import ZkInsightService
 from services.zk_retention_service import ZkRetentionService
 from services.zk_operation_service import ZkOperationService
 from services.zk_evolution_service import ZkEvolutionService
+from services.repurchase_predict_service import RepurchasePredictService
 
 router = APIRouter()
 _store = _ZkStore()
@@ -36,6 +40,7 @@ _retention = ZkRetentionService(fabric=_fabric, store=_store)
 _operation = ZkOperationService(fabric=_fabric, insight=_insight,
                                 store=_store)
 _evolution = ZkEvolutionService(fabric=_fabric, store=_store)
+_repurchase = RepurchasePredictService(fabric=_fabric, store=_store)
 
 
 def _require_admin(x_role: str | None):
@@ -81,6 +86,12 @@ class FeedbackRequest(PydBaseModel):
 class MemoRequest(PydBaseModel):
     topic: str = Field(..., description="member_day/level_threshold")
     notes: str = Field("", max_length=200)
+
+
+class RepurchaseDispatchRequest(PydBaseModel):
+    suggestionId: int = Field(..., ge=1, description="建议书 ID(人工确认闸)")
+    operator: str = Field(..., min_length=1, max_length=64,
+                          description="确认操作人(留痕)")
 
 
 # ============================================================
@@ -349,6 +360,60 @@ async def memos(x_role: str = Header(None, alias="X-Role"),
     try:
         rows = await _evolution.memos(limit=limit)
         return {"success": True, "data": rows, "count": len(rows)}
+    except Exception as e:
+        _handle(e)
+
+
+# ============================================================
+# 无感复购预测(蓝图近期项②, admin)
+# ============================================================
+
+@router.get("/api/member-ai/repurchase/scan",
+            tags=["智客AI智能会员大模型"])
+async def repurchase_scan(
+        x_role: str = Header(None, alias="X-Role"),
+        window_days: int = Query(3, ge=0, le=30)):
+    """无感复购预测扫描(消耗周期中位数 × qFactor hint, 建议书留痕)
+
+    模式闸 REPURCHASE_PUSH_MODE=off|observe|enforce(默认 observe):
+    off 不扫描; observe 扫描+留痕+结构化日志, 绝不发送。
+    """
+    _require_admin(x_role)
+    try:
+        result = await _repurchase.scan_due(window_days=window_days)
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.get("/api/member-ai/repurchase/suggestions",
+            tags=["智客AI智能会员大模型"])
+async def repurchase_suggestions(
+        x_role: str = Header(None, alias="X-Role"),
+        limit: int = Query(50, ge=1, le=200)):
+    """复购建议书留痕列表(upcoming/overdue 两类)"""
+    _require_admin(x_role)
+    try:
+        rows = await _repurchase.suggestions(limit=limit)
+        return {"success": True, "data": rows, "count": len(rows)}
+    except Exception as e:
+        _handle(e)
+
+
+@router.post("/api/member-ai/repurchase/dispatch",
+             tags=["智客AI智能会员大模型"])
+async def repurchase_dispatch(data: RepurchaseDispatchRequest,
+                              x_role: str = Header(None, alias="X-Role")):
+    """人工确认后派发单条复购建议书(站内信)
+
+    人工确认闸: 必须显式 suggestionId + operator; 仅 enforce 模式解锁
+    (enforce 也非自动发送); 发送走消息模块(防骚扰四重调控)。
+    """
+    _require_admin(x_role)
+    try:
+        result = await _repurchase.dispatch(
+            suggestion_id=data.suggestionId, operator=data.operator)
+        return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
 

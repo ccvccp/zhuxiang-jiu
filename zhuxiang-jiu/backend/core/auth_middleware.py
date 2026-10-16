@@ -190,6 +190,11 @@ PUBLIC_GET_PREFIXES = (
 # 注入对照), 存在伪造 X-Member-Id 越权读取的风险
 PUBLIC_GET_PATTERNS = (
     re.compile(r"^/api/activity/\d+$"),
+    # 站内内容社区 C端浏览面 GET(蓝图近期项③): feed/已过审帖子
+    # 游客可看(news.html 无 Token fetch); 精确到两路径——pending
+    # 待审列表为 admin 端点, 不能落公开前缀(公开面会剥离身份头,
+    # 改由 JWT strict/compat 门控 + 路由层 _require_admin 兜底)
+    re.compile(r"^/api/community/(feed|posts)$"),
 )
 
 

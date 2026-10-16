@@ -72,7 +72,10 @@ SAFE_READONLY = {"product.new", "product.price",
                  "map.nearby",
                  # 智搜联动(全只读——统一意图引擎问答,
                  # 规则轨 _execute 直达, 沙箱口径对齐)
-                 "zs.search"}
+                 "zs.search",
+                 # 满减最优测算(全只读——确定性引擎口径链,
+                 # 枚举积分三方案, 数字零 LLM)
+                 "coupon.best_combo"}
 SAFE_WRITE: set[str] = set()        # 一般写: 执行+播报(现空)
 SENSITIVE = {"trust.convert",        # 高敏: confirmToken 流
              "repair.execute",       # 49号P0: 修复执行同高敏流

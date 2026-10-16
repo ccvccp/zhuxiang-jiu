@@ -681,6 +681,23 @@ COMMANDS = [
         "examples": ["小竹，打开购物车", "小竹，去个人中心"],
     },
     {
+        # 满减最优测算·coupon.best_combo: 确定性引擎测算
+        # (等级折扣→满减券→积分→运费口径链, 枚举积分三方案
+        # 避免用猛跌破免邮线反多付运费——零 LLM 产数)。
+        # 置 promo.query 前: "优惠组合"含"优惠"子串, 注册序
+        # first-match 下后置会被泛化"优惠"截胡
+        "action": "coupon.best_combo",
+        "label": "满减最优测算",
+        "patterns": ["满减最优", "最优测算", "满减测算",
+                     "怎么买最划算", "怎么买最省",
+                     "怎么买划算", "买多少划算", "优惠组合",
+                     "凑单", "满减", "测算一下",
+                     "帮我算.*怎么买"],
+        "examples": ["小竹，1200元怎么买最划算",
+                     "小竹，满减最优测算",
+                     "小竹，帮我凑单到1000"],
+    },
+    {
         "action": "promo.query",
         "label": "查优惠",
         "patterns": ["优惠", "活动", "折扣", "促销",
@@ -2774,6 +2791,11 @@ class XiaozhuService:
                 # 智搜联动(全只读): 统一意图引擎问答(P2)
                 return await self._exec_zs_search(
                     text, member_id)
+            if action == "coupon.best_combo":
+                # 满减最优测算(全只读): 确定性引擎口径链
+                # 枚举积分三方案, 数字全部来自引擎返回
+                return await self._exec_coupon_best_combo(
+                    session, text, context)
             if action == "cart.add":
                 return await self._exec_cart_add(
                     session, text)
@@ -2820,6 +2842,125 @@ class XiaozhuService:
             return {"reply": "智搜当前处于关闭状态, "
                             "可稍后再试或转人工客服",
                     "card": None}
+
+    async def _exec_coupon_best_combo(
+            self, session: dict, text: str,
+            context: dict) -> dict:
+        """满减最优测算(coupon.best_combo——确定性引擎, 零 LLM)
+
+        金额来源优先级:
+            ① 会话购物清单(cart_added/cart_setqty 轮次聚合,
+               与结算 _resolve_cart_items 同口径)
+            ② 口述金额(中文/阿拉伯数字解析, 引擎层纯函数)
+            ③ 都无 → 引导话术
+        会员等级取 build_context(fail-soft 默认 L1); 竹叶
+        余额取积分账本(fail-soft 默认 0)。本 handler 只做
+        格式化播报——所有数字必须来自 best_combo 引擎返回。
+        """
+        from services.coupon_best_combo_service import (
+            best_combo, parse_amount_cn,
+        )
+        from core.helpers import round_half_up
+        member_id = session.get("memberId")
+        # ① 会话购物清单金额
+        goods_total = None
+        source = ""
+        try:
+            items = await self._resolve_cart_items(session)
+            total = sum(
+                float(it.get("price") or 0)
+                * int(it.get("quantity") or 0)
+                for it in items)
+            if items and total > 0:
+                goods_total = round_half_up(total)
+                count = sum(int(it.get("quantity") or 0)
+                            for it in items)
+                source = f"清单 {count} 件"
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("coupon_combo_cart_skip: %s", exc)
+        # ② 口述金额
+        if goods_total is None:
+            amount = parse_amount_cn(text)
+            if amount:
+                goods_total = amount
+                source = "口述金额"
+        # ③ 引导
+        if not goods_total:
+            return {"reply": "想测算怎么买最划算——可以说"
+                            "「1200 元怎么买最划算」, 或先把"
+                            "心仪的酒加入清单再说「满减最优"
+                            "测算」",
+                    "card": None}
+        # 等级与竹叶余额(fail-soft)
+        member_level = int((context or {}).get("level") or 1)
+        points_available = 0
+        if member_id:
+            try:
+                from services.points_service import (
+                    PointsService,
+                )
+                account = await PointsService().get_account(
+                    member_id)
+                points_available = int(
+                    account.get("totalPoints") or 0)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("coupon_combo_points_skip: %s",
+                             exc)
+        combo = best_combo(goods_total, member_level,
+                           points_available)
+        # 格式化播报(数字全部来自引擎返回)
+        bits = [f"商品 ¥{combo['goodsTotal']:g}"]
+        if combo["memberDiscount"]:
+            bits.append(f"会员折 −¥"
+                        f"{abs(combo['memberDiscount']):g}")
+        if combo["couponDiscount"]:
+            bits.append(f"满减券 −¥"
+                        f"{abs(combo['couponDiscount']):g}")
+        if combo["pointsUsed"]:
+            bits.append(f"竹叶 {combo['pointsUsed']} 抵 −¥"
+                        f"{abs(combo['pointsDiscount']):g}")
+        bits.append("免运费" if not combo["shipping"]
+                    else f"运费 ¥{combo['shipping']:g}")
+        reply = (f"最划算买法({source or '测算'}): "
+                 + ", ".join(bits)
+                 + f" — 实付 ¥{combo['finalPay']:g}"
+                 + (f", 共省 ¥{combo['savings']:g}"
+                    if combo["savings"] else ""))
+        if combo["hint"]:
+            reply += f"。{combo['hint']}"
+        card = {
+            "type": "coupon_combo",
+            "subject": "满减最优测算",
+            "items": [
+                {"label": "商品总额",
+                 "value": f"¥{combo['goodsTotal']:g}"},
+                {"label": f"会员 L{combo['memberLevel']} 折扣",
+                 "value": (f"−¥{abs(combo['memberDiscount']):g}"
+                           if combo["memberDiscount"]
+                           else "无折扣")},
+                {"label": "满减券",
+                 "value": (f"−¥{abs(combo['couponDiscount']):g}"
+                           if combo["couponDiscount"]
+                           else "未达门槛")},
+                {"label": f"竹叶抵扣({combo['pointsUsed']})",
+                 "value": (f"−¥"
+                           f"{abs(combo['pointsDiscount']):g}"
+                           if combo["pointsUsed"]
+                           else "不使用")},
+                {"label": "运费",
+                 "value": ("免" if not combo["shipping"]
+                           else f"¥{combo['shipping']:g}")},
+                {"label": "实付",
+                 "value": f"¥{combo['finalPay']:g}"},
+                {"label": "共省",
+                 "value": f"¥{combo['savings']:g}"},
+            ],
+            "plan": combo["plan"],
+            "hint": combo["hint"],
+            "finalPay": combo["finalPay"],
+            "pointsUsed": combo["pointsUsed"],
+        }
+        return {"reply": reply, "card": card, "jump": None}
 
     async def _exec_sandbox(self, session: dict,
                             action: str, text: str,

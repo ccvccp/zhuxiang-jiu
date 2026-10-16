@@ -78,6 +78,7 @@ ZK_TABLES = (
     "zk_ltvs",           # LTV 预测记录(id=memberId)
     "zk_sandboxes",      # 等级沙盘推演留痕
     "zk_wakeups",        # 沉睡唤醒建议书
+    "repurchase_suggestions",  # 无感复购预测建议书(蓝图近期项②)
     "zk_feedbacks",      # 反馈闭环留痕
     "zk_memos",          # 决策备忘录
     "zk_params",         # 可学习参数(单记录 "params")

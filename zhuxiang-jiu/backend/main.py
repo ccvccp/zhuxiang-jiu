@@ -101,6 +101,8 @@ from routes import (
     register_attract_routes,
     # 智能知识库训练模型
     register_knowledge_routes,
+    # 数字人直播弹幕QA(复用 knowledge RAG 规则轨)
+    register_live_qa_routes,
     # AI智能中枢模块(35号·全站AI大模型总调度)
     register_hub_routes,
     # 限时秒杀模块
@@ -115,6 +117,8 @@ from routes import (
     register_ai_learning_routes,
     # AI智能推广模块(36号·热点雷达+GLM-5.3 Agent内容工厂)
     register_promo_routes,
+    # 站内内容社区(蓝图近期项③·sv73 产物站内化 feed+商品挂载+UGC 评测)
+    register_community_routes,
     register_zy_routes,
     # 智法·AI智能法务大模型(24号合规模块升级更名·产销法一体化)
     register_zf_routes,
@@ -294,6 +298,7 @@ register_ticket_routes(app)
 register_role_routes(app)
 register_attract_routes(app)
 register_knowledge_routes(app)
+register_live_qa_routes(app)
 register_hub_routes(app)
 register_flashsale_routes(app)
 register_ai_scoring_routes(app)
@@ -302,6 +307,8 @@ register_ai_scoring_auth_routes(app)
 register_ai_learning_routes(app)
 # AI智能推广模块(36号)
 register_promo_routes(app)
+# 站内内容社区(蓝图近期项③: sv73 产物站内化 feed+商品挂载+UGC 评测)
+register_community_routes(app)
 # 智启元·AI智能财务大模型(财务管理模块升级更名)
 register_zy_routes(app)
 # 智法·AI智能法务大模型(24号合规模块升级更名·产销法一体化)

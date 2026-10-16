@@ -249,7 +249,7 @@ async def main():
            and all(a in TOOL_REGISTRY for a in (
                "wine.verify", "wine.craft",
                "wine.recommend", "wine.reviews"))
-           and len(COMMANDS) == 28,
+           and len(COMMANDS) == 30,
            "")
     sid2 = (await svc.open_session(1))["sessionId"]
     await svc.handle_text(sid2, "小竹，看新品")

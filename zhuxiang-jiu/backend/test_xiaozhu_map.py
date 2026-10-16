@@ -5,7 +5,7 @@
         不误伤既有指令(产品/加购)
     [B] 服务直测: POI 注册→类型过滤(直营/餐饮) /
         空库兜底 / 全未营业兜底 / 播报格式
-    [C] 集成链路: handle_text 全链 + 指令计数(28) +
+    [C] 集成链路: handle_text 全链 + 指令计数(30) +
         FC 注册表对齐
 
 运行:
@@ -113,8 +113,9 @@ async def main():
            "竹香酒" in str(r.get("reply")) or "门店" in str(
                r.get("reply")),
            str(r.get("reply"))[:60])
-    # (48号招商 agent.faq/agent.apply 上线后指令数 28→29)
-    record("指令计数 29", len(COMMANDS) == 29,
+    # (48号招商 agent.faq/agent.apply 上线后指令数 28→29;
+    #  coupon.best_combo 满减最优测算增补后 29→30)
+    record("指令计数 30", len(COMMANDS) == 30,
            str(len(COMMANDS)))
     record("FC 注册表对齐", "map.nearby" in TOOL_REGISTRY)
 

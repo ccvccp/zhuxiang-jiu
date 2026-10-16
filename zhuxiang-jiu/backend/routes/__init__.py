@@ -81,10 +81,14 @@ from routes.role_routes import register_role_routes
 from routes.attract_routes import register_attract_routes
 # 智能知识库训练模型
 from routes.knowledge_routes import register_knowledge_routes
+# 数字人直播弹幕QA(复用 knowledge RAG 规则轨)
+from routes.live_qa_routes import register_live_qa_routes
 # AI智能中枢模块(35号·全站AI大模型总调度)
 from routes.hub_routes import register_hub_routes
 # AI智能推广模块(36号·热点雷达+GLM-5.3 Agent内容工厂)
 from routes.promo_routes import register_promo_routes
+# 站内内容社区(蓝图近期项③·sv73 产物站内化 feed+商品挂载+UGC 评测)
+from routes.community_routes import register_community_routes
 # 智启元·AI智能财务大模型(财务管理模块升级更名)
 from routes.zy_routes import register_zy_routes
 # 智法·AI智能法务大模型(24号合规合法智能监控模块升级更名·产销法一体化)
@@ -180,8 +184,10 @@ __all__ = [
     "register_role_routes",
     "register_attract_routes",
     "register_knowledge_routes",
+    "register_live_qa_routes",
     "register_hub_routes",
     "register_promo_routes",
+    "register_community_routes",
     "register_zy_routes",
     "register_zf_routes",
     "register_zw_routes",
