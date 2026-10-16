@@ -25,29 +25,29 @@
         border-radius:10px;font-size:14px;outline:none}
     .search-box input:focus{border-color:#1f4e5f}
     .search-box button{padding:0 22px;border:none;border-radius:10px;
-        background:#1f4e5f;color:#fff;font-size:14px;cursor:pointer}
-    .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;
+        background:#1f4e5f;color:var(--color-white, #fff);font-size:14px;cursor:pointer}
+    .card{background:var(--color-white, #fff);border-radius:12px;padding:16px;margin-bottom:14px;
         box-shadow:0 1px 4px rgba(0,0,0,.05)}
     .card h3{font-size:14px;margin-bottom:12px;color:#1f4e5f}
     .kv{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;font-size:13px}
-    .kv .k{color:#999;font-size:11px;margin-bottom:2px}
+    .kv .k{color:var(--color-muted, #999);font-size:11px;margin-bottom:2px}
     .kv .v{font-weight:600;word-break:break-all}
     .pill{display:inline-block;padding:1px 10px;border-radius:10px;
         font-size:11px;font-weight:600}
-    .pill.ok{background:#e9f7ee;color:#2f9e44}
-    .pill.warn{background:#fff7e0;color:#a37400}
-    .pill.gray{background:#f0f0f0;color:#888}
+    .pill.ok{background:#e9f7ee;color:var(--color-ok, #2f9e44)}
+    .pill.warn{background:#fff7e0;color:var(--color-warn, #a37400)}
+    .pill.gray{background:#f0f0f0;color:var(--color-text-faint, #888)}
     .timeline{list-style:none}
     .timeline li{position:relative;padding:0 0 18px 26px;
         border-left:2px solid #e4dfd4;margin-left:8px}
     .timeline li:last-child{border-left-color:transparent;padding-bottom:0}
     .timeline li::before{content:'';position:absolute;left:-7px;top:2px;
         width:12px;height:12px;border-radius:50%;background:#c9c2b2;
-        border:2px solid #fff}
-    .timeline li.now::before{background:#2f9e44}
-    .timeline .t{font-size:11px;color:#999;margin-bottom:2px}
+        border:2px solid var(--color-white, #fff)}
+    .timeline li.now::before{background:var(--color-ok, #2f9e44)}
+    .timeline .t{font-size:11px;color:var(--color-muted, #999);margin-bottom:2px}
     .timeline .d{font-size:13px;font-weight:600}
-    .timeline .loc{font-size:11px;color:#888}
+    .timeline .loc{font-size:11px;color:var(--color-text-faint, #888)}
     .empty{text-align:center;color:#aaa;font-size:13px;padding:30px 0}
     .err{background:#fee;border:1px solid #f99;color:#c33;border-radius:8px;
         padding:10px 12px;font-size:12px;margin-bottom:12px;display:none}

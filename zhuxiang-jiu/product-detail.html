@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#355c44">
+    <meta name="theme-color" content="var(--color-primary-dark)">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="竹香酒">
@@ -25,7 +25,7 @@
         <div class="product-detail" id="productDetail"></div>
 
         <!-- 产品详情描述 -->
-        <section class="section" style="background:#fff;border-radius:16px;padding:40px;margin-bottom:30px;">
+        <section class="section" style="background:var(--color-white);border-radius:16px;padding:40px;margin-bottom:30px;">
             <div class="section-title">
                 <h2>产品<span>详情</span></h2>
                 <div class="deco-line"></div>
@@ -34,17 +34,17 @@
         </section>
 
         <!-- 75号·竹韵·智衡 知识内核联动(游客白名单 GET /api/zyh/knowledge) -->
-        <section class="section" style="background:#fff;border-radius:16px;padding:40px;margin-bottom:30px;">
+        <section class="section" style="background:var(--color-white);border-radius:16px;padding:40px;margin-bottom:30px;">
             <div class="section-title">
                 <h2>竹酒<span>知识内核</span></h2>
                 <div class="deco-line"></div>
             </div>
             <div id="zyhKnowledge" style="max-width:800px;margin:0 auto;color:var(--color-text);">
-                <p style="color:#999;font-size:14px;">加载中…（75号·竹韵·智衡 事实锚点）</p>
+                <p style="color:var(--color-muted);font-size:14px;">加载中…（75号·竹韵·智衡 事实锚点）</p>
             </div>
             <div style="text-align:center;margin-top:24px;">
                 <a href="zyh.html" style="display:inline-block;padding:10px 28px;border-radius:22px;
-                    background:var(--color-primary,#355c44);color:#fff;text-decoration:none;font-size:14px;">
+                    background:var(--color-primary,var(--color-primary-dark));color:var(--color-white);text-decoration:none;font-size:14px;">
                     🎋 问竹韵·智衡（工艺 / 香型 / 竞品对比）
                 </a>
                 <p style="font-size:11px;color:#aaa;margin-top:8px;">
@@ -192,9 +192,9 @@
                 .then(d => {
                     const box = document.getElementById('zyhKnowledge');
                     if (!d || !Array.isArray(d.items) || !d.items.length) {
-                        box.innerHTML = '<p style="color:#999;font-size:13px;">'
+                        box.innerHTML = '<p style="color:var(--color-muted);font-size:13px;">'
                             + '知识内核暂不可达——可直接访问 <a href="zyh.html" '
-                            + 'style="color:var(--color-primary,#355c44);">竹韵·智衡问答</a>。</p>';
+                            + 'style="color:var(--color-primary,var(--color-primary-dark));">竹韵·智衡问答</a>。</p>';
                         return;
                     }
                     const items = WANT.map(id => d.items.find(it => it.id === id))

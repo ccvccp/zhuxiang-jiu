@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#355c44">
+    <meta name="theme-color" content="var(--color-primary-dark)">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="竹香酒">
@@ -31,7 +31,7 @@
         <div style="display:flex;gap:10px;margin:20px 0;flex-wrap:wrap;" id="newsCategories"></div>
 
         <!-- 品牌内容社区提示条（社区流渲染后显示） -->
-        <div id="communityBadge" style="display:none;align-items:center;gap:8px;margin:20px 0;padding:10px 16px;background:#fff;border-radius:12px;color:var(--color-text-light);font-size:14px;">
+        <div id="communityBadge" style="display:none;align-items:center;gap:8px;margin:20px 0;padding:10px 16px;background:var(--color-white);border-radius:12px;color:var(--color-text-light);font-size:14px;">
             🌿 品牌内容社区 · 多平台发布内容实时同步
         </div>
 
@@ -41,7 +41,7 @@
         <!-- 分页（演示） -->
         <div style="text-align:center;padding:30px 0;">
             <button class="btn btn-outline" disabled>上一页</button>
-            <span style="margin:0 16px;padding:8px 16px;background:var(--color-primary);color:#fff;border-radius:6px;">1</span>
+            <span style="margin:0 16px;padding:8px 16px;background:var(--color-primary);color:var(--color-white);border-radius:6px;">1</span>
             <button class="btn btn-outline" disabled>下一页</button>
         </div>
     </div>
@@ -94,7 +94,7 @@
                     </div>
                 </div>`).join('');
             document.getElementById('newsList').innerHTML = html || `
-                <div style="background:#fff;border-radius:16px;padding:60px;text-align:center;color:var(--color-text-light);">
+                <div style="background:var(--color-white);border-radius:16px;padding:60px;text-align:center;color:var(--color-text-light);">
                     暂无该分类新闻 🌿
                 </div>`;
         }

@@ -28,8 +28,8 @@
     .dash-banner h1{font-size:20px;margin:0 0 4px}
     .dash-banner p{font-size:12px;margin:0;opacity:.85}
     .dash-section{margin-bottom:18px}
-    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
-        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .dash-card{background:var(--color-bg-card,var(--color-white));border:1px solid
+        var(--color-border,var(--color-border-gray));border-radius:8px;padding:16px}
     .card-head{display:flex;justify-content:space-between;align-items:
         center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
     .card-head h3{font-size:15px;margin:0}
@@ -37,44 +37,44 @@
     .dash-toolbar input,.dash-toolbar select{padding:6px 8px;border:1px
         solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
     .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
-        #3d6650;color:#fff;cursor:pointer;font-size:12px}
+        #3d6650;color:var(--color-white);cursor:pointer;font-size:12px}
     .dash-btn.ghost{background:#6b7280}
     .dash-btn.small{padding:3px 10px;font-size:11px}
-    .dash-btn.approve{background:#2f9e44}
-    .dash-btn.reject{background:#c0392b}
+    .dash-btn.approve{background:var(--color-ok)}
+    .dash-btn.reject{background:var(--color-danger)}
     .dash-error{background:#fee;border:1px solid #f99;color:#c33;
         padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
         font-size:12px}
     .dash-info{background:#efe;border:1px solid #9c9;color:#393;
         padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
         font-size:12px}
-    .dash-empty{color:#999;font-size:12px;padding:12px;text-align:center}
+    .dash-empty{color:var(--color-muted);font-size:12px;padding:12px;text-align:center}
     .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
         minmax(140px,1fr));gap:8px}
     .ov-cell{background:var(--color-bg-sub,#f7f7f7);border-radius:6px;
         padding:8px 10px}
-    .ov-cell .k{font-size:11px;color:#888;margin-bottom:3px}
+    .ov-cell .k{font-size:11px;color:var(--color-text-faint);margin-bottom:3px}
     .ov-cell .v{font-size:17px;font-weight:600}
-    .ov-cell .v.red{color:#c0392b}
-    .ov-cell .v.green{color:#2f9e44}
-    .ov-cell .v.blue{color:#24619c}
-    .ov-cell .v.yellow{color:#a37400}
+    .ov-cell .v.red{color:var(--color-danger)}
+    .ov-cell .v.green{color:var(--color-ok)}
+    .ov-cell .v.blue{color:var(--color-info)}
+    .ov-cell .v.yellow{color:var(--color-warn)}
     .ov-cell .v.gray{color:#6b7280}
     table.dash-table{width:100%;border-collapse:collapse;font-size:12px}
     .dash-table th{text-align:left;padding:6px 8px;background:
         var(--color-bg-sub,#f0f0f0);border-bottom:1px solid
         var(--color-border,#ddd);white-space:nowrap}
     .dash-table td{padding:5px 8px;border-bottom:1px solid
-        var(--color-border,#eee);vertical-align:top}
+        var(--color-border,var(--color-gray-light));vertical-align:top}
     .kind-pill{display:inline-block;padding:1px 8px;border-radius:8px;
-        font-size:11px;font-weight:600;background:#eef3fb;color:#24619c}
+        font-size:11px;font-weight:600;background:#eef3fb;color:var(--color-info)}
     .redline-bar{background:#fff8f0;border:1px solid #e8a30c;color:#8a5a00;
         padding:8px 12px;border-radius:5px;margin-bottom:14px;
         font-size:11px}
-    .note-bar{font-size:11px;color:#999;text-align:center;padding:10px 0}
+    .note-bar{font-size:11px;color:var(--color-muted);text-align:center;padding:10px 0}
     .sig-chip{display:inline-block;padding:2px 8px;border-radius:9px;
         font-size:11px;margin:2px;background:#f0f0f0;color:#555}
-    .zone-error{color:#c0392b;font-size:12px;padding:8px}
+    .zone-error{color:var(--color-danger);font-size:12px;padding:8px}
 </style>
 </head>
 <body>
@@ -96,7 +96,7 @@
                     公平性桥接</button>
                 <button class="dash-btn ghost" onclick="runRedteam()">
                     红队复跑</button>
-                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+                <span id="lastUpdate" style="font-size:11px;color:var(--color-muted)"></span>
             </div>
             <div id="errBar" class="dash-error"></div>
             <div id="infoBar" class="dash-info"></div>
@@ -115,12 +115,12 @@
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
                 <div>
                     <div id="ovUsage" class="ov-cells"><div class="dash-empty">加载中…</div></div>
-                    <div style="margin-top:8px;font-size:11px;color:#888"
+                    <div style="margin-top:8px;font-size:11px;color:var(--color-text-faint)"
                         id="usageNote"></div>
                 </div>
                 <div>
                     <div id="ovConfirm" class="ov-cells"><div class="dash-empty">加载中…</div></div>
-                    <div style="margin-top:8px;font-size:11px;color:#888"
+                    <div style="margin-top:8px;font-size:11px;color:var(--color-text-faint)"
                         id="confirmNote"></div>
                 </div>
             </div>
@@ -146,7 +146,7 @@
                 </div>
                 <div>
                     <div id="ovPoints" class="ov-cells"><div class="dash-empty">加载中…</div></div>
-                    <div style="margin-top:8px;font-size:11px;color:#888"
+                    <div style="margin-top:8px;font-size:11px;color:var(--color-text-faint)"
                         id="pointsChips"></div>
                 </div>
             </div>
@@ -170,7 +170,7 @@
                                 class="dash-empty">暂无待审共创指令</td></tr></tbody>
                         </table>
                     </div>
-                    <div style="margin-top:8px;font-size:11px;color:#888"
+                    <div style="margin-top:8px;font-size:11px;color:var(--color-text-faint)"
                         id="failureChips"></div>
                 </div>
                 <div>
@@ -184,7 +184,7 @@
                                 class="dash-empty">暂无等级分组</td></tr></tbody>
                         </table>
                     </div>
-                    <div style="margin-top:8px;font-size:11px;color:#888"
+                    <div style="margin-top:8px;font-size:11px;color:var(--color-text-faint)"
                         id="fairnessNote"></div>
                 </div>
             </div>
@@ -198,7 +198,7 @@
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
                 <div>
                     <div id="ovFc" class="ov-cells"><div class="dash-empty">加载中…</div></div>
-                    <div style="margin-top:8px;font-size:11px;color:#888"
+                    <div style="margin-top:8px;font-size:11px;color:var(--color-text-faint)"
                         id="fcNote"></div>
                 </div>
                 <div>
@@ -211,7 +211,7 @@
                                 class="dash-empty">暂无拒绝记录</td></tr></tbody>
                         </table>
                     </div>
-                    <div style="margin-top:8px;font-size:11px;color:#888"
+                    <div style="margin-top:8px;font-size:11px;color:var(--color-text-faint)"
                         id="fcToolChips"></div>
                 </div>
             </div>
@@ -225,7 +225,7 @@
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
                 <div>
                     <div id="ovVoicepay" class="ov-cells"><div class="dash-empty">加载中…</div></div>
-                    <div style="margin-top:8px;font-size:11px;color:#888"
+                    <div style="margin-top:8px;font-size:11px;color:var(--color-text-faint)"
                         id="vpRules"></div>
                 </div>
                 <div>
@@ -251,7 +251,7 @@
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
                 <div>
                     <div id="ovFeedback" class="ov-cells"><div class="dash-empty">加载中…</div></div>
-                    <div style="margin-top:8px;font-size:11px;color:#888"
+                    <div style="margin-top:8px;font-size:11px;color:var(--color-text-faint)"
                         id="feedbackNote"></div>
                 </div>
                 <div>
@@ -277,12 +277,12 @@
             <div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 14px;align-items:center">
                 <input id="fixWrong" placeholder="误听词(如: 加入国五车)"
                     style="padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;width:180px">
-                <span style="color:#888">→</span>
+                <span style="color:var(--color-text-faint)">→</span>
                 <input id="fixRight" placeholder="修正词(如: 加入购物车)"
                     style="padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:12px;width:180px">
                 <button onclick="addAsrFix()"
-                    style="padding:6px 14px;border:none;border-radius:5px;background:#355c44;color:#fff;font-size:12px;cursor:pointer">添加词条</button>
-                <span style="font-size:11px;color:#888">负反馈轮的"用户说"即 ASR 原文——肉眼断定误听后在此加词条</span>
+                    style="padding:6px 14px;border:none;border-radius:5px;background:var(--color-primary-dark);color:var(--color-white);font-size:12px;cursor:pointer">添加词条</button>
+                <span style="font-size:11px;color:var(--color-text-faint)">负反馈轮的"用户说"即 ASR 原文——肉眼断定误听后在此加词条</span>
             </div>
             <div style="max-height:240px;overflow:auto">
                 <table class="dash-table">
@@ -302,7 +302,7 @@
         <div class="dash-card">
             <div class="card-head"><h3>⑪ 学习进化（P3：👎 自动入队 →
                 AI 建议/人工判定 → 采纳即词条+热词双生效）</h3></div>
-            <div style="display:flex;gap:10px;align-items:center;padding:10px 14px;font-size:11px;color:#888">
+            <div style="display:flex;gap:10px;align-items:center;padding:10px 14px;font-size:11px;color:var(--color-text-faint)">
                 <span id="learnStats">加载中…</span>
                 <span id="learnLlmState"></span>
                 <select id="learnFilter" onchange="loadLearnQueue()"
@@ -331,9 +331,9 @@
         <div class="dash-card">
             <div class="card-head"><h3>⑫ 语音数据周报（P4：近 7 天聚合 · 周一自动站内信 ·
                 学习进化效果观测）</h3></div>
-            <div style="display:flex;gap:10px;align-items:center;padding:10px 14px;font-size:11px;color:#888">
+            <div style="display:flex;gap:10px;align-items:center;padding:10px 14px;font-size:11px;color:var(--color-text-faint)">
                 <button onclick="loadWeekly()"
-                    style="padding:5px 14px;border:none;border-radius:5px;background:#355c44;color:#fff;font-size:11px;cursor:pointer">生成周报</button>
+                    style="padding:5px 14px;border:none;border-radius:5px;background:var(--color-primary-dark);color:var(--color-white);font-size:11px;cursor:pointer">生成周报</button>
                 <span id="weeklyMeta"></span>
             </div>
             <div id="weeklyBody" style="padding:0 14px 12px"><div class="dash-empty">点击"生成周报"查看近 7 天语音数据</div></div>

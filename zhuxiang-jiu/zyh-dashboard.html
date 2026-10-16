@@ -27,8 +27,8 @@
     .dash-banner h1{font-size:20px;margin:0 0 4px}
     .dash-banner p{font-size:12px;margin:0;opacity:.85}
     .dash-section{margin-bottom:18px}
-    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
-        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .dash-card{background:var(--color-bg-card,var(--color-white));border:1px solid
+        var(--color-border,var(--color-border-gray));border-radius:8px;padding:16px}
     .card-head{display:flex;justify-content:space-between;align-items:
         center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
     .card-head h3{font-size:15px;margin:0}
@@ -36,40 +36,40 @@
     .dash-toolbar input,.dash-toolbar select{padding:6px 8px;border:1px
         solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
     .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
-        #2d3748;color:#fff;cursor:pointer;font-size:12px}
+        #2d3748;color:var(--color-white);cursor:pointer;font-size:12px}
     .dash-btn.ghost{background:#6b7280}
     .dash-error{background:#fee;border:1px solid #f99;color:#c33;
         padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
         font-size:12px}
-    .dash-empty{color:#999;font-size:12px;padding:12px;text-align:center}
+    .dash-empty{color:var(--color-muted);font-size:12px;padding:12px;text-align:center}
     .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
         minmax(140px,1fr));gap:8px}
     .ov-cell{background:var(--color-bg-sub,#f7f7f7);border-radius:6px;
         padding:8px 10px}
-    .ov-cell .k{font-size:11px;color:#888;margin-bottom:3px}
+    .ov-cell .k{font-size:11px;color:var(--color-text-faint);margin-bottom:3px}
     .ov-cell .v{font-size:17px;font-weight:600}
-    .ov-cell .v.red{color:#c0392b}
-    .ov-cell .v.green{color:#2f9e44}
-    .ov-cell .v.blue{color:#24619c}
-    .ov-cell .v.yellow{color:#a37400}
+    .ov-cell .v.red{color:var(--color-danger)}
+    .ov-cell .v.green{color:var(--color-ok)}
+    .ov-cell .v.blue{color:var(--color-info)}
+    .ov-cell .v.yellow{color:var(--color-warn)}
     table.dash-table{width:100%;border-collapse:collapse;font-size:12px}
     .dash-table th{text-align:left;padding:6px 8px;background:
         var(--color-bg-sub,#f0f0f0);border-bottom:1px solid
         var(--color-border,#ddd);white-space:nowrap}
     .dash-table td{padding:5px 8px;border-bottom:1px solid
-        var(--color-border,#eee);vertical-align:top}
+        var(--color-border,var(--color-gray-light));vertical-align:top}
     .grade-pill{display:inline-block;padding:1px 8px;border-radius:8px;
         font-size:11px;font-weight:600}
-    .grade-pill.full{background:#e8f2ec;color:#2f9e44}
-    .grade-pill.assist{background:#e9f0f8;color:#24619c}
+    .grade-pill.full{background:#e8f2ec;color:var(--color-ok)}
+    .grade-pill.assist{background:#e9f0f8;color:var(--color-info)}
     .grade-pill.shadow{background:#f0ecf8;color:#6747c9}
-    .grade-pill.off{background:#eee;color:#777}
-    .grade-pill.paused{background:#c0392b;color:#fff}
+    .grade-pill.off{background:var(--color-gray-light);color:#777}
+    .grade-pill.paused{background:var(--color-danger);color:var(--color-white)}
     .redline-bar{background:#fff8f0;border:1px solid #e8a30c;color:#8a5a00;
         padding:8px 12px;border-radius:5px;margin-bottom:14px;
         font-size:11px}
-    .note-bar{font-size:11px;color:#999;text-align:center;padding:10px 0}
-    .kv-line{font-size:11px;color:#666;margin-top:8px;line-height:1.7}
+    .note-bar{font-size:11px;color:var(--color-muted);text-align:center;padding:10px 0}
+    .kv-line{font-size:11px;color:var(--color-text-mid);margin-top:8px;line-height:1.7}
     .cite-tag{display:inline-block;background:#eef4f0;color:#2f6b4f;
         border-radius:4px;padding:0 6px;font-size:10px;margin:1px 2px}
 </style>
@@ -89,7 +89,7 @@
                     placeholder="http://localhost:8000"></label>
                 <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
                 <button class="dash-btn ghost" onclick="loadAll()">手动刷新</button>
-                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+                <span id="lastUpdate" style="font-size:11px;color:var(--color-muted)"></span>
             </div>
             <div id="errBar" class="dash-error"></div>
             <div class="redline-bar">
@@ -116,7 +116,7 @@
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
                 <div>
                     <div id="ovGuard" class="ov-cells"><div class="dash-empty">加载中…</div></div>
-                    <div style="margin-top:8px;font-size:11px;color:#888">
+                    <div style="margin-top:8px;font-size:11px;color:var(--color-text-faint)">
                         L1 正则网关(旧工艺/医疗/注入) → L2 规则分类(混淆/等同/
                         医疗断言/无引用) → L3 溯源(专利 ZZ26SW1489303A /
                         企标 ZZ26SW1489404B)。
@@ -124,7 +124,7 @@
                 </div>
                 <div>
                     <div id="ovCache" class="ov-cells"><div class="dash-empty">加载中…</div></div>
-                    <div style="margin-top:8px;font-size:11px;color:#888">
+                    <div style="margin-top:8px;font-size:11px;color:var(--color-text-faint)">
                         语义缓存: 归一化 query → 应答, TTL 7 天; 命中即返回
                         (cacheHit 留痕)。
                     </div>

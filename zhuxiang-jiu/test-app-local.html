@@ -12,10 +12,10 @@
             margin: 0; padding: 24px; color: #1d2129; line-height: 1.6;
         }
         .wrap { max-width: 980px; margin: 0 auto; }
-        h1 { color: #355c44; font-size: 24px; margin: 0 0 4px; }
+        h1 { color: var(--color-primary-dark, #355c44); font-size: 24px; margin: 0 0 4px; }
         .sub { color: #6b6b6b; font-size: 13px; margin-bottom: 24px; }
         .toolbar {
-            background: #fff; padding: 16px; border-radius: 12px;
+            background: var(--color-white, #fff); padding: 16px; border-radius: 12px;
             box-shadow: 0 2px 12px rgba(0,0,0,0.06); margin-bottom: 16px;
             display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
         }
@@ -31,20 +31,20 @@
             padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 600;
         }
         .scenario {
-            background: #fff; border-radius: 12px; padding: 20px;
+            background: var(--color-white, #fff); border-radius: 12px; padding: 20px;
             margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-            border-left: 4px solid #355c44;
+            border-left: 4px solid var(--color-primary-dark, #355c44);
         }
-        .scenario.fail { border-left-color: #c0392b; }
-        .scenario h3 { margin: 0 0 8px; color: #355c44; font-size: 16px; }
+        .scenario.fail { border-left-color: var(--color-danger, #c0392b); }
+        .scenario h3 { margin: 0 0 8px; color: var(--color-primary-dark, #355c44); font-size: 16px; }
         .scenario .meta { color: #6b6b6b; font-size: 13px; margin-bottom: 12px; }
         .checks { list-style: none; padding: 0; margin: 12px 0 0; }
         .checks li { padding: 6px 0; font-size: 13px; border-bottom: 1px dashed #e5e6eb; }
         .checks li:last-child { border-bottom: none; }
         .pass { color: #00b42a; font-weight: 600; }
-        .fail { color: #c0392b; font-weight: 600; }
+        .fail { color: var(--color-danger, #c0392b); font-weight: 600; }
         .summary {
-            background: #355c44; color: #fff; padding: 20px; border-radius: 12px;
+            background: var(--color-primary-dark, #355c44); color: var(--color-white, #fff); padding: 20px; border-radius: 12px;
             margin-top: 16px; text-align: center;
         }
         .summary .big { font-size: 32px; font-weight: 700; }
@@ -68,7 +68,7 @@
         <div class="toolbar">
             <button onclick="runAllScenarios()">▶ 运行全部场景</button>
             <button class="secondary" onclick="resetAll()">↻ 重置数据</button>
-            <span id="envInfo" class="env-tag" style="background:#e8f0ec;color:#355c44;">环境加载中...</span>
+            <span id="envInfo" class="env-tag" style="background:#e8f0ec;color:var(--color-primary-dark, #355c44);">环境加载中...</span>
         </div>
 
         <div id="scenarios"></div>
@@ -614,7 +614,7 @@ async function runAllScenarios() {
             html += '<pre>订单: ' + JSON.stringify(r.data, null, 2) + '</pre>';
         }
         if (r.error) {
-            html += '<pre style="color:#c0392b;">错误: ' + r.error + '</pre>';
+            html += '<pre style="color:var(--color-danger, #c0392b);">错误: ' + r.error + '</pre>';
         }
         card.innerHTML = html;
         container.appendChild(card);

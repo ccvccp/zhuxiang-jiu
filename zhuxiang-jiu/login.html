@@ -34,7 +34,7 @@
             background: var(--color-bg); min-width: 88px;
         }
         .login-tab.active {
-            background: var(--color-primary); color: #fff;
+            background: var(--color-primary); color: var(--color-white);
             border-color: var(--color-primary); font-weight: 700;
         }
         .login-form { display: none; flex-direction: column; gap: 14px; }
@@ -46,7 +46,7 @@
         .form-item input {
             width: 100%; box-sizing: border-box; padding: 9px 12px;
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-            font-size: 14px; background: #fff;
+            font-size: 14px; background: var(--color-white);
         }
         .form-item input:focus { outline: none; border-color: var(--color-primary); }
         /* 18 岁合规声明勾选框(注册页签): 纯 CSS 自绘(不依赖原生
@@ -57,7 +57,7 @@
             width: 20px; height: 20px; margin: 0; padding: 0;
             flex: none; position: relative; cursor: pointer;
             border: 2px solid var(--color-primary);
-            border-radius: 5px; background: #fff;
+            border-radius: 5px; background: var(--color-white);
             transition: background .15s, border-color .15s;
         }
         .form-item input[type="checkbox"]:checked {
@@ -67,7 +67,7 @@
             content: '✓';
             position: absolute; inset: 0;
             display: flex; align-items: center; justify-content: center;
-            color: #fff; font-size: 14px; font-weight: bold; line-height: 1;
+            color: var(--color-white); font-size: 14px; font-weight: bold; line-height: 1;
         }
         .form-item.adult-row label {
             flex: 1; cursor: pointer; -webkit-tap-highlight-color: transparent;
@@ -75,17 +75,17 @@
         .login-btn {
             border: none; border-radius: var(--radius-sm); cursor: pointer;
             padding: 11px 0; font-size: 14px; width: 100%;
-            background: var(--color-primary); color: #fff; transition: var(--transition);
+            background: var(--color-primary); color: var(--color-white); transition: var(--transition);
         }
         .login-btn:hover { background: var(--color-primary-dark); }
         .login-btn:disabled { opacity: .55; cursor: not-allowed; }
         .login-error {
-            display: none; background: #fdecea; color: var(--color-danger);
+            display: none; background: var(--color-danger-bg); color: var(--color-danger);
             border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
             padding: 9px 12px; font-size: 13px; word-break: break-all;
         }
         .entry-greet {
-            display: none; background: #e8f4ec; color: #2e8b57;
+            display: none; background: var(--color-ok-bg); color: var(--color-ok-deep);
             border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
             padding: 9px 12px; font-size: 13px; margin-bottom: 14px;
         }
@@ -104,14 +104,14 @@
         .qr-box { text-align: center; padding: 6px 0 2px; }
         .qr-canvas {
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-            background: #fff; padding: 8px; width: 168px; height: 168px;
+            background: var(--color-white); padding: 8px; width: 168px; height: 168px;
             box-sizing: border-box;
         }
         .qr-status { font-size: 13px; color: var(--color-text-light); margin-top: 10px; line-height: 1.7; }
         .qr-status b { color: var(--color-primary); }
         .qr-actions { display: flex; gap: 8px; margin-top: 10px; }
         .qr-actions button {
-            flex: 1; border: 1px solid var(--color-border); background: #fff;
+            flex: 1; border: 1px solid var(--color-border); background: var(--color-white);
             color: var(--color-text-light); border-radius: var(--radius-sm);
             padding: 7px 0; font-size: 12px; cursor: pointer;
         }
@@ -143,7 +143,7 @@
                  原始生物数据不上送; JS 检测可用才显示) -->
             <div class="login-form" id="form-webauthn">
                 <div class="form-item" style="text-align:center">
-                    <div id="waStatus" style="font-size:13px;color:#888;line-height:1.7;margin-bottom:14px">
+                    <div id="waStatus" style="font-size:13px;color:var(--color-text-faint);line-height:1.7;margin-bottom:14px">
                         用本机指纹 / 面容完成登录（平台认证器本地验证）<br>
                         <small>本机未绑定时先在下方完成一次密码登录即可自动绑定</small>
                     </div>
@@ -164,7 +164,7 @@
                         <input type="password" id="wa-password" placeholder="请输入密码">
                     </div>
                     <button type="button" class="login-btn" id="waBindBtn"
-                            style="background:#fff;color:#4a7c59;border:1px solid #4a7c59"
+                            style="background:var(--color-white);color:var(--color-primary);border:1px solid var(--color-primary)"
                             onclick="doWebauthnBind(event)">验证并绑定本机指纹</button>
                 </div>
             </div>
@@ -181,9 +181,9 @@
                     <input type="password" id="m-password" placeholder="请输入密码" required>
                 </div>
                 <button type="submit" class="login-btn" id="m-submit">登 录</button>
-                <div style="text-align:center;font-size:13px;color:#4a7c59;">
+                <div style="text-align:center;font-size:13px;color:var(--color-primary);">
                     还没有账号？<a href="javascript:void(0)" onclick="switchTab('reg')"
-                        style="color:#4a7c59;font-weight:bold;">立即注册</a>
+                        style="color:var(--color-primary);font-weight:bold;">立即注册</a>
                 </div>
             </form>
 
@@ -211,9 +211,9 @@
                     <label for="r-adult">我确认已年满 18 周岁（酒类商品合规要求）</label>
                 </div>
                 <button type="submit" class="login-btn" id="r-submit">注 册</button>
-                <div style="text-align:center;font-size:13px;color:#888;">
+                <div style="text-align:center;font-size:13px;color:var(--color-text-faint);">
                     注册即登录 · 已有账号 <a href="javascript:void(0)" onclick="switchTab('member')"
-                        style="color:#4a7c59;font-weight:bold;">去登录</a>
+                        style="color:var(--color-primary);font-weight:bold;">去登录</a>
                 </div>
             </form>
 

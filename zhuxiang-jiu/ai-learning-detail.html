@@ -13,7 +13,7 @@
         }
         .dash-banner h1 { font-size: 22px; margin: 0; }
         .dash-banner p { margin: 6px 0 0; opacity: 0.9; font-size: 13px; }
-        .dash-banner .back-link { color: #fff; font-size: 13px; opacity: 0.85; text-decoration: none; display: inline-block; margin-top: 10px; }
+        .dash-banner .back-link { color: var(--color-white); font-size: 13px; opacity: 0.85; text-decoration: none; display: inline-block; margin-top: 10px; }
         .dash-banner .back-link:hover { opacity: 1; text-decoration: underline; }
 
         .dash-section { padding: 16px 0 4px; }
@@ -29,20 +29,20 @@
         .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
         .dash-toolbar input[type="text"] {
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+            padding: 6px 10px; font-size: 13px; width: 240px; background: var(--color-white);
         }
         .dash-btn {
             border: none; border-radius: var(--radius-sm); cursor: pointer;
-            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: var(--color-white);
             transition: var(--transition);
         }
         .dash-btn:hover { background: var(--color-primary-dark); }
-        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost { background: var(--color-white); color: var(--color-primary); border: 1px solid var(--color-primary); }
         .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
         .dash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
         .dash-error {
-            display: none; background: #fdecea; color: var(--color-danger);
+            display: none; background: var(--color-danger-bg); color: var(--color-danger);
             border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
             padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
         }
@@ -58,13 +58,13 @@
             font-size: 11px; white-space: nowrap; border: 1px solid transparent;
         }
         .badge.module { background: rgba(74, 124, 89, 0.08); color: var(--color-primary-dark); border-color: rgba(74, 124, 89, 0.25); }
-        .badge.version { background: #e8f4ec; color: #2e8b57; }
-        .badge.src-default { background: #f0f0f0; color: #666; }
-        .badge.src-learning { background: #e8f4ec; color: #2e8b57; }
+        .badge.version { background: var(--color-ok-bg); color: var(--color-ok-deep); }
+        .badge.src-default { background: #f0f0f0; color: var(--color-text-mid); }
+        .badge.src-learning { background: var(--color-ok-bg); color: var(--color-ok-deep); }
         .badge.src-manual { background: #eef2fb; color: #3b5998; }
         .badge.src-reset { background: #fdf3e3; color: #a06b00; }
-        .badge.auto-apply { background: #e8f4ec; color: #2e8b57; border-color: rgba(46, 139, 87, 0.35); }
-        .badge.auto-off { background: #f4f4f4; color: #999; }
+        .badge.auto-apply { background: var(--color-ok-bg); color: var(--color-ok-deep); border-color: rgba(46, 139, 87, 0.35); }
+        .badge.auto-off { background: #f4f4f4; color: var(--color-muted); }
         .cfg-chip { font-size: 12px; color: var(--color-text-light); background: var(--color-bg); border-radius: 999px; padding: 3px 12px; }
         .cfg-chip b { color: var(--color-text); }
 
@@ -97,21 +97,21 @@
         .drift-summary .cell b { display: block; font-size: 16px; }
         .drift-summary .cell span { font-size: 11px; color: var(--color-text-light); }
         .drift-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -0px; }
-        .drift-dot.low { background: #2e8b57; }
+        .drift-dot.low { background: var(--color-ok-deep); }
         .drift-dot.medium { background: #e67e22; }
         .drift-dot.high { background: var(--color-danger); }
 
         /* 决策阻断面板(v7.8) */
-        .badge.mode-observe { background: #f0f0f0; color: #666; }
+        .badge.mode-observe { background: #f0f0f0; color: var(--color-text-mid); }
         .badge.mode-shadow { background: #eef2fb; color: #3b5998; border-color: rgba(59, 89, 152, 0.3); }
-        .badge.mode-enforce { background: #fdeaea; color: #c0392b; border-color: rgba(192, 57, 43, 0.35); }
+        .badge.mode-enforce { background: #fdeaea; color: var(--color-danger); border-color: rgba(192, 57, 43, 0.35); }
         .enf-burst { display: flex; align-items: center; gap: 10px; padding: 10px 16px 0; font-size: 12px; color: var(--color-text-light); }
         .enf-burst .bar { flex: 1; max-width: 260px; height: 8px; background: #f0f0f0; border-radius: 4px; overflow: hidden; }
         .enf-burst .bar i { display: block; height: 100%; background: linear-gradient(90deg, #2e8b57, #e67e22, #c0392b); }
         .enf-note { padding: 8px 16px 0; font-size: 12px; color: var(--color-text-light); line-height: 1.7; }
-        .tbl .a-blocked { color: #c0392b; font-weight: 700; }
+        .tbl .a-blocked { color: var(--color-danger); font-weight: 700; }
         .tbl .a-review { color: #a06b00; font-weight: 600; }
-        .tbl .a-pass { color: #2e8b57; }
+        .tbl .a-pass { color: var(--color-ok-deep); }
         .tbl .deg-true { color: #e67e22; font-weight: 600; }
 
         /* 通用表格 */
@@ -123,9 +123,9 @@
         .tbl td.mono { font-family: Consolas, monospace; font-size: 12px; }
         .tbl .v-champion { color: var(--color-primary-dark); font-weight: 700; }
         .tbl .v-challenger { color: var(--color-accent); font-weight: 700; }
-        .dev-pos { color: #c0392b; font-weight: 600; }
+        .dev-pos { color: var(--color-danger); font-weight: 600; }
         .dev-neg { color: #3b5998; font-weight: 600; }
-        .dev-zero { color: #999; }
+        .dev-zero { color: var(--color-muted); }
 
         .card-error { color: var(--color-danger); font-size: 13px; padding: 0 16px 14px; }
 
@@ -138,22 +138,22 @@
         .admin-bar label { font-size: 13px; color: var(--color-text-light); }
         .admin-bar input[type="text"] {
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-            padding: 6px 10px; font-size: 13px; width: 300px; background: #fff;
+            padding: 6px 10px; font-size: 13px; width: 300px; background: var(--color-white);
         }
         .admin-sum { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--color-text-light); }
-        .admin-sum.ok { color: #2e8b57; }
+        .admin-sum.ok { color: var(--color-ok-deep); }
         .admin-sum.bad { color: var(--color-danger); font-weight: 600; }
         .admin-status { padding: 6px 16px 14px; font-size: 13px; min-height: 20px; }
-        .admin-status.ok { color: #2e8b57; }
+        .admin-status.ok { color: var(--color-ok-deep); }
         .admin-status.err { color: var(--color-danger); }
         .dash-btn.danger { background: var(--color-danger); }
         .dash-btn.danger:hover { background: #a93226; }
-        .dash-btn.danger-ghost { background: #fff; color: var(--color-danger); border: 1px solid var(--color-danger); }
+        .dash-btn.danger-ghost { background: var(--color-white); color: var(--color-danger); border: 1px solid var(--color-danger); }
         .dash-btn.danger-ghost:hover { background: #fdf3f2; }
         .winput {
             width: 92px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
             padding: 5px 8px; font-size: 13px; font-family: Consolas, monospace;
-            text-align: right; background: #fff;
+            text-align: right; background: var(--color-white);
         }
         .winput.bad { border-color: var(--color-danger); background: #fdf3f2; }
         .winput:focus { outline: none; border-color: var(--color-primary); }
@@ -167,7 +167,7 @@
         }
         .modal-mask[hidden] { display: none; }
         .modal-box {
-            background: #fff; border-radius: var(--radius-md);
+            background: var(--color-white); border-radius: var(--radius-md);
             box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
             max-width: 600px; width: 100%; max-height: 82vh; overflow: auto;
         }
@@ -176,7 +176,7 @@
             font-weight: 700; color: var(--color-primary-dark);
             display: flex; justify-content: space-between; align-items: center;
         }
-        .modal-close { cursor: pointer; border: none; background: none; font-size: 20px; color: #999; line-height: 1; }
+        .modal-close { cursor: pointer; border: none; background: none; font-size: 20px; color: var(--color-muted); line-height: 1; }
         .modal-close:hover { color: var(--color-text); }
         .modal-body { padding: 14px 18px; font-size: 13px; line-height: 1.8; color: var(--color-text); }
         .modal-foot { padding: 12px 18px 16px; display: flex; gap: 10px; justify-content: flex-end; }
@@ -349,7 +349,7 @@
 
         var SRC_LABEL = { default: '默认', learning: '学习', manual: '人工', reset: '重置' };
         var DRIFT_LABEL = { low: '正常', medium: '关注', high: '告警' };
-        var PALETTE = ['#4a7c59', '#c9a961', '#3b5998', '#c0392b', '#8e44ad',
+        var PALETTE = ['var(--color-primary)', '#c9a961', '#3b5998', 'var(--color-danger)', '#8e44ad',
                        '#16a085', '#d35400', '#2c3e50', '#7f8c8d', '#2980b9'];
 
         /* ========= 工具函数 ========= */
@@ -611,7 +611,7 @@
                 var role = '';
                 if (state.weights.champion && r.version === state.weights.champion.version) role = 'champ';
                 else if (state.weights.challenger && r.version === state.weights.challenger.version) role = 'chall';
-                if (role === 'champ') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="#2e8b57">▲</text>');
+                if (role === 'champ') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="var(--color-ok-deep)">▲</text>');
                 if (role === 'chall') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="#c9a961">△</text>');
             });
 
@@ -639,7 +639,7 @@
                 var color = PALETTE[idx % PALETTE.length];
                 return '<span class="lg"><span class="sw" style="background:' + color + ';"></span>' + esc(f) + '</span>';
             }).join('') +
-            '<span class="lg" style="color:#2e8b57;">▲ 冠军(生效)</span>' +
+            '<span class="lg" style="color:var(--color-ok-deep);">▲ 冠军(生效)</span>' +
             '<span class="lg" style="color:#c9a961;">△ 挑战者</span>';
         }
 
@@ -742,7 +742,7 @@
             document.getElementById('enfSummary').innerHTML =
                 '<div class="cell"><b><span class="badge mode-' + esc(mode) + '">' + esc(MODE_LABEL[mode] || mode) + '</span></b><span>运行模式</span></div>' +
                 '<div class="cell"><b>' + (s.total || 0) + '</b><span>累计决策</span></div>' +
-                '<div class="cell"><b style="color:#c0392b;">' + (s.blocked || 0) + '</b><span>真实阻断</span></div>' +
+                '<div class="cell"><b style="color:var(--color-danger);">' + (s.blocked || 0) + '</b><span>真实阻断</span></div>' +
                 '<div class="cell"><b style="color:#a06b00;">' + (s.reviews || 0) + '</b><span>强制人工</span></div>' +
                 '<div class="cell"><b style="color:#e67e22;">' + (s.degraded || 0) + '</b><span>保护降级</span></div>' +
                 '<div class="cell"><b>' + pct(s.blockRate) + '</b><span>阻断率</span></div>';
@@ -812,7 +812,7 @@
                     '<td class="mono">' + esc(r.version) + '</td>' +
                     '<td><span class="badge src-' + esc(src) + '">' + esc(SRC_LABEL[src] || src) + '</span></td>' +
                     '<td class="mono">' + esc(r.parentVersion || '—') + '</td>' +
-                    '<td>' + (metrics.length ? esc(metrics.join(' · ')) : '<span style="color:#999;">—</span>') + '</td>' +
+                    '<td>' + (metrics.length ? esc(metrics.join(' · ')) : '<span style="color:var(--color-muted);">—</span>') + '</td>' +
                     '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;" title="' + esc(r.note || '') + '">' + esc(r.note || '—') + '</td>' +
                     '<td class="mono">' + esc(fmtTime(r.createdAt)) + '</td></tr>';
             }).join('');

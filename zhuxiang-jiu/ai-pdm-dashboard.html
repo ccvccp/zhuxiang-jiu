@@ -24,7 +24,7 @@
         .dash-banner h1 { font-size: 26px; margin: 0; }
         .dash-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
         .banner-link {
-            color: #fff; text-decoration: none; border: 1px solid rgba(255, 255, 255, 0.55);
+            color: var(--color-white); text-decoration: none; border: 1px solid rgba(255, 255, 255, 0.55);
             border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px;
             white-space: nowrap; transition: var(--transition);
         }
@@ -41,27 +41,27 @@
         .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
         .dash-toolbar input[type="text"], .dash-toolbar input[type="number"] {
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-            padding: 6px 10px; font-size: 13px; width: 220px; background: #fff;
+            padding: 6px 10px; font-size: 13px; width: 220px; background: var(--color-white);
         }
         .dash-btn {
             border: none; border-radius: var(--radius-sm); cursor: pointer;
-            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: var(--color-white);
             transition: var(--transition);
         }
         .dash-btn:hover { background: var(--color-primary-dark); }
-        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost { background: var(--color-white); color: var(--color-primary); border: 1px solid var(--color-primary); }
         .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
         .dash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
 
         /* 错误/提示横幅 */
         .dash-error {
-            display: none; background: #fdecea; color: var(--color-danger);
+            display: none; background: var(--color-danger-bg); color: var(--color-danger);
             border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
             padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
         }
         .dash-info {
-            display: none; background: #e8f4ec; color: #2e8b57;
+            display: none; background: var(--color-ok-bg); color: var(--color-ok-deep);
             border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
             padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
         }
@@ -75,7 +75,7 @@
         .card-head .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
         .card-head select {
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-            padding: 6px 10px; font-size: 13px; background: #fff;
+            padding: 6px 10px; font-size: 13px; background: var(--color-white);
         }
         .scan-result { font-size: 12px; color: var(--color-text-light); }
 
@@ -84,7 +84,7 @@
         .tool-form label { font-size: 13px; color: var(--color-text-light); }
         .tool-form input[type="text"], .tool-form input[type="number"], .tool-form select, .tool-form textarea {
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-            padding: 6px 10px; font-size: 13px; background: #fff;
+            padding: 6px 10px; font-size: 13px; background: var(--color-white);
         }
         .tool-form input[type="text"], .tool-form input[type="number"] { width: 180px; }
         .tool-form textarea { width: 100%; min-height: 56px; resize: vertical; }
@@ -102,17 +102,17 @@
             display: inline-block; border-radius: 999px; padding: 2px 10px;
             font-size: 11px; white-space: nowrap; border: 1px solid transparent;
         }
-        .badge.green { background: #e8f4ec; color: #2e8b57; }
+        .badge.green { background: var(--color-ok-bg); color: var(--color-ok-deep); }
         .badge.yellow { background: #fdf3e3; color: #a06b00; }
-        .badge.red { background: #fdecea; color: var(--color-danger); }
-        .badge.weak { background: #f4f4f4; color: #999; }
+        .badge.red { background: var(--color-danger-bg); color: var(--color-danger); }
+        .badge.weak { background: #f4f4f4; color: var(--color-muted); }
         .badge.blue { background: #eef2fb; color: #3b5998; }
         .badge.purple { background: #f2eaf9; color: #7b3fa0; }
         .badge.orange { background: #fdefdf; color: #c05f00; }
 
         /* 小按钮 */
         .btn-mini {
-            border: 1px solid var(--color-primary); background: #fff; color: var(--color-primary);
+            border: 1px solid var(--color-primary); background: var(--color-white); color: var(--color-primary);
             border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px;
             cursor: pointer; transition: var(--transition);
         }
@@ -132,14 +132,14 @@
         /* AI 报告详情框(预审五因子/审图报告) */
         .detail-box { padding: 12px 16px; }
         .detail-body {
-            background: #fff; border: 1px solid var(--color-border);
+            background: var(--color-white); border: 1px solid var(--color-border);
             border-radius: var(--radius-sm); padding: 12px 14px;
             font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-word;
         }
         .ai-badge { display: inline-block; font-size: 11px; border-radius: 3px; padding: 1px 6px; margin-right: 6px; }
-        .ai-badge.pass { background: #e8f4ec; color: #2e8b57; }
+        .ai-badge.pass { background: var(--color-ok-bg); color: var(--color-ok-deep); }
         .ai-badge.mid { background: #fdf3e3; color: #a06b00; }
-        .ai-badge.fail { background: #fdecea; color: var(--color-danger); }
+        .ai-badge.fail { background: var(--color-danger-bg); color: var(--color-danger); }
 
         /* 图片缩略 */
         .thumb { width: 48px; height: 48px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--color-border); vertical-align: middle; }

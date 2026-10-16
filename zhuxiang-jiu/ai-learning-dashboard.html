@@ -29,22 +29,22 @@
         .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
         .dash-toolbar input[type="text"] {
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+            padding: 6px 10px; font-size: 13px; width: 240px; background: var(--color-white);
         }
         .dash-btn {
             border: none; border-radius: var(--radius-sm); cursor: pointer;
-            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: var(--color-white);
             transition: var(--transition);
         }
         .dash-btn:hover { background: var(--color-primary-dark); }
-        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost { background: var(--color-white); color: var(--color-primary); border: 1px solid var(--color-primary); }
         .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
         .dash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
 
         /* 错误横幅 */
         .dash-error {
-            display: none; background: #fdecea; color: var(--color-danger);
+            display: none; background: var(--color-danger-bg); color: var(--color-danger);
             border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
             padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
         }
@@ -65,20 +65,20 @@
         .dash-scheduler .k { color: var(--color-text-light); margin-right: 4px; }
         .dash-live-dot {
             display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-            background: #2e8b57; margin-right: 6px; vertical-align: middle;
+            background: var(--color-ok-deep); margin-right: 6px; vertical-align: middle;
         }
-        .dash-live-dot.off { background: #999; }
+        .dash-live-dot.off { background: var(--color-muted); }
 
         /* 筛选栏 */
         .dash-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 16px; }
         .chip {
-            border: 1px solid var(--color-border); background: #fff; color: var(--color-text-light);
+            border: 1px solid var(--color-border); background: var(--color-white); color: var(--color-text-light);
             border-radius: 999px; padding: 5px 14px; font-size: 12px; cursor: pointer; transition: var(--transition);
         }
-        .chip.active { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+        .chip.active { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-white); }
         .dash-filters select, .dash-filters input[type="search"] {
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-            padding: 6px 10px; font-size: 13px; background: #fff;
+            padding: 6px 10px; font-size: 13px; background: var(--color-white);
         }
         .dash-filters input[type="search"] { width: 200px; }
         .dash-filters .count { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
@@ -95,12 +95,12 @@
         }
         .badge.module { background: rgba(74, 124, 89, 0.08); color: var(--color-primary-dark); border-color: rgba(74, 124, 89, 0.25); }
         .badge.batch { background: rgba(201, 169, 97, 0.12); color: #8a6d2f; border-color: rgba(201, 169, 97, 0.4); }
-        .badge.src-default { background: #f0f0f0; color: #666; }
-        .badge.src-learning { background: #e8f4ec; color: #2e8b57; }
+        .badge.src-default { background: #f0f0f0; color: var(--color-text-mid); }
+        .badge.src-learning { background: var(--color-ok-bg); color: var(--color-ok-deep); }
         .badge.src-manual { background: #eef2fb; color: #3b5998; }
         .badge.src-reset { background: #fdf3e3; color: #a06b00; }
-        .badge.auto-apply { background: #e8f4ec; color: #2e8b57; border-color: rgba(46, 139, 87, 0.35); }
-        .badge.auto-off { background: #f4f4f4; color: #999; }
+        .badge.auto-apply { background: var(--color-ok-bg); color: var(--color-ok-deep); border-color: rgba(46, 139, 87, 0.35); }
+        .badge.auto-off { background: #f4f4f4; color: var(--color-muted); }
 
         .scorer-rows { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
         .scorer-rows .row { display: flex; justify-content: space-between; align-items: center; }
@@ -119,18 +119,18 @@
 
         .drift-line { display: flex; align-items: center; gap: 8px; font-size: 13px; }
         .drift-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-        .drift-dot.low { background: #2e8b57; }
+        .drift-dot.low { background: var(--color-ok-deep); }
         .drift-dot.medium { background: #e67e22; }
         .drift-dot.high { background: var(--color-danger); }
         .drift-line .lv { font-weight: 600; }
-        .drift-line .lv.low { color: #2e8b57; }
+        .drift-line .lv.low { color: var(--color-ok-deep); }
         .drift-line .lv.medium { color: #e67e22; }
         .drift-line .lv.high { color: var(--color-danger); }
         .drift-line .score { color: var(--color-text-light); font-size: 12px; }
 
         .scorer-card .foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 4px; }
         .scorer-card .foot .btn-report {
-            margin-left: auto; border: 1px solid var(--color-primary); background: #fff;
+            margin-left: auto; border: 1px solid var(--color-primary); background: var(--color-white);
             color: var(--color-primary); border-radius: var(--radius-sm);
             padding: 5px 12px; font-size: 12px; cursor: pointer; transition: var(--transition);
         }
@@ -147,7 +147,7 @@
         }
         .modal-mask.show { display: flex; }
         .modal-box {
-            background: #fff; border-radius: var(--radius-lg); max-width: 720px; width: 100%;
+            background: var(--color-white); border-radius: var(--radius-lg); max-width: 720px; width: 100%;
             max-height: 86vh; overflow-y: auto; box-shadow: var(--shadow-lg); padding: 22px 24px;
         }
         .modal-box h2 { margin: 0 0 4px; font-size: 18px; color: var(--color-primary-dark); }
@@ -157,7 +157,7 @@
         .modal-summary .cell b { display: block; font-size: 18px; }
         .modal-summary .cell span { font-size: 11px; color: var(--color-text-light); }
         .modal-trend { font-size: 13px; margin-bottom: 14px; color: var(--color-text); }
-        .modal-trend .up { color: #2e8b57; font-weight: 700; }
+        .modal-trend .up { color: var(--color-ok-deep); font-weight: 700; }
         .modal-trend .down { color: var(--color-danger); font-weight: 700; }
         .modal-trend .flat { color: var(--color-text-light); font-weight: 700; }
         .modal-box table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -495,7 +495,7 @@
                     '<td class="num">' + v.incorrectCount + '</td>' +
                     '<td class="num">' + pct(v.correctRate) + '</td></tr>';
             }).join('');
-            if (!rows) rows = '<tr><td colspan="4" style="text-align:center;color:#999;">暂无反馈数据</td></tr>';
+            if (!rows) rows = '<tr><td colspan="4" style="text-align:center;color:var(--color-muted);">暂无反馈数据</td></tr>';
 
             box.innerHTML =
                 '<h2>' + esc(r.label) + ' · 学习效果报表</h2>' +

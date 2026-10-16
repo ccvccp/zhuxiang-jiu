@@ -27,8 +27,8 @@
     .dash-banner h1{font-size:20px;margin:0 0 4px}
     .dash-banner p{font-size:12px;margin:0;opacity:.85}
     .dash-section{margin-bottom:18px}
-    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
-        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .dash-card{background:var(--color-bg-card,var(--color-white));border:1px solid
+        var(--color-border,var(--color-border-gray));border-radius:8px;padding:16px}
     .card-head{display:flex;justify-content:space-between;align-items:
         center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
     .card-head h3{font-size:15px;margin:0}
@@ -36,7 +36,7 @@
     .dash-toolbar input,.dash-toolbar select{padding:6px 8px;border:1px
         solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
     .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
-        #2d3748;color:#fff;cursor:pointer;font-size:12px}
+        #2d3748;color:var(--color-white);cursor:pointer;font-size:12px}
     .dash-btn.ghost{background:#6b7280}
     .dash-error{background:#fee;border:1px solid #f99;color:#c33;
         padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
@@ -51,32 +51,32 @@
     .badge{display:inline-block;padding:1px 8px;border-radius:9px;
         font-size:11px;white-space:nowrap}
     .badge.green{background:#e6f7e6;color:#2c7a2c}
-    .badge.yellow{background:#fff7e0;color:#a37400}
-    .badge.red{background:#fdeaea;color:#c0392b}
-    .badge.weak{background:#eee;color:#666}
-    .badge.blue{background:#e8f1fb;color:#24619c}
+    .badge.yellow{background:#fff7e0;color:var(--color-warn)}
+    .badge.red{background:#fdeaea;color:var(--color-danger)}
+    .badge.weak{background:var(--color-gray-light);color:var(--color-text-mid)}
+    .badge.blue{background:#e8f1fb;color:var(--color-info)}
     .badge.purple{background:#f3e8fb;color:#6b46c1}
     .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
         minmax(140px,1fr));gap:10px}
     .ov-cell{background:var(--color-bg-secondary,#f7f9f7);border-radius:6px;
         padding:10px 12px}
-    .ov-cell .k{font-size:11px;color:#888;margin-bottom:4px}
+    .ov-cell .k{font-size:11px;color:var(--color-text-faint);margin-bottom:4px}
     .ov-cell .v{font-size:20px;font-weight:600;color:#2d3748}
-    .ov-cell .v.red{color:#c0392b}
-    .ov-cell .v.yellow{color:#a37400}
+    .ov-cell .v.red{color:var(--color-danger)}
+    .ov-cell .v.yellow{color:var(--color-warn)}
     .ov-cell .v.green{color:#2c7a2c}
-    .dash-empty{color:#999;font-size:12px;padding:14px;text-align:center}
+    .dash-empty{color:var(--color-muted);font-size:12px;padding:14px;text-align:center}
     .btn-mini{padding:2px 8px;font-size:11px;border:none;border-radius:4px;
-        cursor:pointer;background:#2c7a2c;color:#fff;margin-right:4px}
-    .btn-mini.danger{background:#c0392b}
+        cursor:pointer;background:#2c7a2c;color:var(--color-white);margin-right:4px}
+    .btn-mini.danger{background:var(--color-danger)}
     .btn-mini.ghost{background:#6b7280}
-    .btn-mini.blue{background:#24619c}
+    .btn-mini.blue{background:var(--color-info)}
     .detail-body{background:var(--color-bg-secondary,#f7f7f7);border:1px
         solid var(--color-border,#e5e5e5);border-radius:5px;padding:10px;
         font-size:12px;white-space:pre-wrap;max-height:300px;overflow:auto;
         display:none;font-family:Consolas,monospace}
-    .note-bar{font-size:11px;color:#999;padding:10px 4px;
-        border-top:1px solid var(--color-border,#eee);margin-top:16px}
+    .note-bar{font-size:11px;color:var(--color-muted);padding:10px 4px;
+        border-top:1px solid var(--color-border,var(--color-gray-light));margin-top:16px}
     .hours-bar{display:inline-block;height:14px;background:#cbd5e0;
         vertical-align:middle;border-radius:2px}
     .hours-bar span{display:inline-block;height:100%;
@@ -89,34 +89,34 @@
     .series-col-bar{background:#4a72b8;border-radius:2px 2px 0 0;
         min-height:2px}
     .series-col-bar.zero{background:#e2e8f0}
-    .series-col-bar.fpr{background:#c0392b}
+    .series-col-bar.fpr{background:var(--color-danger)}
     .series-labels{display:flex;gap:4px;margin-bottom:8px}
     .series-labels span{flex:1;min-width:10px;text-align:center;
-        font-size:10px;color:#999;white-space:nowrap;overflow:hidden}
+        font-size:10px;color:var(--color-muted);white-space:nowrap;overflow:hidden}
     .redis-fam{font-size:12px}
-    .redis-fam td.red{color:#c0392b;font-weight:600}
+    .redis-fam td.red{color:var(--color-danger);font-weight:600}
     .redis-alert{padding:6px 10px;border-radius:5px;font-size:12px;
         margin-bottom:6px}
-    .redis-alert.critical{background:#fdeaea;color:#c0392b}
-    .redis-alert.warn{background:#fff7e0;color:#a37400}
-    .redis-alert.info{background:#e8f1fb;color:#24619c}
+    .redis-alert.critical{background:#fdeaea;color:var(--color-danger)}
+    .redis-alert.warn{background:#fff7e0;color:var(--color-warn)}
+    .redis-alert.info{background:#e8f1fb;color:var(--color-info)}
     /* P6-3: enforce 就绪度灯卡(ready 绿/holding 黄) */
     .rd-light{display:inline-block;width:10px;height:10px;border-radius:50%;
         margin-right:6px;vertical-align:middle}
-    .rd-light.ready{background:#2f9e44;box-shadow:0 0 4px #2f9e44}
+    .rd-light.ready{background:var(--color-ok);box-shadow:0 0 4px var(--color-ok)}
     .rd-light.holding{background:#e8a30c;box-shadow:0 0 4px #e8a30c}
     .rd-bar{padding:8px 12px;border-radius:5px;font-size:12px;
         margin-bottom:8px;display:flex;align-items:center;
         justify-content:space-between;gap:8px}
     .rd-bar.ready{background:#e9f7ee;color:#226b38}
-    .rd-bar.holding{background:#fff7e0;color:#a37400}
+    .rd-bar.holding{background:#fff7e0;color:var(--color-warn)}
     .rd-checks{font-size:12px;width:100%;border-collapse:collapse;
         margin-top:4px}
     .rd-checks td{padding:4px 8px;border-bottom:1px solid
         var(--color-border,#f0f0f0);vertical-align:top}
-    .rd-checks td.pass{color:#2f9e44}
-    .rd-checks td.fail{color:#c0392b;font-weight:600}
-    .rd-note{font-size:11px;color:#999;margin-top:6px}
+    .rd-checks td.pass{color:var(--color-ok)}
+    .rd-checks td.fail{color:var(--color-danger);font-weight:600}
+    .rd-note{font-size:11px;color:var(--color-muted);margin-top:6px}
 </style>
 </head>
 <body>
@@ -134,7 +134,7 @@
                     placeholder="http://localhost:8000"></label>
                 <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
                 <button class="dash-btn ghost" onclick="refreshData()">手动刷新</button>
-                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+                <span id="lastUpdate" style="font-size:11px;color:var(--color-muted)"></span>
             </div>
             <div id="errBar" class="dash-error"></div>
             <div id="infoBar" class="dash-info"></div>
@@ -281,13 +281,13 @@
             <!-- P6-3: enforce 就绪度灯卡(随日报序列按钮一并刷新;
                  五检查+三信号, ready 绿/holding 黄+blockers 首条) -->
             <div id="enforceReadiness" style="margin-top:12px;border-top:1px solid
-                var(--color-border,#eee);padding-top:10px">
+                var(--color-border,var(--color-gray-light));padding-top:10px">
                 <div class="dash-empty">enforce 就绪度：点「刷新日报序列」一并评估
                     （五检查 + 三信号，只评估不切换）</div>
             </div>
             <!-- Redis 键族健康卡(按需加载) -->
             <div id="redisHealth" style="margin-top:12px;border-top:1px solid
-                var(--color-border,#eee);padding-top:10px">
+                var(--color-border,var(--color-gray-light));padding-top:10px">
                 <div class="dash-empty">Redis 实况：点「Redis 实况体检」按需加载
                     （KEYS/SLOWLOG 有开销，不进自动刷新）</div>
             </div>

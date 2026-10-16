@@ -5,7 +5,7 @@
     部署: 生产 dist 根 /var/www/zxjiu/dist/activity.html(nginx try_files 直 serve)
     定位: 活动中心 C端入口(URL 直达 https://zxjiu.com/activity.html)——
           游客可浏览全部非草稿活动; 会员登录后可报名/取消
-    主题: 竹绿 #355c44 × #4a7c59 × 金 #c9a961(对齐 activity-dashboard)
+    主题: 竹绿 var(--color-primary-dark, #355c44) × var(--color-primary, #4a7c59) × 金 #c9a961(对齐 activity-dashboard)
     数据源:
         游客(公开 GET 白名单): /api/activity/list 活动列表
         登录(JWT): /api/activity/my-registrations 我的报名 +
@@ -21,7 +21,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#355c44">
+<meta name="theme-color" content="var(--color-primary-dark, #355c44)">
 <title>活动中心 · 竹香酒</title>
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -48,56 +48,56 @@
     .back-btn {
         flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%;
         border: none; cursor: pointer; background: rgba(255,255,255,.18);
-        color: #fff; font-size: 17px; line-height: 1; font-family: inherit;
+        color: var(--color-white, #fff); font-size: 17px; line-height: 1; font-family: inherit;
         display: flex; align-items: center; justify-content: center;
     }
     .back-btn:active { opacity: .8; }
     .auth-box { text-align: right; }
     .btn {
         border: none; border-radius: 6px; cursor: pointer; font-size: 13px;
-        padding: 7px 14px; background: rgba(255,255,255,.16); color: #fff;
+        padding: 7px 14px; background: rgba(255,255,255,.16); color: var(--color-white, #fff);
     }
     .btn:active { opacity: .8; }
-    .btn.primary { background: #4a7c59; color: #fff; }
-    .btn.gold { background: #c9a961; color: #fff; }
-    .btn.ghost { background: #fff; color: #355c44; border: 1px solid #c3d4c8; }
+    .btn.primary { background: var(--color-primary, #4a7c59); color: var(--color-white, #fff); }
+    .btn.gold { background: #c9a961; color: var(--color-white, #fff); }
+    .btn.ghost { background: var(--color-white, #fff); color: var(--color-primary-dark, #355c44); border: 1px solid #c3d4c8; }
     .user-chip { font-size: 12px; opacity: .9; margin-bottom: 4px; }
 
     /* 提示卡 */
     .hero {
-        margin: 14px 0; background: #fff; border-radius: 12px; padding: 16px;
-        box-shadow: 0 1px 4px rgba(53,92,68,.08); border-top: 3px solid #4a7c59;
+        margin: 14px 0; background: var(--color-white, #fff); border-radius: 12px; padding: 16px;
+        box-shadow: 0 1px 4px rgba(53,92,68,.08); border-top: 3px solid var(--color-primary, #4a7c59);
     }
-    .hero h1 { font-size: 16px; color: #355c44; margin-bottom: 4px; }
+    .hero h1 { font-size: 16px; color: var(--color-primary-dark, #355c44); margin-bottom: 4px; }
     .hero p { font-size: 12.5px; color: #6b6b6b; }
     .hero .tagline { color: #8a6d2f; }
 
     /* 筛选区 */
     .filter-card {
-        background: #fff; border-radius: 12px; padding: 14px 16px;
+        background: var(--color-white, #fff); border-radius: 12px; padding: 14px 16px;
         box-shadow: 0 1px 4px rgba(53,92,68,.08); margin-bottom: 14px;
     }
     .filter-row-label { font-size: 12px; color: #8a978f; margin: 4px 0 6px; }
     .pills { display: flex; flex-wrap: wrap; gap: 6px; }
     .pill {
-        border: 1px solid #c3d4c8; background: #f4f7f5; color: #355c44;
+        border: 1px solid #c3d4c8; background: #f4f7f5; color: var(--color-primary-dark, #355c44);
         border-radius: 999px; padding: 3px 12px; font-size: 12px; cursor: pointer;
         transition: all .15s;
     }
-    .pill.active { background: #355c44; color: #fff; border-color: #355c44; }
+    .pill.active { background: var(--color-primary-dark, #355c44); color: var(--color-white, #fff); border-color: var(--color-primary-dark, #355c44); }
 
     /* 活动卡列表 */
     .sec-title {
-        font-size: 15px; color: #355c44; margin: 20px 0 10px;
+        font-size: 15px; color: var(--color-primary-dark, #355c44); margin: 20px 0 10px;
         display: flex; align-items: center; gap: 8px;
     }
     .sec-title:before { content: ""; width: 4px; height: 16px;
-        background: #4a7c59; border-radius: 2px; display: inline-block; }
+        background: var(--color-primary, #4a7c59); border-radius: 2px; display: inline-block; }
     .act-list { display: grid; gap: 10px; }
     .act-card {
-        background: #fff; border-radius: 12px; padding: 14px 16px;
+        background: var(--color-white, #fff); border-radius: 12px; padding: 14px 16px;
         box-shadow: 0 1px 4px rgba(53,92,68,.08); cursor: pointer;
-        border-left: 3px solid #4a7c59; transition: transform .12s;
+        border-left: 3px solid var(--color-primary, #4a7c59); transition: transform .12s;
     }
     .act-card:active { transform: scale(.99); }
     .act-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -107,12 +107,12 @@
         font-size: 11px; white-space: nowrap; border: 1px solid transparent;
     }
     .badge.blue { background: #eef2fb; color: #3b5998; }
-    .badge.green { background: #e8f4ec; color: #2e8b57; }
+    .badge.green { background: var(--color-ok-bg, #e8f4ec); color: var(--color-ok-deep, #2e8b57); }
     .badge.gold { background: rgba(201,169,97,.15); color: #8a6d2f; }
-    .badge.red { background: #fdecea; color: #c0392b; }
-    .badge.weak { background: #f4f4f4; color: #999; }
+    .badge.red { background: var(--color-danger-bg, #fdecea); color: var(--color-danger, #c0392b); }
+    .badge.weak { background: #f4f4f4; color: var(--color-muted, #999); }
     .act-meta { font-size: 11.5px; color: #8a978f; margin-top: 5px; }
-    .act-meta .num { color: #355c44; font-weight: 600; }
+    .act-meta .num { color: var(--color-primary-dark, #355c44); font-weight: 600; }
     .act-desc {
         font-size: 12.5px; color: #5b6b66; margin-top: 6px;
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
@@ -120,12 +120,12 @@
     }
     .type-chip {
         display: inline-block; font-size: 10px; border-radius: 4px;
-        background: #eef4f1; color: #4a7c59; padding: 1px 7px; margin-right: 5px;
+        background: #eef4f1; color: var(--color-primary, #4a7c59); padding: 1px 7px; margin-right: 5px;
     }
 
     /* 我的报名 */
     .myreg-card {
-        background: #fff; border-radius: 12px; padding: 14px 16px;
+        background: var(--color-white, #fff); border-radius: 12px; padding: 14px 16px;
         box-shadow: 0 1px 4px rgba(53,92,68,.08); margin-bottom: 14px;
     }
     .reg-row {
@@ -137,7 +137,7 @@
     .reg-row .name { font-weight: 600; color: #2c3e33; font-size: 13.5px; }
     .reg-row .time { font-size: 11px; color: #8a978f; }
     .btn-mini {
-        border: 1px solid #c0392b; background: #fff; color: #c0392b;
+        border: 1px solid var(--color-danger, #c0392b); background: var(--color-white, #fff); color: var(--color-danger, #c0392b);
         border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer;
     }
     .btn-mini:active { background: #fdf1ef; }
@@ -150,7 +150,7 @@
     /* 空态/加载态 */
     .empty {
         text-align: center; color: #9aa7a0; font-size: 13px;
-        padding: 34px 10px; background: #fff; border-radius: 12px;
+        padding: 34px 10px; background: var(--color-white, #fff); border-radius: 12px;
         box-shadow: 0 1px 3px rgba(53,92,68,.05);
     }
 
@@ -159,24 +159,24 @@
         background: rgba(18,32,26,.45); }
     .drawer-mask.show { display: block; }
     .drawer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 31;
-        background: #fff; border-radius: 16px 16px 0 0; padding: 20px 18px 28px;
+        background: var(--color-white, #fff); border-radius: 16px 16px 0 0; padding: 20px 18px 28px;
         display: none; max-width: 680px; margin: 0 auto; }
     .drawer.show { display: block; }
-    .drawer h3 { font-size: 16px; color: #355c44; margin-bottom: 4px; }
+    .drawer h3 { font-size: 16px; color: var(--color-primary-dark, #355c44); margin-bottom: 4px; }
     .drawer .sub { font-size: 12px; color: #8a978f; margin-bottom: 14px; }
     .field { margin-bottom: 12px; }
     .field label { font-size: 12px; color: #5b6b66; display: block; margin-bottom: 4px; }
     .field input { width: 100%; border: 1px solid #c3d4c8; border-radius: 8px;
         padding: 10px 12px; font-size: 14px; outline: none; }
-    .field input:focus { border-color: #4a7c59; }
-    .form-err { color: #c0392b; font-size: 12px; min-height: 16px; margin-bottom: 6px; }
+    .field input:focus { border-color: var(--color-primary, #4a7c59); }
+    .form-err { color: var(--color-danger, #c0392b); font-size: 12px; min-height: 16px; margin-bottom: 6px; }
 
     footer { text-align: center; font-size: 11px; color: #9aa7a0;
         padding: 18px 10px 8px; line-height: 1.8; }
-    footer a { color: #4a7c59; text-decoration: none; }
+    footer a { color: var(--color-primary, #4a7c59); text-decoration: none; }
     .toast { position: fixed; left: 50%; bottom: 90px;
         transform: translateX(-50%); background: rgba(53,92,68,.92);
-        color: #fff; font-size: 12.5px; border-radius: 18px; padding: 8px 18px;
+        color: var(--color-white, #fff); font-size: 12.5px; border-radius: 18px; padding: 8px 18px;
         z-index: 40; opacity: 0; transition: opacity .25s; pointer-events: none;
         max-width: 80%; }
     .toast.show { opacity: 1; }
@@ -559,7 +559,7 @@
                     ? '🕐 ' + fmtTime(a.startTime) + ' ~ ' + fmtTime(a.endTime) + ' · '
                     : '')
                 + '👥 <span class="num">' + (a.registrationCount || 0) + '</span> 人已报名'
-                + (registered ? ' · <span style="color:#4a7c59;font-weight:600">✓ 我已报名</span>' : '')
+                + (registered ? ' · <span style="color:var(--color-primary, #4a7c59);font-weight:600">✓ 我已报名</span>' : '')
                 + '</div>'
                 + (a.description
                     ? '<div class="act-desc">' + esc(a.description) + '</div>' : '')
@@ -615,7 +615,7 @@
                     ? '<button class="btn-mini" onclick="cancelReg(' + r.activityId
                       + ',\'' + esc(r.activityName).replace(/'/g, '&#39;') + '\')">取消报名</button>'
                     : '')
-                + '<button class="btn-mini" style="border-color:#4a7c59;color:#4a7c59" '
+                + '<button class="btn-mini" style="border-color:var(--color-primary, #4a7c59);color:var(--color-primary, #4a7c59)" '
                 + 'onclick="location.href=\'activity-detail.html?v=2&id=' + r.activityId + API_QS + '\'">详情</button>'
                 + '</div>';
         }

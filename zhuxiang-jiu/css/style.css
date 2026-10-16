@@ -15,6 +15,19 @@
     --color-text-light: #6b6b6b;     /* 辅助文字 */
     --color-border: #e5e0d5;         /* 边框色 */
     --color-danger: #c0392b;         /* 警告/价格 */
+    /* ---- T3.1 增补语义令牌(批次三硬编码色治理; 值=原内联高频色, 视觉零变化) ---- */
+    --color-white: #ffffff;          /* 白(深底前景/白底) */
+    --color-muted: #999999;          /* 弱化灰字 */
+    --color-text-faint: #888888;     /* 次弱灰字 */
+    --color-text-mid: #666666;       /* 中灰文字 */
+    --color-ok: #2f9e44;             /* 状态绿(观测页 v.green) */
+    --color-ok-deep: #2e8b57;        /* badge green 前景(activity 族) */
+    --color-ok-bg: #e8f4ec;          /* badge green 背景 */
+    --color-danger-bg: #fdecea;      /* badge red 背景 */
+    --color-info: #24619c;           /* 状态蓝(观测页 v.blue) */
+    --color-warn: #a37400;           /* 状态黄(观测页 v.yellow) */
+    --color-gray-light: #eeeeee;     /* 浅灰底/边 */
+    --color-border-gray: #e0e0e0;    /* 灰边框(dashboard 族) */
     --shadow-sm: 0 2px 8px rgba(74, 124, 89, 0.08);
     --shadow-md: 0 4px 16px rgba(74, 124, 89, 0.12);
     --shadow-lg: 0 8px 32px rgba(74, 124, 89, 0.16);

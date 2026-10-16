@@ -24,8 +24,8 @@
     .dash-banner h1{font-size:20px;margin:0 0 4px}
     .dash-banner p{font-size:12px;margin:0;opacity:.85}
     .dash-section{margin-bottom:18px}
-    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
-        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .dash-card{background:var(--color-bg-card,var(--color-white));border:1px solid
+        var(--color-border,var(--color-border-gray));border-radius:8px;padding:16px}
     .card-head{display:flex;justify-content:space-between;align-items:
         center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
     .card-head h3{font-size:15px;margin:0}
@@ -33,7 +33,7 @@
     .dash-toolbar input,.dash-toolbar select{padding:6px 8px;border:1px
         solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
     .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
-        #3f5f4f;color:#fff;cursor:pointer;font-size:12px}
+        #3f5f4f;color:var(--color-white);cursor:pointer;font-size:12px}
     .dash-btn.ghost{background:#6b7280}
     .dash-error{background:#fee;border:1px solid #f99;color:#c33;
         padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
@@ -45,25 +45,25 @@
     .badge{display:inline-block;padding:1px 8px;border-radius:9px;
         font-size:11px;white-space:nowrap}
     .badge.green{background:#e6f7e6;color:#2c7a2c}
-    .badge.yellow{background:#fff7e0;color:#a37400}
-    .badge.red{background:#fdeaea;color:#c0392b}
-    .badge.weak{background:#eee;color:#666}
-    .badge.blue{background:#e8f1fb;color:#24619c}
+    .badge.yellow{background:#fff7e0;color:var(--color-warn)}
+    .badge.red{background:#fdeaea;color:var(--color-danger)}
+    .badge.weak{background:var(--color-gray-light);color:var(--color-text-mid)}
+    .badge.blue{background:#e8f1fb;color:var(--color-info)}
     .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
         minmax(140px,1fr));gap:10px}
     .ov-cell{background:var(--color-bg-secondary,#f7f9f7);border-radius:6px;
         padding:10px 12px}
-    .ov-cell .k{font-size:11px;color:#888;margin-bottom:4px}
+    .ov-cell .k{font-size:11px;color:var(--color-text-faint);margin-bottom:4px}
     .ov-cell .v{font-size:20px;font-weight:600;color:#3f5f4f}
-    .ov-cell .s{font-size:11px;color:#999;margin-top:2px}
+    .ov-cell .s{font-size:11px;color:var(--color-muted);margin-top:2px}
     .kv-grid{display:grid;grid-template-columns:repeat(auto-fill,
         minmax(200px,1fr));gap:8px}
     .kv{background:var(--color-bg-secondary,#f7f9f7);border-radius:5px;
         padding:8px 10px;font-size:12px}
     .kv b{display:block;color:#555;font-weight:600;margin-bottom:2px}
-    .dash-empty{color:#999;font-size:12px;padding:14px;text-align:center}
-    .note-bar{font-size:11px;color:#999;padding:10px 4px;
-        border-top:1px solid var(--color-border,#eee);margin-top:16px}
+    .dash-empty{color:var(--color-muted);font-size:12px;padding:14px;text-align:center}
+    .note-bar{font-size:11px;color:var(--color-muted);padding:10px 4px;
+        border-top:1px solid var(--color-border,var(--color-gray-light));margin-top:16px}
     .zone-block{margin-bottom:14px}
     .zone-block h4{font-size:13px;margin:0 0 8px;color:#3f5f4f}
 </style>
@@ -83,7 +83,7 @@
                     placeholder="http://localhost:8000"></label>
                 <button class="dash-btn" onclick="saveConn()">保存并刷新</button>
                 <button class="dash-btn ghost" onclick="refreshData()">手动刷新</button>
-                <span id="lastUpdate" style="font-size:11px;color:#999"></span>
+                <span id="lastUpdate" style="font-size:11px;color:var(--color-muted)"></span>
             </div>
             <div id="errBar" class="dash-error"></div>
         </div>

@@ -27,8 +27,8 @@
     .dash-banner h1{font-size:20px;margin:0 0 4px}
     .dash-banner p{font-size:12px;margin:0;opacity:.85}
     .dash-section{margin-bottom:18px}
-    .dash-card{background:var(--color-bg-card,#fff);border:1px solid
-        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .dash-card{background:var(--color-bg-card,var(--color-white));border:1px solid
+        var(--color-border,var(--color-border-gray));border-radius:8px;padding:16px}
     .card-head{display:flex;justify-content:space-between;align-items:
         center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
     .card-head h3{font-size:15px;margin:0}
@@ -36,32 +36,32 @@
     .dash-toolbar input{padding:6px 8px;border:1px
         solid var(--color-border,#ccc);border-radius:5px;font-size:12px}
     .dash-btn{padding:6px 14px;border:none;border-radius:5px;background:
-        #3a1f5c;color:#fff;cursor:pointer;font-size:12px}
+        #3a1f5c;color:var(--color-white);cursor:pointer;font-size:12px}
     .dash-btn.ghost{background:#6b7280}
     .dash-error{background:#fee;border:1px solid #f99;color:#c33;
         padding:8px 12px;border-radius:5px;margin-bottom:10px;display:none;
         font-size:12px}
-    .dash-empty{color:#999;font-size:12px;padding:12px;text-align:center}
+    .dash-empty{color:var(--color-muted);font-size:12px;padding:12px;text-align:center}
     .ov-cells{display:grid;grid-template-columns:repeat(auto-fill,
         minmax(140px,1fr));gap:8px}
     .ov-cell{background:var(--color-bg-sub,#f7f7f7);border-radius:6px;
         padding:8px 10px}
-    .ov-cell .k{font-size:11px;color:#888;margin-bottom:3px}
+    .ov-cell .k{font-size:11px;color:var(--color-text-faint);margin-bottom:3px}
     .ov-cell .v{font-size:17px;font-weight:600}
-    .ov-cell .v.red{color:#c0392b}
-    .ov-cell .v.green{color:#2f9e44}
-    .ov-cell .v.blue{color:#24619c}
-    .ov-cell .v.yellow{color:#a37400}
+    .ov-cell .v.red{color:var(--color-danger)}
+    .ov-cell .v.green{color:var(--color-ok)}
+    .ov-cell .v.blue{color:var(--color-info)}
+    .ov-cell .v.yellow{color:var(--color-warn)}
     table.dash-table{width:100%;border-collapse:collapse;font-size:12px}
     .dash-table th{text-align:left;padding:6px 8px;background:
         var(--color-bg-sub,#f0f0f0);border-bottom:1px solid
         var(--color-border,#ddd);white-space:nowrap}
     .dash-table td{padding:5px 8px;border-bottom:1px solid
-        var(--color-border,#eee);vertical-align:top;word-break:break-all}
+        var(--color-border,var(--color-gray-light));vertical-align:top;word-break:break-all}
     .redline-bar{background:#fff8f0;border:1px solid #e8a30c;color:#8a5a00;
         padding:8px 12px;border-radius:5px;margin-bottom:14px;
         font-size:11px}
-    .note-bar{font-size:11px;color:#999;text-align:center;padding:10px 0}
+    .note-bar{font-size:11px;color:var(--color-muted);text-align:center;padding:10px 0}
     .mode-pill{font-size:11px;padding:3px 10px;border-radius:10px;
         background:#eef;border:1px solid #ccd}
     .mode-pill.ok{background:#e6f7ee;border-color:#9ad;border-color:#7c6;color:#166}
@@ -85,7 +85,7 @@
     <button class="dash-btn" onclick="saveConn()">连接</button>
     <button class="dash-btn ghost" onclick="loadAll()">刷新</button>
     <span id="modePill" class="mode-pill">MODE=…</span>
-    <span id="lastUpdate" style="font-size:11px;color:#999;margin-left:8px"></span>
+    <span id="lastUpdate" style="font-size:11px;color:var(--color-muted);margin-left:8px"></span>
 </div>
 <div id="errBar" class="dash-error"></div>
 
@@ -104,11 +104,11 @@
     <div id="ovFunnel" class="ov-cells" style="margin-bottom:10px"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div>
-        <div style="font-size:12px;color:#666;margin-bottom:6px">最近点击</div>
+        <div style="font-size:12px;color:var(--color-text-mid);margin-bottom:6px">最近点击</div>
         <div id="tblClicks"></div>
       </div>
       <div>
-        <div style="font-size:12px;color:#666;margin-bottom:6px">最近归因</div>
+        <div style="font-size:12px;color:var(--color-text-mid);margin-bottom:6px">最近归因</div>
         <div id="tblAttrs"></div>
       </div>
     </div>
@@ -150,11 +150,11 @@
     <div id="ovHealth" class="ov-cells" style="margin-bottom:10px"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div>
-        <div style="font-size:12px;color:#666;margin-bottom:6px">红队记录</div>
+        <div style="font-size:12px;color:var(--color-text-mid);margin-bottom:6px">红队记录</div>
         <div id="tblRedteam"></div>
       </div>
       <div>
-        <div style="font-size:12px;color:#666;margin-bottom:6px">进化日志</div>
+        <div style="font-size:12px;color:var(--color-text-mid);margin-bottom:6px">进化日志</div>
         <div id="tblEvo"></div>
       </div>
     </div>

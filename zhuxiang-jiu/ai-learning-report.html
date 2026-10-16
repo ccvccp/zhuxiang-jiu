@@ -13,7 +13,7 @@
         }
         .dash-banner h1 { font-size: 22px; margin: 0; }
         .dash-banner p { margin: 6px 0 0; opacity: 0.9; font-size: 13px; }
-        .dash-banner .back-link { color: #fff; font-size: 13px; opacity: 0.85; text-decoration: none; display: inline-block; margin-top: 10px; }
+        .dash-banner .back-link { color: var(--color-white); font-size: 13px; opacity: 0.85; text-decoration: none; display: inline-block; margin-top: 10px; }
         .dash-banner .back-link:hover { opacity: 1; text-decoration: underline; }
         .dash-banner .nav-links { margin-top: 10px; display: flex; gap: 16px; justify-content: center; }
 
@@ -30,19 +30,19 @@
         .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
         .dash-toolbar input[type="text"] {
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+            padding: 6px 10px; font-size: 13px; width: 240px; background: var(--color-white);
         }
         .dash-btn {
             border: none; border-radius: var(--radius-sm); cursor: pointer;
-            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: var(--color-white);
             transition: var(--transition);
         }
         .dash-btn:hover { background: var(--color-primary-dark); }
-        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost { background: var(--color-white); color: var(--color-primary); border: 1px solid var(--color-primary); }
         .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
         .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
         .dash-error {
-            display: none; background: #fdecea; color: var(--color-danger);
+            display: none; background: var(--color-danger-bg); color: var(--color-danger);
             border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
             padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
         }
@@ -58,13 +58,13 @@
             font-size: 11px; white-space: nowrap; border: 1px solid transparent;
         }
         .badge.module { background: rgba(74, 124, 89, 0.08); color: var(--color-primary-dark); border-color: rgba(74, 124, 89, 0.25); }
-        .badge.version { background: #e8f4ec; color: #2e8b57; }
-        .badge.src-default { background: #f0f0f0; color: #666; }
-        .badge.src-learning { background: #e8f4ec; color: #2e8b57; }
+        .badge.version { background: var(--color-ok-bg); color: var(--color-ok-deep); }
+        .badge.src-default { background: #f0f0f0; color: var(--color-text-mid); }
+        .badge.src-learning { background: var(--color-ok-bg); color: var(--color-ok-deep); }
         .badge.src-manual { background: #eef2fb; color: #3b5998; }
         .badge.src-reset { background: #fdf3e3; color: #a06b00; }
         .drift-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
-        .drift-dot.low { background: #2e8b57; }
+        .drift-dot.low { background: var(--color-ok-deep); }
         .drift-dot.medium { background: #e67e22; }
         .drift-dot.high { background: var(--color-danger); }
 
@@ -73,9 +73,9 @@
         .stat-cell { background: var(--color-bg); border-radius: var(--radius-sm); padding: 12px 8px; text-align: center; }
         .stat-cell b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
         .stat-cell span { font-size: 11px; color: var(--color-text-light); }
-        .stat-cell .up { color: #2e8b57; }
+        .stat-cell .up { color: var(--color-ok-deep); }
         .stat-cell .down { color: var(--color-danger); }
-        .stat-cell .flat { color: #999; }
+        .stat-cell .flat { color: var(--color-muted); }
 
         /* auto/manual 占比条 */
         .ratio-bar { height: 14px; border-radius: 999px; overflow: hidden; display: flex; background: var(--color-bg); }
@@ -101,7 +101,7 @@
         .tbl td.mono { font-family: Consolas, monospace; font-size: 12px; }
         .tbl .v-champion { color: var(--color-primary-dark); font-weight: 700; }
         .tbl .v-challenger { color: var(--color-accent); font-weight: 700; }
-        .rate-good { color: #2e8b57; font-weight: 600; }
+        .rate-good { color: var(--color-ok-deep); font-weight: 600; }
         .rate-mid { color: #a06b00; font-weight: 600; }
         .rate-bad { color: var(--color-danger); font-weight: 600; }
 
@@ -176,8 +176,8 @@
             <div class="dash-card">
                 <div class="card-title">正确率演进<small>各权重版本的反馈正确率(0~100%)</small></div>
                 <div class="chart-legend">
-                    <span class="lg"><span class="sw" style="background:#4a7c59;"></span>正确率</span>
-                    <span class="lg" style="color:#2e8b57;">▲ 冠军(生效)</span>
+                    <span class="lg"><span class="sw" style="background:var(--color-primary);"></span>正确率</span>
+                    <span class="lg" style="color:var(--color-ok-deep);">▲ 冠军(生效)</span>
                     <span class="lg" style="color:#c9a961;">△ 挑战者</span>
                 </div>
                 <div class="chart-wrap" id="accChart"><div class="chart-empty">加载中…</div></div>
@@ -353,7 +353,7 @@
                 r.autoFeedback + ' (' + autoPct.toFixed(1) + '%)</span>' +
                 '<span><span class="sw" style="background:#b9c4bd;"></span>手动反馈(管理员标注) ' +
                 r.manualFeedback + ' (' + manualPct.toFixed(1) + '%)</span>' +
-                (total === 0 ? '<span style="color:#999;">暂无反馈</span>' : '');
+                (total === 0 ? '<span style="color:var(--color-muted);">暂无反馈</span>' : '');
         }
 
         /* ========= 合并版本数据(反馈聚合 × 版本档案) ========= */
@@ -417,7 +417,7 @@
                 var x = X(i).toFixed(1);
                 svg.push('<line x1="' + x + '" y1="' + padT + '" x2="' + x + '" y2="' + (H - padB) + '" stroke="#f0ede4" stroke-width="1"/>');
                 svg.push('<text x="' + x + '" y="' + (H - 12) + '" text-anchor="middle" font-size="10" fill="#6b6b6b">' + esc(r.version) + '</text>');
-                if (r.role === 'champion') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="#2e8b57">▲</text>');
+                if (r.role === 'champion') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="var(--color-ok-deep)">▲</text>');
                 if (r.role === 'challenger') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="#c9a961">△</text>');
             });
 
@@ -425,7 +425,7 @@
             var seg = [], dots = [], labels = [];
             var flushSeg = function () {
                 if (seg.length >= 2) {
-                    svg.push('<polyline points="' + seg.join(' ') + '" fill="none" stroke="#4a7c59" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>');
+                    svg.push('<polyline points="' + seg.join(' ') + '" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>');
                 }
                 seg = [];
             };
@@ -433,9 +433,9 @@
                 if (r.correctRate == null) { flushSeg(); return; }
                 var x = X(i).toFixed(1), y = Y(r.correctRate).toFixed(1);
                 seg.push(x + ',' + y);
-                dots.push('<circle cx="' + x + '" cy="' + y + '" r="3.4" fill="#4a7c59"><title>' +
+                dots.push('<circle cx="' + x + '" cy="' + y + '" r="3.4" fill="var(--color-primary)"><title>' +
                     esc(r.version) + ' 正确率 ' + pct(r.correctRate) + ' · 反馈 ' + r.feedbackCount + ' 条 · 错误 ' + r.incorrectCount + '</title></circle>');
-                labels.push('<text x="' + x + '" y="' + (+y - 8).toFixed(1) + '" text-anchor="middle" font-size="10" fill="#2e8b57" font-weight="600">' + (r.correctRate * 100).toFixed(0) + '%</text>');
+                labels.push('<text x="' + x + '" y="' + (+y - 8).toFixed(1) + '" text-anchor="middle" font-size="10" fill="var(--color-ok-deep)" font-weight="600">' + (r.correctRate * 100).toFixed(0) + '%</text>');
             });
             flushSeg();
             svg.push(dots.join(''));
@@ -472,7 +472,7 @@
                 var x = X(i).toFixed(1);
                 svg.push('<line x1="' + x + '" y1="' + padT + '" x2="' + x + '" y2="' + (H - padB) + '" stroke="#f0ede4" stroke-width="1"/>');
                 svg.push('<text x="' + x + '" y="' + (H - 12) + '" text-anchor="middle" font-size="10" fill="#6b6b6b">' + esc(r.version) + '</text>');
-                if (r.role === 'champion') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="#2e8b57">▲</text>');
+                if (r.role === 'champion') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="var(--color-ok-deep)">▲</text>');
                 if (r.role === 'challenger') svg.push('<text x="' + x + '" y="' + (H - 24) + '" text-anchor="middle" font-size="10" fill="#c9a961">△</text>');
             });
 

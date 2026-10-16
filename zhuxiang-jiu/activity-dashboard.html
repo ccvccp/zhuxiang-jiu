@@ -22,16 +22,16 @@
     <style>
         /* ========= 主题变量内联(生产自包含; 本地有 css/style.css 时叠加不冲突) ========= */
         :root {
-            --color-primary: #4a7c59;        /* 竹绿主色 */
-            --color-primary-dark: #355c44;   /* 深竹绿 */
+            --color-primary: var(--color-primary);        /* 竹绿主色 */
+            --color-primary-dark: var(--color-primary-dark);   /* 深竹绿 */
             --color-primary-light: #6b9b7c;  /* 浅竹绿 */
             --color-accent: #c9a961;         /* 金色辅色 */
             --color-bg: #f8f6f0;             /* 米白背景 */
-            --color-bg-card: #ffffff;        /* 卡片背景 */
+            --color-bg-card: var(--color-white);        /* 卡片背景 */
             --color-text: #2c2c2c;           /* 正文文字 */
             --color-text-light: #6b6b6b;     /* 辅助文字 */
             --color-border: #e5e0d5;         /* 边框色 */
-            --color-danger: #c0392b;         /* 警告/价格 */
+            --color-danger: var(--color-danger);         /* 警告/价格 */
             --shadow-sm: 0 2px 8px rgba(74, 124, 89, 0.08);
             --radius-sm: 4px;
             --radius-md: 8px;
@@ -59,7 +59,7 @@
         .dash-banner h1 { font-size: 26px; margin: 0; }
         .dash-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
         .banner-link {
-            color: #fff; text-decoration: none; border: 1px solid rgba(255, 255, 255, 0.55);
+            color: var(--color-white); text-decoration: none; border: 1px solid rgba(255, 255, 255, 0.55);
             border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px;
             white-space: nowrap; transition: var(--transition);
         }
@@ -71,7 +71,7 @@
         .back-btn {
             flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%;
             border: none; cursor: pointer; background: rgba(255, 255, 255, 0.2);
-            color: #fff; font-size: 18px; line-height: 1; font-family: inherit;
+            color: var(--color-white); font-size: 18px; line-height: 1; font-family: inherit;
             display: flex; align-items: center; justify-content: center;
             transition: var(--transition);
         }
@@ -89,27 +89,27 @@
         .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
         .dash-toolbar input[type="text"] {
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+            padding: 6px 10px; font-size: 13px; width: 240px; background: var(--color-white);
         }
         .dash-btn {
             border: none; border-radius: var(--radius-sm); cursor: pointer;
-            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: var(--color-white);
             transition: var(--transition);
         }
         .dash-btn:hover { background: var(--color-primary-dark); }
-        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost { background: var(--color-white); color: var(--color-primary); border: 1px solid var(--color-primary); }
         .dash-btn.ghost:hover { background: rgba(74, 124, 89, 0.06); }
         .dash-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
 
         /* 错误/提示横幅 */
         .dash-error {
-            display: none; background: #fdecea; color: var(--color-danger);
+            display: none; background: var(--color-danger-bg); color: var(--color-danger);
             border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
             padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
         }
         .dash-info {
-            display: none; background: #e8f4ec; color: #2e8b57;
+            display: none; background: var(--color-ok-bg); color: var(--color-ok-deep);
             border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
             padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
         }
@@ -123,7 +123,7 @@
         .card-head .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
         .card-head select {
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-            padding: 6px 10px; font-size: 13px; background: #fff;
+            padding: 6px 10px; font-size: 13px; background: var(--color-white);
         }
 
         /* 总览 cells */
@@ -140,7 +140,7 @@
         .act-form input[type="text"], .act-form input[type="number"],
         .act-form input[type="datetime-local"], .act-form select, .act-form textarea {
             width: 100%; box-sizing: border-box; border: 1px solid var(--color-border);
-            border-radius: var(--radius-sm); padding: 7px 10px; font-size: 13px; background: #fff;
+            border-radius: var(--radius-sm); padding: 7px 10px; font-size: 13px; background: var(--color-white);
         }
         .act-form textarea { min-height: 72px; resize: vertical; line-height: 1.7; font-family: inherit; }
         .act-form textarea.json { font-family: Consolas, monospace; font-size: 12px; }
@@ -152,11 +152,11 @@
         .pill-bar { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px 4px; }
         .pill {
             border: 1px solid var(--color-border); border-radius: 999px; padding: 4px 14px;
-            font-size: 12px; cursor: pointer; background: #fff; color: var(--color-text-light);
+            font-size: 12px; cursor: pointer; background: var(--color-white); color: var(--color-text-light);
             transition: var(--transition);
         }
         .pill:hover { border-color: var(--color-primary); color: var(--color-primary); }
-        .pill.active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+        .pill.active { background: var(--color-primary); color: var(--color-white); border-color: var(--color-primary); }
 
         /* 表格 */
         .matrix-wrap { overflow-x: auto; }
@@ -171,16 +171,16 @@
             display: inline-block; border-radius: 999px; padding: 2px 10px;
             font-size: 11px; white-space: nowrap; border: 1px solid transparent;
         }
-        .badge.green { background: #e8f4ec; color: #2e8b57; }
+        .badge.green { background: var(--color-ok-bg); color: var(--color-ok-deep); }
         .badge.yellow { background: #fdf3e3; color: #a06b00; }
-        .badge.red { background: #fdecea; color: var(--color-danger); }
-        .badge.weak { background: #f4f4f4; color: #999; }
+        .badge.red { background: var(--color-danger-bg); color: var(--color-danger); }
+        .badge.weak { background: #f4f4f4; color: var(--color-muted); }
         .badge.blue { background: #eef2fb; color: #3b5998; }
         .badge.gold { background: rgba(201, 169, 97, 0.15); color: #8a6d2f; }
 
         /* 小按钮 */
         .btn-mini {
-            border: 1px solid var(--color-primary); background: #fff; color: var(--color-primary);
+            border: 1px solid var(--color-primary); background: var(--color-white); color: var(--color-primary);
             border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px;
             cursor: pointer; transition: var(--transition); margin: 1px 2px;
         }
@@ -202,13 +202,13 @@
         tr.detail-row > td { background: var(--color-bg); padding: 0 16px; white-space: normal; }
         .detail-box { padding: 14px 0; display: flex; flex-direction: column; gap: 12px; }
         .detail-body {
-            background: #fff; border: 1px solid var(--color-border);
+            background: var(--color-white); border: 1px solid var(--color-border);
             border-radius: var(--radius-sm); padding: 12px 14px;
             font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-word;
         }
         .detail-body.json { font-family: Consolas, monospace; font-size: 12px; }
         .detail-label { font-size: 12px; color: var(--color-text-light); margin-bottom: 4px; }
-        .sub-table { width: 100%; border-collapse: collapse; font-size: 12px; background: #fff; }
+        .sub-table { width: 100%; border-collapse: collapse; font-size: 12px; background: var(--color-white); }
         .sub-table th { padding: 6px 8px; border-bottom: 1px solid var(--color-border); text-align: left; color: var(--color-text-light); }
         .sub-table td { padding: 5px 8px; border-bottom: 1px solid var(--color-border); }
 
@@ -220,11 +220,11 @@
         .prize-row { display: grid; grid-template-columns: 2fr 1.2fr 0.8fr 0.8fr 0.8fr 0.8fr auto; gap: 8px; align-items: center; }
         .prize-row input {
             width: 100%; box-sizing: border-box; border: 1px solid var(--color-border);
-            border-radius: var(--radius-sm); padding: 6px 8px; font-size: 12px; background: #fff;
+            border-radius: var(--radius-sm); padding: 6px 8px; font-size: 12px; background: var(--color-white);
         }
         .prize-row select {
             width: 100%; box-sizing: border-box; border: 1px solid var(--color-border);
-            border-radius: var(--radius-sm); padding: 6px 4px; font-size: 12px; background: #fff;
+            border-radius: var(--radius-sm); padding: 6px 4px; font-size: 12px; background: var(--color-white);
         }
         .prob-total { font-size: 13px; margin-top: 10px; }
         .prob-total.over { color: var(--color-danger); font-weight: 600; }
@@ -232,7 +232,7 @@
         /* 发货行内运单输入 */
         .deliver-input {
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-            padding: 3px 8px; font-size: 12px; width: 130px; background: #fff;
+            padding: 3px 8px; font-size: 12px; width: 130px; background: var(--color-white);
         }
 
         /* 提示行 */
@@ -426,7 +426,7 @@
                             </tr>
                         </thead>
                         <tbody id="activityBody">
-                            <tr><td colspan="10" style="color:#999;font-size:12px;padding:16px;">加载中…</td></tr>
+                            <tr><td colspan="10" style="color:var(--color-muted);font-size:12px;padding:16px;">加载中…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -488,7 +488,7 @@
                             </tr>
                         </thead>
                         <tbody id="prizeRecordBody">
-                            <tr><td colspan="9" style="color:#999;font-size:12px;padding:16px;">加载中…</td></tr>
+                            <tr><td colspan="9" style="color:var(--color-muted);font-size:12px;padding:16px;">加载中…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -541,7 +541,7 @@
                             </tr>
                         </thead>
                         <tbody id="grantBody">
-                            <tr><td colspan="8" style="color:#999;font-size:12px;padding:16px;">加载中…</td></tr>
+                            <tr><td colspan="8" style="color:var(--color-muted);font-size:12px;padding:16px;">加载中…</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -764,14 +764,14 @@
             if (!info) { return; }
             var wrap = document.createElement('span');
             wrap.style.cssText = 'display:inline-flex;align-items:center;gap:8px;'
-                + 'font-size:12px;color:#fff;opacity:.92;';
+                + 'font-size:12px;color:var(--color-white);opacity:.92;';
             var name = document.createElement('span');
             name.textContent = (info.nickname || info.phone || '已登录')
                 + (info.role === 'admin' ? '(管理员)' : '');
             var btn = document.createElement('button');
             btn.textContent = '退出';
             btn.style.cssText = 'background:rgba(255,255,255,.18);border:1px solid '
-                + 'rgba(255,255,255,.45);color:#fff;border-radius:6px;'
+                + 'rgba(255,255,255,.45);color:var(--color-white);border-radius:6px;'
                 + 'padding:2px 10px;font-size:11px;cursor:pointer;';
             btn.onclick = function () {
                 localStorage.removeItem('zhuxiang.auth');
@@ -853,7 +853,7 @@
                     return String(g.nodeCode || '').indexOf('activity.') === 0;
                 });
                 if (!acts.length) {
-                    body.innerHTML = '<tr><td colspan="8" style="color:#999;'
+                    body.innerHTML = '<tr><td colspan="8" style="color:var(--color-muted);'
                         + 'font-size:12px;padding:16px;">暂无活动后台授权——用上方表单授予第一个。</td></tr>';
                     return;
                 }
@@ -1131,7 +1131,7 @@
             var list = state.activities;
             renderOverview(list);
             if (!list.length) {
-                $('activityBody').innerHTML = '<tr><td colspan="10" style="color:#999;'
+                $('activityBody').innerHTML = '<tr><td colspan="10" style="color:var(--color-muted);'
                     + 'font-size:12px;padding:16px;">暂无活动——用上方「② 发布活动」创建第一个。</td></tr>';
                 return;
             }
@@ -1460,7 +1460,7 @@
                 if (st) { url += '&status=' + encodeURIComponent(st); }
                 var records = await fetchJson(url);
                 if (!records || !records.length) {
-                    $('prizeRecordBody').innerHTML = '<tr><td colspan="9" style="color:#999;'
+                    $('prizeRecordBody').innerHTML = '<tr><td colspan="9" style="color:var(--color-muted);'
                         + 'font-size:12px;padding:16px;">暂无发奖记录。</td></tr>';
                     return;
                 }

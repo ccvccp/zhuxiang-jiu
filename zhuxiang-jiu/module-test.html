@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#355c44">
+    <meta name="theme-color" content="var(--color-primary-dark)">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="竹香酒">
@@ -97,7 +97,7 @@
     <section class="section" id="conventionPanel" style="background:linear-gradient(135deg,#2c3e50,#34495e);color:#fff;">
         <div class="container">
             <div class="section-title">
-                <h2 style="color:#fff;">事务服务 <span style="color:#f1c40f;">约定检查器</span></h2>
+                <h2 style="color:var(--color-white);">事务服务 <span style="color:#f1c40f;">约定检查器</span></h2>
                 <p style="color:#ecf0f1;">把《预检与失败阶段策略》维护清单固化为可执行检查 · 新增服务时自动运行</p>
                 <div class="deco-line"></div>
             </div>
@@ -110,7 +110,7 @@
                     </div>
                     <div>
                         <button class="btn-run-all" onclick="runConventionCheck(false)" style="background:#16a085;margin-right:8px;">▶ 运行静态检查</button>
-                        <button class="btn-run-all" onclick="runConventionCheck(true)" style="background:#c0392b;">▶ 运行完整检查(含回归)</button>
+                        <button class="btn-run-all" onclick="runConventionCheck(true)" style="background:var(--color-danger);">▶ 运行完整检查(含回归)</button>
                     </div>
                 </div>
                 <div style="font-size:13px;color:#bdc3c7;margin-bottom:8px;">
@@ -131,15 +131,15 @@
                 <p>对接 agent-upgrade-service.js · 11阶段事务 · 升级/降级/回滚 全场景</p>
                 <div class="deco-line"></div>
             </div>
-            <div style="background:#fff;border:2px solid #4a7c59;border-radius:8px;padding:20px;margin-top:16px;">
+            <div style="background:var(--color-white);border:2px solid var(--color-primary);border-radius:8px;padding:20px;margin-top:16px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
                     <div>
-                        <strong style="color:#355c44;">AgentUpgradeClient 控制台</strong>
-                        <span style="margin-left:12px;color:#666;font-size:13px;">当前模式: <code id="agentMode">mock</code></span>
-                        <span style="margin-left:12px;color:#666;font-size:13px;">数据源: <code id="agentDataSource">localStorage</code></span>
+                        <strong style="color:var(--color-primary-dark);">AgentUpgradeClient 控制台</strong>
+                        <span style="margin-left:12px;color:var(--color-text-mid);font-size:13px;">当前模式: <code id="agentMode">mock</code></span>
+                        <span style="margin-left:12px;color:var(--color-text-mid);font-size:13px;">数据源: <code id="agentDataSource">localStorage</code></span>
                     </div>
                     <div>
-                        <button class="btn-run-all" onclick="runAgentUpgradeRegression()" style="background:#c0392b;margin-right:8px;">▶ 一键回归测试</button>
+                        <button class="btn-run-all" onclick="runAgentUpgradeRegression()" style="background:var(--color-danger);margin-right:8px;">▶ 一键回归测试</button>
                         <button class="btn-test" onclick="resetAgentMock()" style="margin-right:8px;">↻ 重置Mock数据</button>
                         <button class="btn-test" onclick="setAgentMode('mock')" style="margin-right:8px;">Mock模式</button>
                         <button class="btn-test" onclick="setAgentMode('live')">Live模式</button>
@@ -147,31 +147,31 @@
                 </div>
 
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:16px;">
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
-                        <div style="font-weight:bold;color:#355c44;margin-bottom:8px;">测试1: 市级→核心 升级</div>
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
+                        <div style="font-weight:bold;color:var(--color-primary-dark);margin-bottom:8px;">测试1: 市级→核心 升级</div>
                         <button class="btn-test" onclick="runUpgradeTest(1, '市级', '核心', '主动升级')">▶ 执行升级</button>
                     </div>
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
-                        <div style="font-weight:bold;color:#355c44;margin-bottom:8px;">测试2: 核心→战略 升级</div>
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
+                        <div style="font-weight:bold;color:var(--color-primary-dark);margin-bottom:8px;">测试2: 核心→战略 升级</div>
                         <button class="btn-test" onclick="runUpgradeTest(2, '核心', '战略', 'AI建议升级')">▶ 执行升级</button>
                     </div>
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
-                        <div style="font-weight:bold;color:#355c44;margin-bottom:8px;">测试3: 核心→市级 降级</div>
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
+                        <div style="font-weight:bold;color:var(--color-primary-dark);margin-bottom:8px;">测试3: 核心→市级 降级</div>
                         <button class="btn-test" onclick="runDowngradeTest(2, '核心', '连续3月未达25万门槛')">▶ 执行降级</button>
                     </div>
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
-                        <div style="font-weight:bold;color:#355c44;margin-bottom:8px;">测试4: 模拟回滚</div>
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
+                        <div style="font-weight:bold;color:var(--color-primary-dark);margin-bottom:8px;">测试4: 模拟回滚</div>
                         <button class="btn-test" onclick="runRollbackTest()">▶ 触发回滚</button>
                     </div>
                 </div>
 
-                <div style="border-top:1px solid #eee;padding-top:12px;">
-                    <strong style="color:#355c44;">代理商列表(实时数据):</strong>
+                <div style="border-top:1px solid var(--color-gray-light);padding-top:12px;">
+                    <strong style="color:var(--color-primary-dark);">代理商列表(实时数据):</strong>
                     <div id="agentList" style="margin-top:8px;font-size:13px;"></div>
                 </div>
 
                 <div style="margin-top:16px;">
-                    <strong style="color:#355c44;">事务执行日志:</strong>
+                    <strong style="color:var(--color-primary-dark);">事务执行日志:</strong>
                     <div id="agentLog" style="background:#1e1e1e;color:#0f0;padding:12px;border-radius:6px;margin-top:8px;max-height:300px;overflow-y:auto;font-family:Consolas,monospace;font-size:12px;line-height:1.5;"></div>
                 </div>
             </div>
@@ -186,15 +186,15 @@
                 <p>对接 checkout-service.js · 9阶段事务 · 下单/券核销/库存回滚 全场景</p>
                 <div class="deco-line"></div>
             </div>
-            <div style="background:#fff;border:2px solid #4a7c59;border-radius:8px;padding:20px;margin-top:16px;">
+            <div style="background:var(--color-white);border:2px solid var(--color-primary);border-radius:8px;padding:20px;margin-top:16px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
                     <div>
-                        <strong style="color:#355c44;">CheckoutService 控制台</strong>
-                        <span style="margin-left:12px;color:#666;font-size:13px;">当前模式: <code id="checkoutMode">mock</code></span>
-                        <span style="margin-left:12px;color:#666;font-size:13px;">数据源: <code id="checkoutDataSource">localStorage</code></span>
+                        <strong style="color:var(--color-primary-dark);">CheckoutService 控制台</strong>
+                        <span style="margin-left:12px;color:var(--color-text-mid);font-size:13px;">当前模式: <code id="checkoutMode">mock</code></span>
+                        <span style="margin-left:12px;color:var(--color-text-mid);font-size:13px;">数据源: <code id="checkoutDataSource">localStorage</code></span>
                     </div>
                     <div>
-                        <button class="btn-run-all" onclick="runCheckoutRegression()" style="background:#c0392b;margin-right:8px;">▶ 一键回归测试</button>
+                        <button class="btn-run-all" onclick="runCheckoutRegression()" style="background:var(--color-danger);margin-right:8px;">▶ 一键回归测试</button>
                         <button class="btn-test" onclick="resetCheckoutMock()" style="margin-right:8px;">↻ 重置Mock数据</button>
                         <button class="btn-test" onclick="setCheckoutMode('mock')" style="margin-right:8px;">Mock模式</button>
                         <button class="btn-test" onclick="setCheckoutMode('live')">Live模式</button>
@@ -202,31 +202,31 @@
                 </div>
 
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:16px;">
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
-                        <div style="font-weight:bold;color:#355c44;margin-bottom:8px;">测试1: 正常下单(L5+5000积分)</div>
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
+                        <div style="font-weight:bold;color:var(--color-primary-dark);margin-bottom:8px;">测试1: 正常下单(L5+5000积分)</div>
                         <button class="btn-test" onclick="runCheckoutSubmitTest('normal')">▶ 提交订单</button>
                     </div>
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
-                        <div style="font-weight:bold;color:#355c44;margin-bottom:8px;">测试2: 优惠券下单(SVIP20)</div>
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
+                        <div style="font-weight:bold;color:var(--color-primary-dark);margin-bottom:8px;">测试2: 优惠券下单(SVIP20)</div>
                         <button class="btn-test" onclick="runCheckoutSubmitTest('coupon')">▶ 提交订单</button>
                     </div>
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
-                        <div style="font-weight:bold;color:#355c44;margin-bottom:8px;">测试3: 库存不足(回滚)</div>
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
+                        <div style="font-weight:bold;color:var(--color-primary-dark);margin-bottom:8px;">测试3: 库存不足(回滚)</div>
                         <button class="btn-test" onclick="runCheckoutSubmitTest('stockout')">▶ 触发回滚</button>
                     </div>
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
-                        <div style="font-weight:bold;color:#355c44;margin-bottom:8px;">测试4: 无效优惠券(回滚)</div>
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
+                        <div style="font-weight:bold;color:var(--color-primary-dark);margin-bottom:8px;">测试4: 无效优惠券(回滚)</div>
                         <button class="btn-test" onclick="runCheckoutSubmitTest('badcoupon')">▶ 触发回滚</button>
                     </div>
                 </div>
 
-                <div style="border-top:1px solid #eee;padding-top:12px;">
-                    <strong style="color:#355c44;">商品/会员/优惠券(实时数据):</strong>
+                <div style="border-top:1px solid var(--color-gray-light);padding-top:12px;">
+                    <strong style="color:var(--color-primary-dark);">商品/会员/优惠券(实时数据):</strong>
                     <div id="checkoutList" style="margin-top:8px;font-size:13px;"></div>
                 </div>
 
                 <div style="margin-top:16px;">
-                    <strong style="color:#355c44;">事务执行日志:</strong>
+                    <strong style="color:var(--color-primary-dark);">事务执行日志:</strong>
                     <div id="checkoutLog" style="background:#1e1e1e;color:#0f0;padding:12px;border-radius:6px;margin-top:8px;max-height:300px;overflow-y:auto;font-family:Consolas,monospace;font-size:12px;line-height:1.5;"></div>
                 </div>
             </div>
@@ -241,15 +241,15 @@
                 <p>对接 inventory-service.js · 库存扣减/回补事务 · applyDeduct 共享核心(供 checkout 委托)</p>
                 <div class="deco-line"></div>
             </div>
-            <div style="background:#fff;border:2px solid #e67e22;border-radius:8px;padding:20px;margin-top:16px;">
+            <div style="background:var(--color-white);border:2px solid #e67e22;border-radius:8px;padding:20px;margin-top:16px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
                     <div>
-                        <strong style="color:#c0392b;">InventoryService 控制台</strong>
-                        <span style="margin-left:12px;color:#666;font-size:13px;">当前模式: <code id="inventoryMode">mock</code></span>
-                        <span style="margin-left:12px;color:#666;font-size:13px;">预警阈值: <code id="inventoryThreshold">10</code></span>
+                        <strong style="color:var(--color-danger);">InventoryService 控制台</strong>
+                        <span style="margin-left:12px;color:var(--color-text-mid);font-size:13px;">当前模式: <code id="inventoryMode">mock</code></span>
+                        <span style="margin-left:12px;color:var(--color-text-mid);font-size:13px;">预警阈值: <code id="inventoryThreshold">10</code></span>
                     </div>
                     <div>
-                        <button class="btn-run-all" onclick="runInventoryRegression()" style="background:#c0392b;margin-right:8px;">▶ 库存管理一键回归</button>
+                        <button class="btn-run-all" onclick="runInventoryRegression()" style="background:var(--color-danger);margin-right:8px;">▶ 库存管理一键回归</button>
                         <button class="btn-test" onclick="resetInventoryMock()" style="margin-right:8px;">↻ 重置Mock数据</button>
                         <button class="btn-test" onclick="setInventoryMode('mock')" style="margin-right:8px;">Mock模式</button>
                         <button class="btn-test" onclick="setInventoryMode('live')">Live模式</button>
@@ -261,7 +261,7 @@
                     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                         <div>
                             <strong style="color:#8e44ad;">🔒 Mutex 并发压测</strong>
-                            <span style="margin-left:8px;color:#666;font-size:13px;">FIFO 队列锁 · stock:{pid} 串行化 · 防超卖/死锁/退化</span>
+                            <span style="margin-left:8px;color:var(--color-text-mid);font-size:13px;">FIFO 队列锁 · stock:{pid} 串行化 · 防超卖/死锁/退化</span>
                         </div>
                         <div>
                             <button class="btn-run-all" onclick="runHighPressureTestPanel()" style="background:#8e44ad;margin-right:8px;">▶ 高压并发(500d+500r)</button>
@@ -275,7 +275,7 @@
                     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                         <div>
                             <strong style="color:#2980b9;">🧪 边界 mock 判定测试</strong>
-                            <span style="margin-left:8px;color:#666;font-size:13px;">特殊字符/超长描述/mock异常/null/空对象/正则/Unicode/超长AI名</span>
+                            <span style="margin-left:8px;color:var(--color-text-mid);font-size:13px;">特殊字符/超长描述/mock异常/null/空对象/正则/Unicode/超长AI名</span>
                         </div>
                         <div>
                             <button class="btn-run-all" onclick="runEdgeCaseMockTest()" style="background:#2980b9;">▶ 边界判定(8场景)</button>
@@ -288,7 +288,7 @@
                     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                         <div>
                             <strong style="color:#16a085;">🤖 AiOps模块25单元测试</strong>
-                            <span style="margin-left:8px;color:#666;font-size:13px;">10个AI能力+结构+mock+判定 · 16用例</span>
+                            <span style="margin-left:8px;color:var(--color-text-mid);font-size:13px;">10个AI能力+结构+mock+判定 · 16用例</span>
                         </div>
                         <div>
                             <button class="btn-run-all" onclick="runAiOpsModuleTest()" style="background:#16a085;">▶ AiOps测试(16用例)</button>
@@ -301,7 +301,7 @@
                     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                         <div>
                             <strong style="color:#e67e22;">🤝 合作模块15单元测试</strong>
-                            <span style="margin-left:8px;color:#666;font-size:13px;">10个AI能力+结构+mock+供应链闭环 · 16用例</span>
+                            <span style="margin-left:8px;color:var(--color-text-mid);font-size:13px;">10个AI能力+结构+mock+供应链闭环 · 16用例</span>
                         </div>
                         <div>
                             <button class="btn-run-all" onclick="runCooperationModuleTest()" style="background:#e67e22;">▶ 合作测试(16用例)</button>
@@ -314,7 +314,7 @@
                     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                         <div>
                             <strong style="color:#2980b9;">📦 模块27原料采购单元测试</strong>
-                            <span style="margin-left:8px;color:#666;font-size:13px;">10个AI能力+结构+mock+合作闭环 · 16用例</span>
+                            <span style="margin-left:8px;color:var(--color-text-mid);font-size:13px;">10个AI能力+结构+mock+合作闭环 · 16用例</span>
                         </div>
                         <div>
                             <button class="btn-run-all" onclick="runProcurementModuleTest()" style="background:#2980b9;">▶ 采购测试(16用例)</button>
@@ -327,7 +327,7 @@
                     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                         <div>
                             <strong style="color:#8e44ad;">🏗️ 模块28仓储优化单元测试</strong>
-                            <span style="margin-left:8px;color:#666;font-size:13px;">10个AI能力+结构+mock+供应链闭环 · 16用例</span>
+                            <span style="margin-left:8px;color:var(--color-text-mid);font-size:13px;">10个AI能力+结构+mock+供应链闭环 · 16用例</span>
                         </div>
                         <div>
                             <button class="btn-run-all" onclick="runWarehouseModuleTest()" style="background:#8e44ad;">▶ 仓储测试(16用例)</button>
@@ -340,7 +340,7 @@
                     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                         <div>
                             <strong style="color:#6c5ce7;">📦 模块28仓储服务API测试</strong>
-                            <span style="margin-left:8px;color:#666;font-size:13px;">10个AI能力端点+事务+Mutex+Mock/Live · 12用例</span>
+                            <span style="margin-left:8px;color:var(--color-text-mid);font-size:13px;">10个AI能力端点+事务+Mutex+Mock/Live · 12用例</span>
                         </div>
                         <div>
                             <button class="btn-run-all" onclick="runWarehouseServiceTest()" style="background:#6c5ce7;">▶ 仓储API测试(12用例)</button>
@@ -354,7 +354,7 @@
                     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                         <div>
                             <strong style="color:#00a085;">🔧 缓存工具函数测试(JUnit风格)</strong>
-                            <span style="margin-left:8px;color:#666;font-size:13px;">createModuleMockCache · 28用例(基础/懒加载/引用/重置/边界/隔离/完整性/并发)</span>
+                            <span style="margin-left:8px;color:var(--color-text-mid);font-size:13px;">createModuleMockCache · 28用例(基础/懒加载/引用/重置/边界/隔离/完整性/并发)</span>
                         </div>
                         <div>
                             <button class="btn-run-all" onclick="runCacheUtilTest()" style="background:#00a085;">▶ 缓存工具测试(28用例)</button>
@@ -368,7 +368,7 @@
                     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                         <div>
                             <strong style="color:#2c3e50;">🧠 模块29 AI决策筹划(AI大脑中枢)单元测试</strong>
-                            <span style="margin-left:8px;color:#666;font-size:13px;">6层架构·双维服务角色与模块·10个AI能力+结构+mock+编排判定 · 16用例</span>
+                            <span style="margin-left:8px;color:var(--color-text-mid);font-size:13px;">6层架构·双维服务角色与模块·10个AI能力+结构+mock+编排判定 · 16用例</span>
                         </div>
                         <div>
                             <button class="btn-run-all" onclick="runDecisionModuleTest()" style="background:#2c3e50;">▶ 决策筹划测试(16用例)</button>
@@ -378,31 +378,31 @@
                 </div>
 
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:16px;">
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
-                        <div style="font-weight:bold;color:#c0392b;margin-bottom:8px;">测试1: 正常扣减(qty=2)</div>
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
+                        <div style="font-weight:bold;color:var(--color-danger);margin-bottom:8px;">测试1: 正常扣减(qty=2)</div>
                         <button class="btn-test" onclick="runInventoryOpTest('deduct_normal')">▶ 扣减库存</button>
                     </div>
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
-                        <div style="font-weight:bold;color:#c0392b;margin-bottom:8px;">测试2: 库存不足(回滚)</div>
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
+                        <div style="font-weight:bold;color:var(--color-danger);margin-bottom:8px;">测试2: 库存不足(回滚)</div>
                         <button class="btn-test" onclick="runInventoryOpTest('deduct_stockout')">▶ 触发回滚</button>
                     </div>
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
-                        <div style="font-weight:bold;color:#c0392b;margin-bottom:8px;">测试3: 库存回补(qty=5)</div>
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
+                        <div style="font-weight:bold;color:var(--color-danger);margin-bottom:8px;">测试3: 库存回补(qty=5)</div>
                         <button class="btn-test" onclick="runInventoryOpTest('restock')">▶ 回补库存</button>
                     </div>
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
-                        <div style="font-weight:bold;color:#c0392b;margin-bottom:8px;">测试4: 低库存预警(余5)</div>
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
+                        <div style="font-weight:bold;color:var(--color-danger);margin-bottom:8px;">测试4: 低库存预警(余5)</div>
                         <button class="btn-test" onclick="runInventoryOpTest('lowstock')">▶ 触发预警</button>
                     </div>
                 </div>
 
-                <div style="border-top:1px solid #eee;padding-top:12px;">
-                    <strong style="color:#c0392b;">商品库存 + 预警(实时数据):</strong>
+                <div style="border-top:1px solid var(--color-gray-light);padding-top:12px;">
+                    <strong style="color:var(--color-danger);">商品库存 + 预警(实时数据):</strong>
                     <div id="inventoryList" style="margin-top:8px;font-size:13px;"></div>
                 </div>
 
                 <div style="margin-top:16px;">
-                    <strong style="color:#c0392b;">事务执行日志:</strong>
+                    <strong style="color:var(--color-danger);">事务执行日志:</strong>
                     <div id="inventoryLog" style="background:#1e1e1e;color:#0f0;padding:12px;border-radius:6px;margin-top:8px;max-height:300px;overflow-y:auto;font-family:Consolas,monospace;font-size:12px;line-height:1.5;"></div>
                 </div>
             </div>
@@ -417,40 +417,40 @@
                 <p>对接 agent-shipping-service.js · 区域认领/发货路由/厂家5%同品分润服务费</p>
                 <div class="deco-line"></div>
             </div>
-            <div style="background:#fff;border:2px solid #2980b9;border-radius:8px;padding:20px;margin-top:16px;">
+            <div style="background:var(--color-white);border:2px solid #2980b9;border-radius:8px;padding:20px;margin-top:16px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
                     <div>
                         <strong style="color:#2980b9;">AgentShippingService 控制台</strong>
-                        <span style="margin-left:12px;color:#666;font-size:13px;">模式: <code id="shippingMode">mock</code></span>
-                        <span style="margin-left:12px;color:#666;font-size:13px;">服务费率: <code id="shippingRate">5%</code></span>
+                        <span style="margin-left:12px;color:var(--color-text-mid);font-size:13px;">模式: <code id="shippingMode">mock</code></span>
+                        <span style="margin-left:12px;color:var(--color-text-mid);font-size:13px;">服务费率: <code id="shippingRate">5%</code></span>
                     </div>
                     <div>
-                        <button class="btn-run-all" onclick="runAgentShippingRegression()" style="background:#c0392b;margin-right:8px;">▶ 发货认领一键回归</button>
+                        <button class="btn-run-all" onclick="runAgentShippingRegression()" style="background:var(--color-danger);margin-right:8px;">▶ 发货认领一键回归</button>
                         <button class="btn-run-all" onclick="runShippingPanelTest()" style="background:#8e44ad;margin-right:8px;">🧪 面板函数单元测试</button>
                         <button class="btn-test" onclick="resetShippingMock()" style="margin-right:8px;">↻ 重置Mock</button>
                     </div>
                 </div>
 
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:16px;">
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
                         <div style="font-weight:bold;color:#2980b9;margin-bottom:8px;">测试1: 代理1认领山东泰安</div>
                         <button class="btn-test" onclick="runShippingOpTest('claim_taian')">▶ 认领区域</button>
                     </div>
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
                         <div style="font-weight:bold;color:#2980b9;margin-bottom:8px;">测试2: 代理2重复认领(拒绝)</div>
                         <button class="btn-test" onclick="runShippingOpTest('claim_dup')">▶ 触发回滚</button>
                     </div>
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
                         <div style="font-weight:bold;color:#2980b9;margin-bottom:8px;">测试3: 代理1释放山东泰安</div>
                         <button class="btn-test" onclick="runShippingOpTest('release')">▶ 释放认领</button>
                     </div>
-                    <div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;background:#f9f9f9;">
+                    <div style="border:1px solid var(--color-border-gray);border-radius:6px;padding:12px;background:#f9f9f9;">
                         <div style="font-weight:bold;color:#2980b9;margin-bottom:8px;">测试4: 认领后下单(路由+服务费)</div>
                         <button class="btn-test" onclick="runShippingOpTest('order_route')">▶ 下单验证</button>
                     </div>
                 </div>
 
-                <div style="border-top:1px solid #eee;padding-top:12px;">
+                <div style="border-top:1px solid var(--color-gray-light);padding-top:12px;">
                     <strong style="color:#2980b9;">认领记录 + 服务费结算(实时数据):</strong>
                     <div id="shippingList" style="margin-top:8px;font-size:13px;"></div>
                 </div>
@@ -464,7 +464,7 @@
     </section>
 
     <!-- 架构概览 -->
-    <section class="section" style="background:#fff;">
+    <section class="section" style="background:var(--color-white);">
         <div class="container">
             <div class="section-title">
                 <h2>四<span>中台</span>架构</h2>
@@ -472,25 +472,25 @@
                 <div class="deco-line"></div>
             </div>
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:24px;">
-                <div style="text-align:center;padding:20px;border-radius:8px;background:#e8f5e9;border:2px solid #4a7c59;">
+                <div style="text-align:center;padding:20px;border-radius:8px;background:#e8f5e9;border:2px solid var(--color-primary);">
                     <div style="font-size:32px;">🏢</div>
-                    <h3 style="color:#355c44;margin:8px 0;">业务中台</h3>
-                    <p style="font-size:12px;color:#666;" id="bizStat">6大域 · 29模块</p>
+                    <h3 style="color:var(--color-primary-dark);margin:8px 0;">业务中台</h3>
+                    <p style="font-size:12px;color:var(--color-text-mid);" id="bizStat">6大域 · 29模块</p>
                 </div>
                 <div style="text-align:center;padding:20px;border-radius:8px;background:#fff3e0;border:2px solid #e67e22;">
                     <div style="font-size:32px;">🤖</div>
                     <h3 style="color:#e67e22;margin:8px 0;">AI智能中台</h3>
-                    <p style="font-size:12px;color:#666;" id="aiStat">29大AI能力 · 90%</p>
+                    <p style="font-size:12px;color:var(--color-text-mid);" id="aiStat">29大AI能力 · 90%</p>
                 </div>
                 <div style="text-align:center;padding:20px;border-radius:8px;background:#e3f2fd;border:2px solid #3498db;">
                     <div style="font-size:32px;">📊</div>
                     <h3 style="color:#2980b9;margin:8px 0;">数据中台</h3>
-                    <p style="font-size:12px;color:#666;">200+标签 · 7数据域</p>
+                    <p style="font-size:12px;color:var(--color-text-mid);">200+标签 · 7数据域</p>
                 </div>
                 <div style="text-align:center;padding:20px;border-radius:8px;background:#eceff1;border:2px solid #2c3e50;">
                     <div style="font-size:32px;">⚖️</div>
                     <h3 style="color:#2c3e50;margin:8px 0;">合规中台</h3>
-                    <p style="font-size:12px;color:#666;">双引擎 · 16部法律</p>
+                    <p style="font-size:12px;color:var(--color-text-mid);">双引擎 · 16部法律</p>
                 </div>
             </div>
         </div>
@@ -792,7 +792,7 @@
             const html = db.agents.map(a => {
                 const cs = db.credit_scores.find(c => c.agent_id === a.id);
                 const wallet = db.wallet_accounts.find(w => w.agent_id === a.id);
-                return `<div style="padding:6px 8px;border-left:3px solid #4a7c59;margin-bottom:4px;background:#f9f9f9;">
+                return `<div style="padding:6px 8px;border-left:3px solid var(--color-primary);margin-bottom:4px;background:#f9f9f9;">
                     <strong>[${a.id}] ${a.name}</strong> | ${a.agent_level} | ${a.region} |
                     竹信分${cs ? cs.credit_score : 'N/A'} | 钱包¥${(wallet ? wallet.credit_limit : 0).toLocaleString()} |
                     返利档${a.current_rebate_tier} | 升级次数${a.upgrade_count || 0}
@@ -891,7 +891,7 @@
         function renderCheckoutList() {
             const db = CheckoutService.getMockDB();
             const productsHtml = db.products.slice(0, 4).map(p =>
-                `<div style="padding:4px 8px;border-left:3px solid #4a7c59;margin-bottom:3px;background:#f9f9f9;">
+                `<div style="padding:4px 8px;border-left:3px solid var(--color-primary);margin-bottom:3px;background:#f9f9f9;">
                     <strong>[${p.id}] ${p.name}</strong> | ¥${p.price} | 库存${p.stock}
                 </div>`
             ).join('');
@@ -901,15 +901,15 @@
                 </div>`
             ).join('');
             const couponsHtml = db.coupons.map(c =>
-                `<div style="padding:4px 8px;border-left:3px solid #c0392b;margin-bottom:3px;background:#f9f9f9;">
+                `<div style="padding:4px 8px;border-left:3px solid var(--color-danger);margin-bottom:3px;background:#f9f9f9;">
                     <strong>${c.code}</strong> (${c.desc}) | 折扣${(c.discount * 100).toFixed(0)}% | ${c.status}
                 </div>`
             ).join('');
             document.getElementById('checkoutList').innerHTML =
                 `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">
-                    <div><strong style="color:#355c44;">商品:</strong>${productsHtml}</div>
-                    <div><strong style="color:#355c44;">会员:</strong>${membersHtml}</div>
-                    <div><strong style="color:#355c44;">优惠券:</strong>${couponsHtml}</div>
+                    <div><strong style="color:var(--color-primary-dark);">商品:</strong>${productsHtml}</div>
+                    <div><strong style="color:var(--color-primary-dark);">会员:</strong>${membersHtml}</div>
+                    <div><strong style="color:var(--color-primary-dark);">优惠券:</strong>${couponsHtml}</div>
                 </div>`;
         }
 
@@ -979,7 +979,7 @@
             const productsHtml = db.products.slice(0, 6).map(p => {
                 const alert = db.stock_alerts.find(a => a.product_id === p.id);
                 const alertMark = alert ? ` ⚠${alert.level}` : '';
-                const stockColor = p.stock === 0 ? '#c0392b' : (p.stock <= InventoryService.CONFIG.LOW_STOCK_THRESHOLD ? '#e67e22' : '#355c44');
+                const stockColor = p.stock === 0 ? 'var(--color-danger)' : (p.stock <= InventoryService.CONFIG.LOW_STOCK_THRESHOLD ? '#e67e22' : 'var(--color-primary-dark)');
                 return `<div style="padding:4px 8px;border-left:3px solid #e67e22;margin-bottom:3px;background:#f9f9f9;">
                     <strong>[${p.id}] ${p.name}</strong> | 库存 <strong style="color:${stockColor};">${p.stock}</strong>${alertMark}
                 </div>`;
@@ -991,8 +991,8 @@
             ).join('') || '<em>暂无流水</em>';
             document.getElementById('inventoryList').innerHTML =
                 `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;">
-                    <div><strong style="color:#c0392b;">商品库存:</strong>${productsHtml}</div>
-                    <div><strong style="color:#c0392b;">最近流水(最新3条):</strong>${flowsHtml}</div>
+                    <div><strong style="color:var(--color-danger);">商品库存:</strong>${productsHtml}</div>
+                    <div><strong style="color:var(--color-danger);">最近流水(最新3条):</strong>${flowsHtml}</div>
                 </div>`;
         }
 

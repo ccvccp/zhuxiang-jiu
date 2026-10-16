@@ -24,8 +24,8 @@
     .rt-banner h1{font-size:20px;margin:0 0 4px}
     .rt-banner p{font-size:12px;margin:0;opacity:.85}
     .rt-section{margin-bottom:18px}
-    .rt-card{background:var(--color-bg-card,#fff);border:1px solid
-        var(--color-border,#e0e0e0);border-radius:8px;padding:16px}
+    .rt-card{background:var(--color-bg-card,var(--color-white));border:1px solid
+        var(--color-border,var(--color-border-gray));border-radius:8px;padding:16px}
     .card-head{display:flex;justify-content:space-between;align-items:
         center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
     .card-head h3{font-size:15px;margin:0}
@@ -33,7 +33,7 @@
     .rt-toolbar input{padding:6px 8px;border:1px solid
         var(--color-border,#ccc);border-radius:5px;font-size:12px}
     .rt-btn{padding:6px 14px;border:none;border-radius:5px;background:
-        #6b2c20;color:#fff;cursor:pointer;font-size:12px}
+        #6b2c20;color:var(--color-white);cursor:pointer;font-size:12px}
     .rt-btn.ghost{background:#6b7280}
     .rt-btn:disabled{background:#aaa;cursor:wait}
     .rt-error{background:#fee;border:1px solid #f99;color:#c33;
@@ -44,71 +44,71 @@
         font-size:12px}
     .rt-verdict{border-radius:8px;padding:14px 18px;margin-bottom:16px;
         display:none;font-size:14px;font-weight:600}
-    .rt-verdict.pass{background:#e6f6ea;border:2px solid #2f9e44;color:#1e6b30}
-    .rt-verdict.fail{background:#fdeaea;border:2px solid #c0392b;color:#8a1f14}
+    .rt-verdict.pass{background:#e6f6ea;border:2px solid var(--color-ok);color:#1e6b30}
+    .rt-verdict.fail{background:#fdeaea;border:2px solid var(--color-danger);color:#8a1f14}
     .rt-verdict .sub{display:block;font-size:11px;font-weight:400;
         margin-top:4px;opacity:.8}
     .rt-cells{display:grid;grid-template-columns:repeat(auto-fill,
         minmax(150px,1fr));gap:10px}
     .rt-cell{background:var(--color-bg-sub,#f7f7f7);border-radius:6px;
         padding:12px 10px;text-align:center}
-    .rt-cell .k{font-size:11px;color:#888;margin-bottom:4px}
+    .rt-cell .k{font-size:11px;color:var(--color-text-faint);margin-bottom:4px}
     .rt-cell .v{font-size:26px;font-weight:700}
-    .rt-cell .v.green{color:#2f9e44}
-    .rt-cell .v.red{color:#c0392b}
-    .rt-cell .v.blue{color:#24619c}
-    .rt-cell .v.yellow{color:#a37400}
+    .rt-cell .v.green{color:var(--color-ok)}
+    .rt-cell .v.red{color:var(--color-danger)}
+    .rt-cell .v.blue{color:var(--color-info)}
+    .rt-cell .v.yellow{color:var(--color-warn)}
     /* 向量分布卡 */
     .vec-grid{display:grid;grid-template-columns:repeat(auto-fill,
         minmax(230px,1fr));gap:12px}
     .vec-card{border-radius:8px;padding:12px 14px;border:1px solid
-        var(--color-border,#e0e0e0);background:var(--color-bg-sub,#fafafa)}
+        var(--color-border,var(--color-border-gray));background:var(--color-bg-sub,#fafafa)}
     .vec-card .vec-head{display:flex;justify-content:space-between;
         align-items:center;margin-bottom:6px}
     .vec-card .vec-name{font-size:13px;font-weight:600}
     .vec-card .vec-count{font-size:18px;font-weight:700}
-    .vec-card .vec-desc{font-size:11px;color:#888;margin-bottom:8px}
+    .vec-card .vec-desc{font-size:11px;color:var(--color-text-faint);margin-bottom:8px}
     .vec-bar{height:8px;border-radius:4px;background:#e8e8e8;overflow:hidden}
     .vec-bar>span{display:block;height:100%;border-radius:4px}
-    .vec-blocked{font-size:11px;margin-top:6px;color:#2f9e44}
-    .vec-blocked.bad{color:#c0392b}
+    .vec-blocked{font-size:11px;margin-top:6px;color:var(--color-ok)}
+    .vec-blocked.bad{color:var(--color-danger)}
     /* 明细表 */
     table.rt-table{width:100%;border-collapse:collapse;font-size:12px}
     .rt-table th{text-align:left;padding:7px 8px;background:
         var(--color-bg-sub,#f0f0f0);border-bottom:1px solid
         var(--color-border,#ddd);white-space:nowrap}
     .rt-table td{padding:6px 8px;border-bottom:1px solid
-        var(--color-border,#eee);vertical-align:top}
+        var(--color-border,var(--color-gray-light));vertical-align:top}
     .vec-pill{display:inline-block;padding:1px 8px;border-radius:8px;
-        font-size:11px;font-weight:600;color:#fff;white-space:nowrap}
+        font-size:11px;font-weight:600;color:var(--color-white);white-space:nowrap}
     .st-badge{display:inline-block;padding:2px 10px;border-radius:9px;
         font-size:11px;font-weight:700;white-space:nowrap}
-    .st-badge.ok{background:#e6f6ea;color:#1e6b30;border:1px solid #2f9e44}
-    .st-badge.bad{background:#fdeaea;color:#8a1f14;border:1px solid #c0392b}
+    .st-badge.ok{background:#e6f6ea;color:#1e6b30;border:1px solid var(--color-ok)}
+    .st-badge.bad{background:#fdeaea;color:#8a1f14;border:1px solid var(--color-danger)}
     .case-id{font-family:Consolas,monospace;font-weight:700;color:#555}
-    .ev-text{color:#666;font-size:11px;max-width:340px;word-break:break-all}
+    .ev-text{color:var(--color-text-mid);font-size:11px;max-width:340px;word-break:break-all}
     .def-text{color:#444;font-size:11px;max-width:220px}
     /* token 拒绝分布 */
     .rej-row{display:grid;grid-template-columns:170px 1fr 60px;gap:10px;
         align-items:center;margin-bottom:8px}
     .rej-label{font-size:12px;text-align:right;color:#555}
-    .rej-track{height:16px;border-radius:4px;background:#eee;overflow:hidden}
+    .rej-track{height:16px;border-radius:4px;background:var(--color-gray-light);overflow:hidden}
     .rej-track>span{display:block;height:100%;border-radius:4px;
         transition:width .6s ease}
     .rej-count{font-size:12px;font-weight:700;color:#333}
-    .rej-note{font-size:11px;color:#999;padding:6px 0 2px 180px}
+    .rej-note{font-size:11px;color:var(--color-muted);padding:6px 0 2px 180px}
     .redline-bar{background:#fff8f0;border:1px solid #e8a30c;color:#8a5a00;
         padding:8px 12px;border-radius:5px;margin-bottom:14px;
         font-size:11px}
-    .note-bar{font-size:11px;color:#999;text-align:center;padding:10px 0}
-    .loading-box{color:#888;font-size:13px;padding:40px;text-align:center}
+    .note-bar{font-size:11px;color:var(--color-muted);text-align:center;padding:10px 0}
+    .loading-box{color:var(--color-text-faint);font-size:13px;padding:40px;text-align:center}
     .spin{display:inline-block;width:14px;height:14px;border:2px solid #ccc;
         border-top-color:#6b2c20;border-radius:50%;margin-right:8px;
         vertical-align:-2px;animation:rtspin 1s linear infinite}
     @keyframes rtspin{to{transform:rotate(360deg)}}
     @media print{
         .rt-toolbar,.rt-btn{display:none}
-        body{background:#fff}
+        body{background:var(--color-white)}
     }
 </style>
 </head>
@@ -129,7 +129,7 @@
                     运行红队测试</button>
                 <button class="rt-btn ghost" onclick="runRedteam()">
                     重新执行</button>
-                <span id="lastRun" style="font-size:11px;color:#999"></span>
+                <span id="lastRun" style="font-size:11px;color:var(--color-muted)"></span>
             </div>
             <div id="errBar" class="rt-error"></div>
             <div id="infoBar" class="rt-info"></div>
@@ -241,15 +241,15 @@ var VECTORS = {
     'jailbreak': {
         label: 'A · 工具描述越狱', count: 3,
         desc: 'params 伪造 requiresConsent / tier / description 试图覆盖注册表禁令',
-        color: '#a37400' },
+        color: 'var(--color-warn)' },
     'cost-tamper': {
         label: 'B · 成本篡改', count: 3,
         desc: '伪造 privacyCost=0/-1 免成本; 预算耗尽后伪造零成本绕过',
-        color: '#24619c' },
+        color: 'var(--color-info)' },
     'forged-token': {
         label: 'C · 伪造 token', count: 5,
         desc: '随机串 / 格式伪冒 / 重放 / 跨用户盗用 / 动作劫持',
-        color: '#c0392b' },
+        color: 'var(--color-danger)' },
     'priv-escalation': {
         label: 'D · 越权工具诱导', count: 3,
         desc: '未注册工具 / 注入指令串 / 只读通道垃圾 token',
@@ -276,11 +276,11 @@ var DEFENSES = {
 
 /* token 拒绝类型中文名 */
 var REJ_LABELS = [
-    ['notFound', '伪造 / 作废(notFound)', '#c0392b'],
-    ['expired', 'TTL 超时(expired)', '#a37400'],
+    ['notFound', '伪造 / 作废(notFound)', 'var(--color-danger)'],
+    ['expired', 'TTL 超时(expired)', 'var(--color-warn)'],
     ['used', '重放(used)', '#e67e22'],
     ['crossUser', '跨用户盗用(crossUser)', '#8e44ad'],
-    ['actionMismatch', '动作劫持(actionMismatch)', '#24619c']
+    ['actionMismatch', '动作劫持(actionMismatch)', 'var(--color-info)']
 ];
 
 function esc(s) {
@@ -480,7 +480,7 @@ function renderCases(b) {
     document.getElementById('caseBody').innerHTML =
         cases.map(function (c) {
             var meta = VECTORS[c.vector] || { label: c.vector,
-                                               color: '#888' };
+                                               color: 'var(--color-text-faint)' };
             var def = DEFENSES[c.caseId] || '—';
             return '<tr><td><span class="case-id">' + esc(c.caseId) +
                 '</span></td>' +

@@ -21,7 +21,7 @@
         .dash-banner h1 { font-size: 26px; margin: 0; }
         .dash-banner p { margin: 8px 0 0; opacity: 0.9; font-size: 13px; }
         .banner-link {
-            color: #fff; text-decoration: none; border: 1px solid rgba(255,255,255,.55);
+            color: var(--color-white); text-decoration: none; border: 1px solid rgba(255,255,255,.55);
             border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px;
             white-space: nowrap; transition: var(--transition);
         }
@@ -36,21 +36,21 @@
         .dash-toolbar label { font-size: 13px; color: var(--color-text-light); }
         .dash-toolbar input[type="text"] {
             border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-            padding: 6px 10px; font-size: 13px; width: 240px; background: #fff;
+            padding: 6px 10px; font-size: 13px; width: 240px; background: var(--color-white);
         }
         .dash-btn {
             border: none; border-radius: var(--radius-sm); cursor: pointer;
-            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: #fff;
+            padding: 8px 16px; font-size: 13px; background: var(--color-primary); color: var(--color-white);
         }
-        .dash-btn.ghost { background: #fff; color: var(--color-primary); border: 1px solid var(--color-primary); }
+        .dash-btn.ghost { background: var(--color-white); color: var(--color-primary); border: 1px solid var(--color-primary); }
         .dash-last-update { margin-left: auto; font-size: 12px; color: var(--color-text-light); }
         .dash-error {
-            display: none; background: #fdecea; color: var(--color-danger);
+            display: none; background: var(--color-danger-bg); color: var(--color-danger);
             border: 1px solid #f5c6c0; border-radius: var(--radius-sm);
             padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
         }
         .dash-info {
-            display: none; background: #e8f4ec; color: #2e8b57;
+            display: none; background: var(--color-ok-bg); color: var(--color-ok-deep);
             border: 1px solid #bcd9c6; border-radius: var(--radius-sm);
             padding: 10px 14px; font-size: 13px; margin-top: 12px; word-break: break-all;
         }
@@ -78,15 +78,15 @@
         .matrix .cap-id { font-family: Consolas, monospace; font-size: 12px; color: var(--color-text-light); }
 
         .badge { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: 11px; white-space: nowrap; }
-        .badge.green { background: #e8f4ec; color: #2e8b57; }
+        .badge.green { background: var(--color-ok-bg); color: var(--color-ok-deep); }
         .badge.yellow { background: #fdf3e3; color: #a06b00; }
-        .badge.red { background: #fdecea; color: var(--color-danger); }
-        .badge.weak { background: #f4f4f4; color: #999; }
+        .badge.red { background: var(--color-danger-bg); color: var(--color-danger); }
+        .badge.weak { background: #f4f4f4; color: var(--color-muted); }
         .badge.blue { background: #eef2fb; color: #3b5998; }
         .badge.purple { background: #f2eaf9; color: #7b3fa0; }
 
         .btn-mini {
-            border: 1px solid var(--color-primary); background: #fff; color: var(--color-primary);
+            border: 1px solid var(--color-primary); background: var(--color-white); color: var(--color-primary);
             border-radius: var(--radius-sm); padding: 3px 10px; font-size: 12px; cursor: pointer;
         }
         .btn-mini:hover { background: rgba(74,124,89,.08); }
