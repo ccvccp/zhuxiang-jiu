@@ -2,7 +2,8 @@
 # 用法: powershell -File rotate-ak.ps1 <AK_ID> <AK_SECRET>
 param(
     [Parameter(Mandatory = $true)][string]$AkId,
-    [Parameter(Mandatory = $true)][string]$AkSecret
+    [Parameter(Mandatory = $true)][string]$AkSecret,
+    [string]$UserName = 'power-application-user'
 )
 $ErrorActionPreference = 'Stop'
 function PercentEncode([string]$s) { return [Uri]::EscapeDataString($s) }
@@ -23,13 +24,12 @@ function Invoke-Ram([string]$Action, [hashtable]$BizParams) {
     $resp = Invoke-WebRequest ("https://ram.aliyuncs.com/?" + $canonical + '&Signature=' + [Uri]::EscapeDataString($sig)) -UseBasicParsing -TimeoutSec 30
     return ($resp.Content | ConvertFrom-Json)
 }
-# 1) 自省: ListAccessKeys(不带 UserName=当前密钥所属用户) 拿 UserName
+# 1) 自省: ListAccessKeys 带 UserName(阿里云该接口 UserName 必填, 见 InvalidParameter.UserName.Empty)
 try {
-    $keys = Invoke-Ram 'ListAccessKeys' @{}
-    $userName = $keys.AccessKeys.AccessKey[0].UserName
-    Write-Host ("RAM 用户: " + $userName)
+    $keys = Invoke-Ram 'ListAccessKeys' @{ UserName = $UserName }
+    Write-Host ("RAM 用户: " + $userName + "  密钥数: " + @($keys.AccessKeys.AccessKey).Count)
 } catch {
-    Write-Host ("ListAccessKeys(自) 失败: " + $_.Exception.Message)
+    Write-Host ("ListAccessKeys 失败: " + $_.Exception.Message)
     exit 1
 }
 # 2) 自禁用
