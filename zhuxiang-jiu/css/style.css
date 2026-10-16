@@ -38,6 +38,16 @@
     --transition: all 0.3s ease;
 }
 
+/* ---------- T3.3 空态组件标准(规范 §5.1: 居中灰字+场景文案) ----------
+   消费口径: <div class="empty-state">暂无XX(场景说明)</div>;
+   dashboard 族既有 .dash-empty 页面级定义沿用, 本类为全站标准与增量页默认。 */
+.empty-state {
+    text-align: center;
+    color: var(--color-muted);
+    padding: 24px 12px;
+    font-size: 13px;
+}
+
 /* ---------- 基础重置 ---------- */
 * {
     margin: 0;
