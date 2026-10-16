@@ -254,10 +254,10 @@ async function loadPending() {
             return f.name + '=' + f.score + '(w' + f.weight + ')';
         }).join(' / ');
         var aiBadge = ai.action === 'fast_track' ?
-            '<span class="ai-badge pass">快车道</span>' :
+            '<span class="ai-badge green">快车道</span>' :
             (ai.action === 'manual_review' ?
                 '<span class="ai-badge mid">人工审</span>' :
-                '<span class="ai-badge fail">拒</span>');
+                '<span class="ai-badge red">拒</span>');
         return '<tr>' +
             '<td class="cap-id">' + esc(p.product_id) + '</td>' +
             '<td>' + esc(p.name) + '</td>' +

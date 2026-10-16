@@ -137,7 +137,7 @@
         display: inline-block; padding: 2px 10px; border-radius: 10px;
         font-size: 11px; font-weight: 700;
     }
-    .badge.ok { background: #e6f4ec; color: #1f6b52; }
+    .badge.green { background: #e6f4ec; color: #1f6b52; }
     .badge.rule { background: #eaf4ee; color: var(--green-dark); }
 
     /* ========= 铁律矩阵 ========= */
@@ -357,13 +357,13 @@
         <div class="card" style="padding:0; overflow:hidden">
             <table class="rt-table">
                 <tr><th>向量</th><th>攻击仿真</th><th>防御机制</th><th>判定</th></tr>
-                <tr><td><b>RT-01</b> 规则绕过</td><td>伪造 trustValue 字段注入 / 超限价 / 负价</td><td>服务端强制计算 30/70 + R4 单次限额拒 + 非法价拒</td><td><span class="badge ok">✓ 防住</span></td></tr>
-                <tr><td><b>RT-02</b> 拆单绕限</td><td>5 笔小额压窗口用量后大额 200 信值</td><td>R5 累计限额拒（150+60=210 &gt; 500×40%=200）</td><td><span class="badge ok">✓ 防住</span></td></tr>
-                <tr><td><b>RT-03</b> 积分套利</td><td>同日高频兑换第 4 次冲击</td><td>R6 日限频 3 次拒（cancelled 不占频次）</td><td><span class="badge ok">✓ 防住</span></td></tr>
-                <tr><td><b>RT-04</b> 价格操纵</td><td>商品 7 日提价 50% 叠加信值支付</td><td>PRICE-MANIP 均价口径检测（drift 0.5 &gt; 0.2）</td><td><span class="badge ok">✓ 防住</span></td></tr>
-                <tr><td><b>RT-05</b> 双花</td><td>并发两笔支付同一订单</td><td>支付占位锁（Redis SET NX）—— 恰 1 成功</td><td><span class="badge ok">✓ 防住</span></td></tr>
-                <tr><td><b>RT-06</b> 申诉刷分</td><td>重复申诉 + 坐等过期自动翻转</td><td>重复拒 + 48h 过期 expired 不翻转（终审人工铁律）</td><td><span class="badge ok">✓ 防住</span></td></tr>
-                <tr><td><b>RT-07</b> 负值透支</td><td>锁值后压档案余额至 10 再支付</td><td>pay 时 R7 余额复核拒（10 &lt; 30）</td><td><span class="badge ok">✓ 防住</span></td></tr>
+                <tr><td><b>RT-01</b> 规则绕过</td><td>伪造 trustValue 字段注入 / 超限价 / 负价</td><td>服务端强制计算 30/70 + R4 单次限额拒 + 非法价拒</td><td><span class="badge green">✓ 防住</span></td></tr>
+                <tr><td><b>RT-02</b> 拆单绕限</td><td>5 笔小额压窗口用量后大额 200 信值</td><td>R5 累计限额拒（150+60=210 &gt; 500×40%=200）</td><td><span class="badge green">✓ 防住</span></td></tr>
+                <tr><td><b>RT-03</b> 积分套利</td><td>同日高频兑换第 4 次冲击</td><td>R6 日限频 3 次拒（cancelled 不占频次）</td><td><span class="badge green">✓ 防住</span></td></tr>
+                <tr><td><b>RT-04</b> 价格操纵</td><td>商品 7 日提价 50% 叠加信值支付</td><td>PRICE-MANIP 均价口径检测（drift 0.5 &gt; 0.2）</td><td><span class="badge green">✓ 防住</span></td></tr>
+                <tr><td><b>RT-05</b> 双花</td><td>并发两笔支付同一订单</td><td>支付占位锁（Redis SET NX）—— 恰 1 成功</td><td><span class="badge green">✓ 防住</span></td></tr>
+                <tr><td><b>RT-06</b> 申诉刷分</td><td>重复申诉 + 坐等过期自动翻转</td><td>重复拒 + 48h 过期 expired 不翻转（终审人工铁律）</td><td><span class="badge green">✓ 防住</span></td></tr>
+                <tr><td><b>RT-07</b> 负值透支</td><td>锁值后压档案余额至 10 再支付</td><td>pay 时 R7 余额复核拒（10 &lt; 30）</td><td><span class="badge green">✓ 防住</span></td></tr>
             </table>
         </div>
     </div>
