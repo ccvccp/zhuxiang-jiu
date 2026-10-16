@@ -119,7 +119,13 @@ var AIHubWidget = (function () {
     /* ========= Hub 面板探测(降级开关) ========= */
     async function probeHub() {
         try {
-            var p = await apiJson('/api/hub/panel?role=' + encodeURIComponent(state.role));
+            /* T4.4: 探测 800ms 超时竞速——后端不可达时隐藏多模态键时延 ≤1s */
+            var p = await Promise.race([
+                apiJson('/api/hub/panel?role=' + encodeURIComponent(state.role)),
+                new Promise(function (_, rej) {
+                    setTimeout(function () { rej(new Error('probe_timeout')); }, 800);
+                })
+            ]);
             state.hubOk = !!p.hubEnabled;
             state.asrOk = !!p.asrEnabled;
             renderChips(p.chips || []);
