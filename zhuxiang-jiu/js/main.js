@@ -17,7 +17,9 @@ const Cart = {
     },
     add(productId, qty = 1) {
         const items = this.get();
-        const product = PRODUCTS.find(p => p.id === productId);
+        // T1.1 live 兼容: mock 池(data.js)查不到时回退 live 池(ProductsLive, 字符串 SKU id)
+        const product = PRODUCTS.find(p => p.id === productId)
+            || (window.ProductsLive && ProductsLive.findById(productId));
         if (!product) return;
         const existing = items.find(i => i.id === productId);
         if (existing) {

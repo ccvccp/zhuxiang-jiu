@@ -86,14 +86,20 @@
     <div id="footer"></div>
 
     <script src="js/data.js"></script>
+    <script src="js/products-live.js"></script>
     <script src="js/main.js"></script>
     <script>
         initPage('products');
 
         let filterState = { cat: 'all', series: 'all', price: 'all', sort: 'default' };
 
+        // T1.1 live 化: 数据源优先 live 池(ProductsLive), 失败/未加载回落 data.js PRODUCTS
+        function getSource() {
+            return (window.ProductsLive && ProductsLive.get()) || PRODUCTS;
+        }
+
         function renderList() {
-            let list = PRODUCTS.filter(p => {
+            let list = getSource().filter(p => {
                 if (filterState.cat !== 'all' && p.category !== filterState.cat) return false;
                 if (filterState.series !== 'all' && p.series !== filterState.series) return false;
                 if (filterState.price !== 'all') {
@@ -106,10 +112,10 @@
                 return true;
             });
 
-            // 排序
+            // 排序('新品'判定兼容 mock tag 与 live isNew)
             if (filterState.sort === 'price-asc') list.sort((a, b) => a.price - b.price);
             else if (filterState.sort === 'price-desc') list.sort((a, b) => b.price - a.price);
-            else if (filterState.sort === 'new') list.sort((a, b) => (b.tag === '新品' ? 1 : 0) - (a.tag === '新品' ? 1 : 0));
+            else if (filterState.sort === 'new') list.sort((a, b) => ((b.isNew || b.tag === '新品') ? 1 : 0) - ((a.isNew || a.tag === '新品') ? 1 : 0));
 
             document.getElementById('productCount').textContent = list.length;
             document.getElementById('productList').innerHTML = list.length
@@ -143,6 +149,9 @@
         });
 
         renderList();
+
+        // T1.1: 异步拉取 live 数据, 成功后重渲染(失败静默保持上方 mock 渲染)
+        if (window.ProductsLive) ProductsLive.load(renderList);
     </script>
 </body>
 </html>
