@@ -32,6 +32,24 @@
         bar.style.display = 'block';
     }
 
+    // 观测面失败回落(T2.1): 区块渲染静态文案——不编造数据, 提示手动刷新
+    var FALLBACK_TEXT = '观测面暂不可达 · 点击「手动刷新」重试';
+
+    function fallback(ids) {
+        ids.forEach(function (id) {
+            var el = $(id);
+            if (!el) { return; }
+            if (el.tagName === 'TBODY') {
+                var cols = el.closest('table')
+                    .querySelectorAll('thead th').length || 1;
+                el.innerHTML = '<tr><td colspan="' + cols
+                    + '" class="dash-empty">' + FALLBACK_TEXT + '</td></tr>';
+            } else {
+                el.innerHTML = '<div class="dash-empty">' + FALLBACK_TEXT + '</div>';
+            }
+        });
+    }
+
     function getJSON(path) {
         return fetch(apiBase() + path).then(function (r) {
             if (!r.ok) { throw new Error(path + ' → HTTP ' + r.status); }
@@ -181,20 +199,35 @@
         var limit = $('qaLimit').value || 10;
         getJSON('/api/zyh/qa?limit=' + limit)
             .then(renderQa)
-            .catch(function (e) { err('QA 留痕加载失败: ' + e.message); });
+            .catch(function (e) {
+                err('QA 留痕加载失败: ' + e.message);
+                fallback(['qaRows']);
+            });
     }
 
     function loadAll() {
         err('');
         $('apiBase').value = apiBase();
         getJSON('/api/zyh/mode').then(renderMode)
-            .catch(function (e) { err('灰度态加载失败: ' + e.message); });
+            .catch(function (e) {
+                err('灰度态加载失败: ' + e.message);
+                fallback(['ovMode', 'modeDetail']);
+            });
         getJSON('/api/zyh/stats').then(renderStats)
-            .catch(function (e) { err('统计加载失败: ' + e.message); });
+            .catch(function (e) {
+                err('统计加载失败: ' + e.message);
+                fallback(['ovGuard', 'ovCache']);
+            });
         getJSON('/api/zyh/knowledge').then(renderKnowledge)
-            .catch(function (e) { err('知识内核加载失败: ' + e.message); });
+            .catch(function (e) {
+                err('知识内核加载失败: ' + e.message);
+                fallback(['knowledgeRows']);
+            });
         getJSON('/api/zyh/graph').then(renderGraph)
-            .catch(function (e) { err('图谱加载失败: ' + e.message); });
+            .catch(function (e) {
+                err('图谱加载失败: ' + e.message);
+                fallback(['ovGraph', 'graphEdges']);
+            });
         loadQa();
         $('lastUpdate').textContent = '更新于 ' + new Date().toLocaleTimeString();
     }
