@@ -293,6 +293,9 @@ def ssh_connect(tries=30, wait=10, overrides=None):
                       username=conn["user"],
                       password=conn["password"],
                       look_for_keys=False, allow_agent=False, timeout=15)
+            # 死链加速检测(2026-10-17 west-E 代理断连实证):
+            # 无 keepalive 时 channel 读可挂死不抛错
+            c.get_transport().set_keepalive(15)
             return c
         except Exception as e:  # noqa: BLE001
             last = str(e)[:120]
@@ -319,11 +322,34 @@ def push(ssh, local: Path, remote: str, chunk=90000):
     ssh.exec_command(
         f"mkdir -p '{rdir}'")[1].channel.recv_exit_status()
     ssh.exec_command(f"rm -f '{remote}'")[1].channel.recv_exit_status()
-    for i in range(0, len(b64), chunk):
-        code, _, err = run(ssh, f"printf '%s' '{b64[i:i+chunk]}'"
-                                f" >> '{remote}'", timeout=60)
-        if code != 0:
-            raise RuntimeError(f"上传分块失败 {local.name}: {err[:100]}")
+    parts = [b64[i:i + chunk] for i in range(0, len(b64), chunk)]
+    # 慢链批量拼参(2026-10-17 west-E 实证): 逐块 exec 往返太慢; 单参数
+    # 上限 128KB(90K 安全), 命令行总额理论 ~2MB 但代理上限更低且超限
+    # 即断链(EOFError 空串, 会话同死)。故小步起发(2 参/组)成功翻倍、
+    # 失败减半重排——自动收敛到该链路可承受的最大单命令; 断链由
+    # 外层 attempt 重连 + md5 跳过续传兜底
+    from collections import deque
+    q = deque(parts)
+    target = chunk * 2
+    while q:
+        n = max(1, target // chunk)
+        group = [q.popleft() for _ in range(min(n, len(q)))]
+        try:
+            args = " ".join(f"'{p}'" for p in group)
+            code, _, err = run(ssh, "printf '%s' " + args
+                               + f" >> '{remote}'", timeout=180)
+            ok = code == 0
+        except Exception:  # noqa: BLE001  断链/超大命令 EOFError 等
+            ok, err = False, "exec 异常(断链或命令超限)"
+        if ok:
+            target = min(target * 2, 1800000)
+            continue
+        if len(group) == 1:
+            raise RuntimeError(
+                f"上传分块失败 {local.name}: {str(err)[:100]}")
+        for p in reversed(group):
+            q.appendleft(p)
+        target = max(target // 2, chunk)
     code, out, _ = run(
         ssh, f"base64 -d '{remote}' > '{remote}.bin' && mv"
              f" '{remote}.bin' '{remote}' && md5sum '{remote}'")
@@ -345,11 +371,13 @@ def _remote_md5s(ssh, remotes: list) -> dict:
     return m
 
 
-def push_many(ssh, items, parallel=4, label=""):
+def push_many(ssh, items, parallel=1, label="", reconnect=None):
     """批量上传(2026-10-17 提速): ①远端 md5 一次批量预检, 未变文件
-    直接跳过(实例文件随盘持久, 同实例复跑 24 图秒级过) ②差异文件
-    ThreadPool 并发推(paramiko 多通道并发安全)。exec 通道瓶颈在
-    轮次延迟非流量, 故并行轮次 > tar 合流(体积不降)"""
+    直接跳过(实例文件随盘持久, 同实例复跑 24 图秒级过) ②差异文件逐个
+    推, 单文件失败经 reconnect() 重连重试至多 3 次(west-E 代理按连接
+    限流实证: 每连接推 1-2 文件即被 10054 重置)。返回(可能重连后的)
+    ssh 供调用方续用。默认串行——该代理 2/4 并发通道即断且断后挂死,
+    主收益本就在 md5 跳过, 全量上传仅在全新实例发生一次"""
     from concurrent.futures import ThreadPoolExecutor
     need, skipped = [], 0
     remote_md5 = _remote_md5s(ssh, [r for _, r in items])
@@ -361,9 +389,29 @@ def push_many(ssh, items, parallel=4, label=""):
             need.append((local, remote))
     print(f"    {label}{len(items)} 项: 未变跳过 {skipped} / 待传 {len(need)}")
     if not need:
-        return
-    with ThreadPoolExecutor(max_workers=parallel) as ex:
-        list(ex.map(lambda t: push(ssh, t[0], t[1]), need))
+        return ssh
+
+    def one(t):
+        nonlocal ssh
+        local, remote = t
+        for i in range(3):
+            try:
+                push(ssh, local, remote)
+                return
+            except Exception as e:  # noqa: BLE001
+                if i == 2 or reconnect is None:
+                    raise
+                print(f"    [断线重连] {Path(local).name}: "
+                      f"{str(e)[:80]}")
+                ssh = reconnect()
+
+    if parallel > 1 and len(need) > 1:
+        with ThreadPoolExecutor(max_workers=parallel) as ex:
+            list(ex.map(one, need))
+    else:
+        for t in need:
+            one(t)
+    return ssh
 
 
 def pull(ssh, remote: str, local: Path):
@@ -659,10 +707,12 @@ def main() -> int:
             return 1
     run(ssh, f"mkdir -p {DH_IMAGE_REMOTE.rsplit('/', 1)[0]}"
              f" {REMOTE_ROOT} {REMOTE_SVC.rsplit('/', 1)[0]}")
-    push_many(ssh,
-              [(local, remote) for local, remote in DH_IMAGES.values()]
-              + [(DH_SVC_LOCAL, REMOTE_SVC)],
-              label="[基准图] ")
+    ssh = push_many(
+        ssh,
+        [(local, remote) for local, remote in DH_IMAGES.values()]
+        + [(DH_SVC_LOCAL, REMOTE_SVC)],
+        label="[基准图] ",
+        reconnect=lambda: ssh_connect(overrides=overrides))
 
     ok = fail = 0
     for sid in sids:
