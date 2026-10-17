@@ -2,9 +2,10 @@
 
 端点:
     GET  /api/v1/dramas               在线剧集清单(公开 GET, 游客浏览)
-    GET  /api/v1/dramas/{drama_id}    剧集详情(公开)
+    GET  /api/v1/dramas/{drama_id}    剧集详情(公开, 未放送集不可见)
     GET  /api/v1/dramas/{id}/episodes 分集+解锁状态(公开, user_id 可选)
     POST /api/v1/dramas               组剧(admin)
+    POST /api/v1/dramas/{id}/release  放送分集(边更边锁, admin)
 """
 
 from fastapi import APIRouter, Header, HTTPException
@@ -39,6 +40,7 @@ class DramaCreateRequest(BaseModel):
     cover_url: str = ""
     tags: list[str] = []
     free_episodes: int = 2
+    published_episodes: int = 0   # 已放送集数(0=整剧全放; 边更边锁)
     status: str = "online"
     episodes: list[dict]
 
@@ -53,7 +55,8 @@ async def get_drama(drama_id: str):
     d = await _svc.get(drama_id)
     if not d:
         raise HTTPException(status_code=404, detail="drama not found")
-    return {"code": 0, "data": d}
+    # 边更边锁: 未放送分集对外不可见(仅保留 total_episodes 计数)
+    return {"code": 0, "data": _svc.public_view(d)}
 
 
 @router.get("/{drama_id}/episodes")
@@ -80,6 +83,27 @@ async def create_drama(body: DramaCreateRequest,
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return {"code": 0, "data": drama.model_dump()}
+
+
+class ReleaseRequest(BaseModel):
+    up_to: int | None = None     # None=放送下一集(首次启用=放送到免费集数)
+
+
+@router.post("/{drama_id}/release")
+async def release_drama(drama_id: str, body: ReleaseRequest,
+                        x_role: str | None = Header(default=None)):
+    """放送分集(边更边锁·admin, 2026-10-17 对标懒趴趴短剧):
+    首周连发 3-4 集抢合集连续推荐窗口, 卡点落在热度峰而非第 2 集"""
+    _require_admin(x_role)
+    try:
+        drama = await _svc.release_episode(drama_id, body.up_to)
+    except KeyError:
+        raise HTTPException(status_code=404,
+                            detail="drama not found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from None
+    return {"code": 0, "data": _svc.public_view(drama)}
 
 
 # ---------- DP1: 注册解锁 + 卡点配置 ----------
@@ -140,6 +164,10 @@ async def episode_checkpoint(drama_id: str, episode_id: str,
         raise HTTPException(status_code=404, detail="episode not found")
     free_n = int(d.get("free_episodes") or 0)
     n = int(ep.get("episode_number") or 0)
+    # 边更边锁: 未放送集卡点页不暴露(防提前透剧)
+    pub_n = int(d.get("published_episodes") or 0)
+    if pub_n > 0 and n > pub_n:
+        raise HTTPException(status_code=404, detail="episode not published")
     if _svc.is_alcohol_drama(d):
         # 酒类品牌剧全集免登录(2026-10-09 定案)——无卡点
         raise HTTPException(status_code=409, detail="酒类剧全集免费无卡点")

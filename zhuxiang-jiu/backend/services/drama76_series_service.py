@@ -46,6 +46,7 @@ class DramaSeries(BaseModel):
     cover_url: str = ""
     tags: list[str] = []
     free_episodes: int = 2       # 外部平台完整免费集数
+    published_episodes: int = 0  # 已放送集数(0=整剧全放; 边更边锁)
     episodes: list[EpisodeRef] = []
     status: DramaStatus = DramaStatus.DRAFT
     created_at: str = ""
@@ -122,6 +123,8 @@ class DramaSeriesService:
                 cliff_note=str(e.get("cliff_note") or "")))
         if not eps:
             raise ValueError("episodes 为空")
+        pub_n = min(max(0, int(body.get("published_episodes") or 0)),
+                    len(eps))
         drama = DramaSeries(
             drama_id=str(body.get("drama_id")
                          or f"drama_{int(datetime.now().timestamp()):x}"),
@@ -131,6 +134,7 @@ class DramaSeriesService:
             cover_url=str(body.get("cover_url") or ""),
             tags=list(body.get("tags") or []),
             free_episodes=max(0, int(body.get("free_episodes") or 2)),
+            published_episodes=pub_n,
             episodes=eps,
             status=DramaStatus(
                 str(body.get("status") or "online")),
@@ -140,8 +144,8 @@ class DramaSeriesService:
         self._ensure_table()
         await self.repo._save(self.TABLE, drama.drama_id,
                               drama.model_dump())
-        logger.info("drama76_series_created id=%s eps=%d free=%d",
-                    drama.drama_id, len(eps), drama.free_episodes)
+        logger.info("drama76_series_created id=%s eps=%d free=%d pub=%d",
+                    drama.drama_id, len(eps), drama.free_episodes, pub_n)
         return drama
 
     async def list_online(self) -> list[dict]:
@@ -162,6 +166,51 @@ class DramaSeriesService:
         fields += [str(t) for t in (drama.get("tags") or [])]
         return any("酒" in f for f in fields)
 
+    @staticmethod
+    def published_eps(drama: dict) -> list[dict]:
+        """已放送分集(边更边锁): published_episodes=0 整剧全放
+        (存量兼容); >0 时仅返回编号<=已放送数的分集"""
+        pub = int(drama.get("published_episodes") or 0)
+        eps = drama.get("episodes") or []
+        if pub <= 0:
+            return list(eps)
+        return [e for e in eps
+                if int(e.get("episode_number") or 0) <= pub]
+
+    @classmethod
+    def public_view(cls, drama: dict) -> dict:
+        """对外详情视图: 未放送分集不可见(保留 total 计数)"""
+        d = dict(drama)
+        if int(drama.get("published_episodes") or 0) > 0:
+            d["episodes"] = cls.published_eps(drama)
+            d["total_episodes"] = len(drama.get("episodes") or [])
+        return d
+
+    async def release_episode(self, drama_id: str,
+                              up_to: int | None = None) -> dict:
+        """放送分集(边更边锁·admin, 2026-10-17 对标懒趴趴):
+        首周连发 3-4 集抢合集连续推荐窗口, published=0 首次
+        调用放送到免费集数(启用分批); up_to 直接指定放送到第
+        几集(可回拨); 越界 ValueError"""
+        self._ensure_table()
+        drama = await self.repo._get(self.TABLE, drama_id)
+        if not drama:
+            raise KeyError(drama_id)
+        total = len(drama.get("episodes") or [])
+        pub = int(drama.get("published_episodes") or 0)
+        # up_to None: 首次启用放送到免费集数, 否则放送下一集
+        pub = (max(int(drama.get("free_episodes") or 0), 1)
+               if pub <= 0 else pub + 1) \
+            if up_to is None else int(up_to)
+        if not (0 <= pub <= total):
+            raise ValueError(f"up_to 越界(0-{total})")
+        drama["published_episodes"] = pub
+        drama["updated_at"] = _now()
+        await self.repo._save(self.TABLE, drama_id, drama)
+        logger.info("drama76_released drama=%s published=%d/%d",
+                    drama_id, pub, total)
+        return drama
+
     def episode_states(self, drama: dict, is_member: bool = False,
                        unlocked_dramas: set | None = None
                        ) -> list[dict[str, Any]]:
@@ -169,7 +218,7 @@ class DramaSeriesService:
         酒类品牌剧(2026-10-09 定案)——全集免注册无障碍观看;
         其余剧: 编号<=free → free; 会员 → member_only; 用户已解锁本剧
         (unlocked_dramas 含 drama_id) → 全集 unlocked; 其余 locked"""
-        eps = drama.get("episodes") or []
+        eps = self.published_eps(drama)
         if self.is_alcohol_drama(drama):
             return [{
                 "episode_id": e.get("episode_id"),
@@ -184,7 +233,7 @@ class DramaSeriesService:
         drama_unlocked = bool(unlocked_dramas
                               and drama.get("drama_id") in unlocked_dramas)
         out = []
-        for e in drama.get("episodes") or []:
+        for e in eps:
             n = int(e.get("episode_number") or 0)
             if n <= free_n:
                 status, unlocked = "free", True

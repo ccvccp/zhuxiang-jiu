@@ -40,6 +40,19 @@ MIN_EPISODES, MAX_EPISODES = 4, 80
 # 口播节奏上限(对话剧单句; 73号独白 25 字更严)
 LINE_MAX_CHARS = 30
 MIN_LINES_PER_EP = 4
+
+# 时长双档(2026-10-17 对标懒趴趴短剧): 第 1/5/9…集为长集
+# (建世界观+充值锚点), 其余短集(爆发集抢完播率)——
+# 长档 90-150s/台词 5-8 句, 短档 45-90s/台词 4-6 句
+LONG_DURATION = (90, 150)
+SHORT_DURATION = (45, 90)
+
+
+def episode_length_plan(ep_no: int) -> str:
+    """集号 → 长集(long)/短集(short): 1,5,9,13… 长档"""
+    return "long" if (int(ep_no) - 1) % 4 == 0 else "short"
+
+
 # 合规: 酒类连续剧角色白名单(IP 双主角+四中老年——儿童禁入)
 DEFAULT_CAST = ("zhuxiaomei", "xiaozhushuaige")
 ALLOWED_CAST = ("zhuxiaomei", "xiaozhushuaige",
@@ -175,6 +188,7 @@ class Drama84ScriptService:
             if series is not None \
                     and not lint_series(series):
                 series["track"] = (model or "main")
+                self._normalize_durations(series)
                 break
             series = None
         if series is None:
@@ -189,6 +203,22 @@ class Drama84ScriptService:
             json.dumps(series, ensure_ascii=False, indent=1),
             encoding="utf-8")
         return series
+
+    # ---------- 时长档位校正(LLM 轨后处理, 确定性保证) ----------
+
+    @staticmethod
+    def _normalize_durations(series: dict) -> None:
+        """按集号双档 clamp duration(LLM 出界时拉回档内;
+        缺失给档中值)——长 90-150s / 短 45-90s"""
+        for ep in series.get("episodes") or []:
+            lo, hi = (LONG_DURATION if episode_length_plan(
+                ep.get("ep")) == "long" else SHORT_DURATION)
+            try:
+                d = int(ep.get("duration") or 0)
+            except (TypeError, ValueError):
+                d = 0
+            ep["duration"] = min(hi, max(lo, d)) if d > 0 \
+                else (lo + hi) // 2
 
     # ---------- LLM 轨(bible+episodes 一次成形) ----------
 
@@ -228,7 +258,10 @@ class Drama84ScriptService:
                 "4. 角色只能从阵容选: \n" + persona_lines + "\n"
                 "5. 剧情积极向上可连载, 可自然融入竹香酒品牌"
                 "(不硬广), 每集至少一处品牌或产品自然出现;\n"
-                "6. 禁暴力低俗/未成年相关/功效宣称/绝对化用语。"
+                "6. 禁暴力低俗/未成年相关/功效宣称/绝对化用语;\n"
+                "7. 时长双档: 第1/5/9…集为长集(90-150秒, lines "
+                "5-8句, 建世界观+情绪锚点), 其余短集(45-90秒, "
+                "lines 4-6句, 抢完播率)——本条覆盖铁律1的句数。"
             )
             user = (f"热点: {hotspot.get('title')} "
                     f"(平台{hotspot.get('platform')}, "
@@ -290,7 +323,8 @@ class Drama84ScriptService:
             eps.append({
                 "ep": i,
                 "title": f"{ht}·{stage}",
-                "duration": 75,
+                "duration": (120 if episode_length_plan(i) == "long"
+                             else 70),
                 "beats": {
                     "hook": f"第{i}集: {ht}风波又起",
                     "twist": f"{na}发现转机藏在竹香酒里",
@@ -496,9 +530,15 @@ class Drama84ScriptService:
                 (series.get("cast") or [])}
         ip_full = bool(cast & set(DEFAULT_CAST))
         cast_n = len(cast)
-        pacing_ok = sum(
-            1 for e in eps
-            if 45 <= int(e.get("duration") or 0) <= 120)
+
+        def _pacing_ok(ep: dict) -> bool:
+            """双档达标(2026-10-17): 长集 90-180s / 短集 45-120s"""
+            dur = int(ep.get("duration") or 0)
+            return (LONG_DURATION[0] <= dur <= 180 if
+                    episode_length_plan(ep.get("ep")) == "long"
+                    else 45 <= dur <= 120)
+
+        pacing_ok = sum(1 for e in eps if _pacing_ok(e))
         factors = [
             {"name": "theme_appeal",
              "score": round(min(100.0, hs_score), 1),
@@ -516,7 +556,7 @@ class Drama84ScriptService:
                  100 * pacing_ok / max(1, len(eps)), 1),
              "weight": D84_WEIGHTS["pacing"],
              "detail": f"{pacing_ok}/{len(eps)} 集达标"
-                       f"(45-120s)"},
+                       f"(长集90-180s/短集45-120s)"},
             {"name": "script_quality",
              "score": (100.0 if not flaws and
                        (series.get("track") or "")
