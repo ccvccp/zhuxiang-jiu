@@ -418,6 +418,41 @@ IP_PERSONAS = {
             "winter": "assets/ip/roles/role_tong_m_winter.jpg",
             "spring": "assets/ip/roles/role_tong_m_spring.jpg"},
     },
+    # 青年角色双档(2026-10-17 批次, 素材 D:\网站角色\新增加人物 4 图
+    # 入库 assets/ip/roles/, 3072x4096 竖版统一规格; 每角色 2 图:
+    # default 常装 + alt 备选档)。竹林佳人形象为成年女性(2026-10-17
+    # 用户确认), 允许酒类出片; 音色沿用 joyvoice 实证枚举, 后续可经
+    # spike_roles_voices.py 听测换档
+    "role_qingnian_m": {
+        "id": "role_qingnian_m",
+        "name": "竹林才俊",
+        "tagline": "网站角色 · 英气俊朗的青年男士",
+        "personaPrompt": (
+            "你是网站角色『竹林才俊』——英气俊朗的青年男士口吻, 称呼"
+            "观众'各位', 谈吐清爽有见地, 热爱分享竹香型白酒的年轻化"
+            "喝法与潮流搭配; 从不劝酒, 不做功效宣称, 不引用权威背书与"
+            "研究数据, 始终强调理性饮酒"),
+        "voice": "xiaochen",
+        "allow_alcohol": True,
+        "outfits": {
+            "default": "assets/ip/roles/role_qingnian_m.jpg",
+            "alt": "assets/ip/roles/role_qingnian_m_alt.jpg"},
+    },
+    "role_qingnian_f": {
+        "id": "role_qingnian_f",
+        "name": "竹林佳人",
+        "tagline": "网站角色 · 清丽灵秀的年轻女士",
+        "personaPrompt": (
+            "你是网站角色『竹林佳人』——清丽灵秀的年轻女士口吻, 称呼"
+            "观众'姐妹们', 温柔中带俏皮, 热爱分享竹香型白酒的微醺美学"
+            "与佐餐搭配; 从不劝酒, 不做功效宣称, 不引用权威背书与研究"
+            "数据, 始终强调理性饮酒"),
+        "voice": "tongtong",
+        "allow_alcohol": True,    # 成年形象(2026-10-17 用户确认)
+        "outfits": {
+            "default": "assets/ip/roles/role_qingnian_f.jpg",
+            "alt": "assets/ip/roles/role_qingnian_f_alt.jpg"},
+    },
 }
 DEFAULT_PERSONA = "zhuxiaomei"
 DEFAULT_CATEGORY = "竹香型白酒"

@@ -170,6 +170,18 @@ DH_IMAGES = {
     "role_laonian_m_winter": (
         _ROLES / "role_laonian_m_winter.jpg",
         "/root/assets/ip/roles/role_laonian_m_winter.jpg"),
+    # 2026-10-17 青年双角色(竹林才俊/佳人, 素材 3072x4096 竖版;
+    # default + alt 两档)
+    "role_qingnian_m": (_ROLES / "role_qingnian_m.jpg",
+                        "/root/assets/ip/roles/role_qingnian_m.jpg"),
+    "role_qingnian_m_alt": (_ROLES / "role_qingnian_m_alt.jpg",
+                            "/root/assets/ip/roles/"
+                            "role_qingnian_m_alt.jpg"),
+    "role_qingnian_f": (_ROLES / "role_qingnian_f.jpg",
+                        "/root/assets/ip/roles/role_qingnian_f.jpg"),
+    "role_qingnian_f_alt": (_ROLES / "role_qingnian_f_alt.jpg",
+                            "/root/assets/ip/roles/"
+                            "role_qingnian_f_alt.jpg"),
 }
 # 兼容旧引用(缺省人设)
 DH_IMAGE_LOCAL = DH_IMAGES["zhuxiaomei"][0]

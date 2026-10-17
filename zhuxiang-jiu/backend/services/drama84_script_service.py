@@ -54,11 +54,13 @@ def episode_length_plan(ep_no: int) -> str:
     return "long" if (int(ep_no) - 1) % 4 == 0 else "short"
 
 
-# 合规: 酒类连续剧角色白名单(IP 双主角+四中老年——儿童禁入)
+# 合规: 酒类连续剧角色白名单(IP 双主角+四中老年+青年双角色
+# 2026-10-17 批次竹林才俊/佳人入列——儿童禁入)
 DEFAULT_CAST = ("zhuxiaomei", "xiaozhushuaige")
 ALLOWED_CAST = ("zhuxiaomei", "xiaozhushuaige",
                 "role_zhongnian_f", "role_zhongnian_m",
-                "role_laonian_f", "role_laonian_m")
+                "role_laonian_f", "role_laonian_m",
+                "role_qingnian_m", "role_qingnian_f")
 
 # P2 剧集评分五因子(44号治理档案型, batch 55——单一事实源)
 D84_WEIGHTS = {

@@ -525,6 +525,9 @@ _ROLE_IDS = {
     "role_laonian_m": ("竹林爷爷", "luodo", True),
     "role_tong_f": ("竹芽妹妹", "chuichui", False),
     "role_tong_m": ("竹笋弟弟", "kazi", False),
+    # 2026-10-17 青年双角色(成年形象用户确认, default+alt 两档)
+    "role_qingnian_m": ("竹林才俊", "xiaochen", True),
+    "role_qingnian_f": ("竹林佳人", "tongtong", True),
 }
 
 
@@ -542,9 +545,10 @@ def test_t12c_roles_registry_and_assets():
                 f"素材缺失: {outfit}"
         assert ("理性饮酒" in p["personaPrompt"]
                 if allow else "从不提及任何酒类" in p["personaPrompt"])
-    # dh 基准图: 中老年四角注册(儿童不入出片链)
+    # dh 基准图: 中老年四角+青年双角注册(儿童不入出片链)
     for rid in ("role_zhongnian_f", "role_zhongnian_m",
-                "role_laonian_f", "role_laonian_m"):
+                "role_laonian_f", "role_laonian_m",
+                "role_qingnian_m", "role_qingnian_f"):
         assert dh_batch.dh_image_for(rid) == \
             f"/root/assets/ip/roles/{rid}.jpg"
         assert Path(dh_batch.DH_IMAGES[rid][0]).is_file()
