@@ -25,10 +25,20 @@ $s2 = (Get-Item C:\backend\services\drama84_script_service.py).Length
 $s3 = (Get-Item C:\backend\routes\drama76_routes.py).Length
 Info "svc76: ${s1}B; svc84: ${s2}B; routes76: ${s3}B"
 
-Step '[2/3] 重启后端'
+Step '[2/3] 重启后端(nssm restart + sc start 兜底)'
 cmd /c "C:\nginx\nssm.exe restart backend8147" | Out-Null
 Start-Sleep -Seconds 12
-$h = & curl.exe -s -o NUL -w '%{http_code}' http://127.0.0.1:8000/api/decision/health
+$h = & curl.exe -s -o NUL -w '%{http_code}' -m 8 http://127.0.0.1:8000/api/decision/health
+if ($h -ne '200') {
+    # 兜底: nssm restart 后偶发 Stopped 不自愈(2026-10-17 实证) -> sc start 手动拉起
+    $st = Get-Service backend8147 -ErrorAction SilentlyContinue
+    if ($st -and $st.Status -ne 'Running') {
+        & sc.exe start backend8147 | Out-Null
+        Info "sc start fallback (state was: $($st.Status))"
+        Start-Sleep -Seconds 15
+    }
+    $h = & curl.exe -s -o NUL -w '%{http_code}' -m 8 http://127.0.0.1:8000/api/decision/health
+}
 Info "/api/decision/health: $h"
 if ($h -ne '200') { Write-Host 'DRAMA-DEPLOY-FAIL health'; exit 1 }
 
