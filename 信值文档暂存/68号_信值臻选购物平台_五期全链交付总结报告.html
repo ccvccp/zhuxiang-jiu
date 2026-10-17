@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>68号·信值·臻选购物平台——五期全链交付总结报告</title>
+<style>
+  :root {
+    --primary: #6b3410;
+    --accent: #935116;
+    --bg: #faf7f2;
+    --card: #ffffff;
+    --border: #e2d5c5;
+    --text: #3a2c1e;
+    --muted: #7d6a55;
+    --pass: #1e8449;
+    --warn: #b9770e;
+    --danger: #922b21;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.75;
+    font-size: 15px;
+  }
+  .page { max-width: 1080px; margin: 0 auto; padding: 32px 24px 64px; }
+  header.hero {
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    color: #fff; border-radius: 14px; padding: 40px 36px; margin-bottom: 28px;
+  }
+  header.hero h1 { font-size: 26px; letter-spacing: 1px; margin-bottom: 14px; }
+  header.hero .quote {
+    background: rgba(255,255,255,.12); border-left: 4px solid #f0d9b5;
+    padding: 14px 18px; border-radius: 8px; font-size: 14px; line-height: 2;
+  }
+  header.hero .quote p { margin-bottom: 4px; }
+  header.hero .quote strong { color: #f9e79f; }
+  h2.section {
+    font-size: 20px; color: var(--primary);
+    border-left: 6px solid var(--accent); padding-left: 12px;
+    margin: 36px 0 16px;
+  }
+  h3.engine { font-size: 16px; color: var(--accent); margin: 20px 0 8px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 22px 26px; margin-bottom: 18px;
+    box-shadow: 0 1px 3px rgba(60,40,20,.06);
+  }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px; }
+  th {
+    background: var(--primary); color: #fff; padding: 9px 10px;
+    text-align: left; font-weight: 600; white-space: nowrap;
+  }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:nth-child(even) td { background: #f7f1e8; }
+  tr:hover td { background: #f3e9db; }
+  code {
+    font-family: Consolas, "Courier New", monospace; font-size: 12.5px;
+    background: #f2ece3; color: var(--danger); padding: 1px 6px;
+    border-radius: 4px; white-space: nowrap;
+  }
+  .arch {
+    background: #2c1f14; color: #ead9c2; border-radius: 10px;
+    padding: 22px 26px; font-family: Consolas, "Courier New", monospace;
+    font-size: 13px; line-height: 1.9; overflow-x: auto; white-space: pre;
+  }
+  .arch .hl { color: #f9e79f; font-weight: bold; }
+  .arch .arrow { color: #a9dfbf; }
+  ul.clean { padding-left: 22px; }
+  ul.clean li { margin-bottom: 6px; }
+  .badge {
+    display: inline-block; padding: 2px 10px; border-radius: 10px;
+    font-size: 12px; font-weight: 600; color: #fff;
+  }
+  .badge.ok { background: var(--pass); }
+  .badge.warn { background: var(--warn); }
+  .badge.info { background: var(--accent); }
+  .stats { display: flex; gap: 14px; flex-wrap: wrap; margin: 6px 0 4px; }
+  .stat {
+    flex: 1 1 150px; background: linear-gradient(180deg,#fdf8f0,#f5ecdd);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 12px; text-align: center;
+  }
+  .stat .num { font-size: 26px; font-weight: 700; color: var(--primary); }
+  .stat .lbl { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+  .note {
+    background: #fef9e7; border-left: 4px solid var(--warn);
+    padding: 12px 16px; border-radius: 8px; margin: 12px 0; font-size: 13.5px;
+  }
+  footer.finale {
+    background: linear-gradient(135deg, #6b3410, #935116); color: #fff;
+    border-radius: 12px; padding: 24px 28px; margin-top: 30px;
+    font-size: 14.5px; line-height: 2;
+  }
+  footer.finale strong { color: #f9e79f; }
+  .redline-td code { white-space: normal; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="hero">
+  <h1>68号·信值·臻选购物平台<br>五期全链交付总结报告</h1>
+  <div class="quote">
+    <p><strong>定位升级</strong>：zxjiu.com 从企业展示站升维为<strong>信值驱动的购物平台</strong>——"模块即货架， 信值即货币， AI 即导购"。</p>
+    <p><strong>核心创新命题</strong>：<strong>零重复建设的编排式创新</strong>——《信值·臻选大模型》文档描绘的五维雷达/三维匹配/动态定价/导购助手/邻里臻选/反作弊， 本项目 60+ 既有模块已建成约 80%， 68号只做"聚合编排前台"， 不重建任何信用资产。</p>
+    <p><strong>架构铁律</strong>：<strong>LLM 禁入判定链不变</strong>——评分=公式/排序=加权/定价=三因子/反作弊=确定性检测器； 一切惩罚经 46号审批（宪法域）。</p>
+  </div>
+</header>
+
+<!-- 核心指标 -->
+<div class="stats">
+  <div class="stat"><div class="num">5+1</div><div class="lbl">五期+实机验收</div></div>
+  <div class="stat"><div class="num">25</div><div class="lbl">API 端点</div></div>
+  <div class="stat"><div class="num">7</div><div class="lbl">新数据表</div></div>
+  <div class="stat"><div class="num">6,974</div><div class="lbl">交付代码行</div></div>
+  <div class="stat"><div class="num">146</div><div class="lbl">专项断言</div></div>
+  <div class="stat"><div class="num">56×3</div><div class="lbl">实机验收全绿</div></div>
+</div>
+
+<!-- 一 -->
+<h2 class="section">一、五期交付总览</h2>
+<div class="card">
+<table>
+<tr><th>期</th><th>交付</th><th>核心验收</th><th>断言</th><th>提交</th></tr>
+<tr><td><strong>P0</strong> 信值账户聚合层</td><td>五维雷达（诚信30/互助25/专业20/活跃15/成长10——分段Sigmoid+熔断+衰减）</td><td>47/67/44/62号只读聚合/新用户30天冷启动权重切换/全计算审计留痕</td><td>26</td><td><code>7a98166</code></td></tr>
+<tr><td><strong>P1</strong> 臻选货架引擎</td><td>商品三维评分（契合×安全硬闸×转化 → L1-L4）+信值加权排序</td><td>P7b 范式移植商品域/L4 短路不进乘法/排序公式 base×(1+α×雷达总分)</td><td>24</td><td><code>fdb3a40</code></td></tr>
+<tr><td><strong>P2</strong> 透明定价与导购</td><td>价格构成拆解（60号三因子+α抵扣+0.7地板+杀熟审计）+反馈闭环（L1/L2/L3）+小竹导购人格（SOP五步法）</td><td>原价-信值抵扣-折扣=实付强制公示/价差&gt;20%留痕/LLM 禁数字（全查询层直出）</td><td>29</td><td><code>7e2772f</code></td></tr>
+<tr><td><strong>P3</strong> 互助购物生态</td><td>邻里臻选（品类聚合+匿名门槛K=5）+邻里求购（67号范式）+碳积分联动</td><td>零个体数据红线/三单上限/紧急→距离→新单排序/碳档案不可交易</td><td>23</td><td><code>eb64788</code></td></tr>
+<tr><td><strong>P4</strong> 商家信值体系</td><td>4+2 认证+预演沙盘（P7c 范式）+S-A-B-C-D 动态评级</td><td>四必查缺一确定性拒绝/1000单推演+启航报告/降级仅生成 46号建议书</td><td>23</td><td><code>b075122</code></td></tr>
+<tr><td><strong>P5</strong> 灰度上线收官</td><td>三态灰度 XINZHI_MODE+A/B 护栏（三指标恶化&gt;3%自动暂停）+年度信值白皮书</td><td>读取链 guard-pause&gt;override&gt;env/6 决策面 off=409/观测面永不关停/PII 扫描零命中</td><td>21</td><td><code>951e83d</code></td></tr>
+<tr><td><strong>P5f</strong> Docker 实机</td><td>实机验收 56 断言×3 轮幂等+XINZHI_MODE compose 脚手架</td><td>Redis 容器全链/40号 P7 回归 33/33 共存零影响</td><td>56</td><td><code>016a2e5</code></td></tr>
+</table>
+</div>
+
+<!-- 二 -->
+<h2 class="section">二、五层架构（数据流）</h2>
+<div class="arch">【账户层·信值五维雷达 P0】xinzhi_radar_service（新）
+    用户信值五维 = 聚合 47号tier（诚信基础） × 67号信任指数（互助）
+    × 44号评分（专业） × 登录/订单流水（活跃） × 62号估值斜率（成长）
+    → 分段Sigmoid归一化（文档公式） → <span class="hl">硬熔断（任一维&lt;40→总分≤59）</span>
+    → 软奖励（连续6月无违规+互助TOP10%→+5） → 负面半衰期90天
+    ★ 零新建计算：五维数据源全部是既有模块的只读聚合
+        <span class="arrow">▼</span>
+【决策层·臻选货架 P1】xinzhi_prime_service（新）
+    商品三维评分 = 信值契合度（品类×场景×用户tier知识映射表）
+    × 体验确定性（<span class="hl">硬闸&lt;0.6</span>: 违禁词/下架/差评观察） × 转化潜力
+    （同类商品历史漏斗, 冷启动0.5） → L1臻选位（≥75）/L2优选（≥50）
+    /L3普通/L4风险 → 信值加权排序 base×(1+α×总分/100)
+        <span class="arrow">▼</span>
+【体验层·透明定价与导购 P2】xinzhi_pricing/guide_service（新）
+    价格构成 = 60号三因子（信任×贡献×活动, ≤30%封顶） →
+    68号 α 信值抵扣（S.15/A.12/B.08/C,D=0, 单笔≤30%） →
+    0.7 地板保护（不可击穿） → 详情页<span class="hl">强制公示（杀熟价差&gt;20%留痕）</span>
+    导购 = 小竹臻选导购人格（SOP五步法: 意图锚定→信值佐证→
+    透明解释→履约跟进→价值沉淀） ★ <span class="hl">数字永远来自查询层</span>
+        <span class="arrow">▼</span>
+【生态层·互助购物 P3-P4】xinzhi_neighbor/merchant_service（新）
+    邻里臻选 = 品类聚合（平台×品类×漏斗, 匿名门槛K=5, 零个体数据）
+    邻里求购 = 67号叫帮范式（三单上限/违禁词/LBS紧急→距离→新单）
+    碳积分 = 67号互助碳（只读） + 68号求购碳（500g×参与人数, 不可交易）
+    商家体系 = 4+2 认证 + 预演沙盘（1000单推演+启航报告）
+    + S-A-B-C-D 评级（<span class="hl">降级走 46号建议书——处罚永不自动</span>）
+        <span class="arrow">▼</span>
+【治理层·灰度与宪法 P5】xinzhi_mode/whitepaper_service（新）
+    三态灰度 XINZHI_MODE（off/shadow/assist——读取链:
+    护栏暂停&gt;运行时override&gt;环境变量） + A/B 护栏（退款率/
+    客诉进线/卸载率任一恶化&gt;3%自动暂停, 恢复须人工）
+    + 年度信值白皮书（四章节+PII 扫描+样本门+67号联动）
+    <span class="hl">观测面永不关停（宪法口径: 观测与纠错永不关停）</span></div>
+
+<!-- 三 -->
+<h2 class="section">三、核心交付明细</h2>
+<div class="card">
+<h3 class="engine">P0 信值账户聚合层（<code>xinzhi_radar_service.py</code>）</h3>
+<ul class="clean">
+<li><strong>五维口径</strong>（文档《信值五维雷达图》）： 诚信度30%/互助值25%/专业度20%/活跃度15%/成长力10%； 分段 Sigmoid 归一化（及格线 x0→50 分， 卓越线趋近 100）。</li>
+<li><strong>修正层</strong>： 硬熔断（任一维&lt;40→总分≤59）+软奖励（+5）+负面半衰期 90 天（远期衰减归零）。</li>
+<li><strong>新用户保护</strong>： 30 天冷启动权重切换（活跃15→25, 诚信30→20）。</li>
+<li><strong>审计留痕</strong>： 每次计算入库快照（原始输入/归一化中间值/最终分/解释文本——<code>computedFingerprint</code> 防重复计算）。</li>
+</ul>
+
+<h3 class="engine">P1 臻选货架引擎（<code>xinzhi_prime_service.py</code>）</h3>
+<ul class="clean">
+<li><strong>信值契合度</strong>： 确定性知识映射表（珍藏系列→专业度/宴请→互助值/热销→活跃度； 基准分×(0.6+0.4×维度值/100) 用户加成）； 无映射中性 50。</li>
+<li><strong>安全硬闸</strong>（&lt;0.6 无条件拦截， 短路不进价值乘法）： 下架商品→L4/违禁词（40号 RISK_BLOCK_WORDS 复用+商品域扩展）/差评观察×0.5。</li>
+<li><strong>L1-L4 分级</strong>： L1（≥75）/L2（≥50）/L3 兜底/L4 屏蔽<strong>留痕永不静默丢弃</strong>。</li>
+<li><strong>信值加权排序</strong>（文档公式）： 最终分 = 基础分×(1+α×雷达总分/100)。</li>
+</ul>
+
+<h3 class="engine">P2 透明定价与导购（<code>xinzhi_pricing_service.py</code>/<code>xinzhi_guide_service.py</code>）</h3>
+<ul class="clean">
+<li><strong>定价管线</strong>（全确定性， 60号 compute_price 复用）： ① 60号三因子（叠加封顶 0.7）→ ② 68号 α 信值抵扣（单笔≤30% 上限）→ ③ 地板保护（α 不可击穿 0.7 地板）→ ④ 杀熟审计（同商品跨会员价差&gt;20% 留痕， 处置经 46号）。</li>
+<li><strong>公示行</strong>（文档要求）：<code>原价¥X - 信值抵扣¥Y(等级G α=Z) - 三因子折扣¥W = 实付¥V</code></li>
+<li><strong>反馈闭环</strong>（四步轻量机制）： 埋点（标签）→分流（L1安抚自动回复/L2工单24h/L3紧急15分钟）→路由→处置（人工轨不可重复）。</li>
+<li><strong>导购人格</strong>： SOP五步法； <strong>LLM 禁数字铁律</strong>（话术=模板拼接， 数字 100% 查询层插值）； L4 硬闸商品如实告知不静默。</li>
+</ul>
+
+<h3 class="engine">P3 互助购物生态（<code>xinzhi_neighbor_service.py</code>）</h3>
+<ul class="clean">
+<li><strong>邻里臻选频道</strong>（零个体数据红线——P6f-3 口径）： 品类聚合； 匿名门槛 K=5（&lt;5 人品类不展示防群体反推个体）。</li>
+<li><strong>邻里求购</strong>（67号叫帮范式直接复用， 67号模块零改动）： 三单上限+违禁词预检（BANNED_KEYWORDS 复用）+LBS 20km 排序（紧急→距离→新单）+响应仅计数脱敏+发起人关闭。</li>
+<li><strong>碳积分联动</strong>： 求购关闭折算 500g×(1+响应人数)； 碳档案=67号互助碳只读引用+68号求购碳； <strong>不可交易</strong>（宪法口径防金融化）。</li>
+</ul>
+
+<h3 class="engine">P4 商家信值体系（<code>xinzhi_merchant_service.py</code>）</h3>
+<ul class="clean">
+<li><strong>4+2 认证</strong>（38号审核范式）： 四必查（主体资质/履约能力/服务保障/后台系统）缺一确定性拒绝留痕； 两加分（生态贡献+8/外部背书+6）。</li>
+<li><strong>预演沙盘</strong>（P7c 范式移植）： 申报配置→模拟 1000 单→信值轨迹 10 段爬坡→《启航报告》（TOP3 风险+成长路线图三杠杆分数弹性）。</li>
+<li><strong>动态评级 S-A-B-C-D</strong>： 认证分+履约分（37号订单结算率×28+评价好评率×18 只读聚合）； <strong>升级自动生效留痕； 降级仅生成 46号 pending 建议书（处罚永不自动——宪法域）</strong>。</li>
+</ul>
+
+<h3 class="engine">P5 灰度上线收官（<code>xinzhi_mode_service.py</code>/<code>xinzhi_whitepaper_service.py</code>）</h3>
+<ul class="clean">
+<li><strong>三态灰度</strong>（全站 PAY60/XX64 同款范式）： off（默认零影响）/shadow（放行+留痕标记）/assist（生产）； 读取链： 护栏暂停&gt;运行时 override&gt;环境变量。</li>
+<li><strong>6 决策面门槛</strong>（off 时 409）： 求购发布/响应/关闭+商家认证/评级重算+导购应答； <strong>观测面永不关停</strong>（宪法口径）。</li>
+<li><strong>A/B 护栏</strong>： 三指标任一相对基线恶化&gt;3% 自动暂停（保护机制非处罚）； 恢复须人工 resume（决策留痕）； 指标滚动留痕（截断 50 条）。</li>
+<li><strong>年度信值白皮书</strong>（四章节固定结构）： 信值体系框架/年度数据/红线工程化案例（6 条）/开放倡议（CC BY-NC-SA）； PII 扫描兜底+样本门（分区&lt;3 不出数）+67号互助白皮书只读联动。</li>
+</ul>
+</div>
+
+<!-- 四 -->
+<h2 class="section">四、数据资产</h2>
+<div class="card">
+<p><strong>7 新表</strong>（xinzhi 前缀， 双模式内存+Redis, bool 显式还原+复杂字段序列化清单——P6g-4 教训）：</p>
+<table>
+<tr><th>表</th><th>用途</th><th>期</th></tr>
+<tr><td><code>xinzhi_radar_snapshots</code></td><td>用户五维快照（总分/分维/归因/审计指纹）</td><td>P0</td></tr>
+<tr><td><code>xinzhi_product_scores</code></td><td>商品三维评分快照（契合/安全/转化/分级）</td><td>P1</td></tr>
+<tr><td><code>xinzhi_price_details</code></td><td>价格构成拆解留痕（杀熟审计源）</td><td>P2</td></tr>
+<tr><td><code>xinzhi_feedback</code></td><td>反馈工单（标签/路由/状态/时效）</td><td>P2</td></tr>
+<tr><td><code>xinzhi_groupbuys</code></td><td>邻里求购（67号联动关联键）</td><td>P3</td></tr>
+<tr><td><code>xinzhi_merchants</code></td><td>商家信值档案（认证/评级/沙盘报告）</td><td>P4</td></tr>
+<tr><td><code>xinzhi_grayscale</code></td><td>灰度运行时态（override/护栏暂停/指标留痕）</td><td>P5</td></tr>
+</table>
+<p><strong>25 端点</strong>（X-Member-Id 会员域； off 态观测面照常）：radar、radar/history、products/score、prime、products/{id}/score、price/{id}、feedback（POST/GET）、guide、guide/personas、neighbor、groupbuy（POST/GET/respond/close）、carbon/{member_id}、merchant/apply、merchant/simulate、merchant/{id}/level、merchant/{id}/regrade、mode（GET）、mode/override、mode/guard、mode/resume、whitepaper。</p>
+<p><strong>46号审批总线集成</strong>：<code>xinzhi_merchant</code> 评分器入册 SCORER_REGISTRY（batch 41）——商家降档建议书走 submit_change pending 人工裁决轨。</p>
+</div>
+
+<!-- 五 -->
+<h2 class="section">五、验证体系</h2>
+<div class="card">
+<table>
+<tr><th>层</th><th>口径</th><th>结果</th></tr>
+<tr><td>专项测试</td><td>6 套件 146 断言（26+24+29+23+23+21）</td><td><span class="badge ok">全过</span></td></tr>
+<tr><td>跨期回归</td><td>每期交付后 P0 起全量回归</td><td><span class="badge ok">全绿</span></td></tr>
+<tr><td>Docker 实机</td><td>verify_xinzhi_p5_live.py 56 断言×3 轮幂等</td><td><span class="badge ok">56/56</span></td></tr>
+<tr><td>共存零影响</td><td>40号 P7 实机回归（同一容器）</td><td><span class="badge ok">33/33</span></td></tr>
+<tr><td>67号零改动</td><td>git diff 确认（help_service 等零变更）</td><td><span class="badge ok">确认</span></td></tr>
+<tr><td>语法+lint</td><td>py_compile+ruff 全部 68号文件</td><td><span class="badge ok">全绿</span></td></tr>
+</table>
+<div class="note"><strong>实机关键断言链</strong>：会员注册→雷达即时计算→播种 S/D 等级+trusted/restricted tier→商品三维评分→价格构成（trusted+S ¥216.41 vs restricted+D ¥281.4 价差 23%→auditFlag 留痕）→反馈 L1/L2/L3 分流→灰度默认 off（三决策面 409/观测面 200）→切档 assist（导购 SOP 五步+求购全链+碳折算）→46号 sync 入册→4+2 认证+沙盘→护栏恶化自动暂停（决策面随 guard_pause 关闭）→人工恢复→白皮书四章节 PII 零命中→override 清除回落 off（零影响铁律闭环）。</div>
+</div>
+
+<!-- 六 -->
+<h2 class="section">六、红线对照表（宪法域）</h2>
+<div class="card">
+<table>
+<tr><th>红线</th><th>工程实现</th><th>验证</th></tr>
+<tr><td>抵扣系数 α 只紧不松</td><td class="redline-td">S.15/A.12/B.08 硬编码； 放宽走 46号建议书</td><td><span class="badge info">专项+实机</span></td></tr>
+<tr><td>同商品用户间价差≤20%+公示</td><td class="redline-td">杀熟审计留痕+价格构成卡强制</td><td><span class="badge info">实机（trusted vs restricted）</span></td></tr>
+<tr><td>抵扣≤30%/实付≥地板</td><td class="redline-td">ALPHA_CAP+0.7 地板双闸</td><td><span class="badge info">实机（promo 0.5 触地板）</span></td></tr>
+<tr><td>降级永不自动</td><td class="redline-td">商家降档仅 46号 pending 建议书</td><td><span class="badge info">专项（changeId 留痕）</span></td></tr>
+<tr><td>邻里频道零个体数据</td><td class="redline-td">品类聚合+匿名门槛 K=5</td><td><span class="badge info">专项+实机</span></td></tr>
+<tr><td>LLM 禁入判定链</td><td class="redline-td">评分/排序/定价/分流/评级全确定性； 导购数字全查询层</td><td><span class="badge info">专项（数字一致性）</span></td></tr>
+<tr><td>观测面永不关停</td><td class="redline-td">mode 只挡 6 决策面</td><td><span class="badge info">实机（off 态雷达 200）</span></td></tr>
+<tr><td>护栏暂停非处罚</td><td class="redline-td">功能开关（自动）+人工恢复（留痕）</td><td><span class="badge info">实机</span></td></tr>
+<tr><td>碳积分不可交易</td><td class="redline-td">只读观测口径（methodology 公示）</td><td><span class="badge info">专项</span></td></tr>
+<tr><td>灰度默认零影响</td><td class="redline-td">XINZHI_MODE=off 时 67 模块零改动</td><td><span class="badge info">实机（40号回归）</span></td></tr>
+</table>
+</div>
+
+<!-- 七 -->
+<h2 class="section">七、大事记</h2>
+<div class="card">
+<table>
+<tr><th>日期</th><th>事件</th></tr>
+<tr><td>2026-09-11</td><td>规划方案入库（<code>2492f45</code>）——编排式创新定调</td></tr>
+<tr><td>2026-09-11</td><td>P0 信值账户聚合层交付（<code>7a98166</code>）——五维雷达上线</td></tr>
+<tr><td>2026-09-11</td><td>P1 臻选货架引擎交付（<code>fdb3a40</code>）——P7b 范式移植商品域</td></tr>
+<tr><td>2026-09-11</td><td>P2 透明定价与导购交付（<code>7e2772f</code>）——含杀熟审计+导购人格</td></tr>
+<tr><td>2026-09-11</td><td>P3 互助购物生态交付（<code>eb64788</code>）——67号零改动联动</td></tr>
+<tr><td>2026-09-11</td><td>P4 商家信值体系交付（<code>b075122</code>）——46号总线集成</td></tr>
+<tr><td>2026-09-11</td><td>P5 灰度收官交付（<code>951e83d</code>）——三态+护栏+白皮书</td></tr>
+<tr><td>2026-09-11</td><td>Docker 实机验证（<code>016a2e5</code>）——56 断言×3 轮幂等+compose 脚手架</td></tr>
+</table>
+<p><strong>提交链</strong>：<code>2492f45 → 7a98166 → fdb3a40 → 7e2772f → eb64788 → b075122 → 951e83d → 016a2e5</code></p>
+</div>
+
+<!-- 八 -->
+<h2 class="section">八、代码资产</h2>
+<div class="card">
+<table>
+<tr><th>类别</th><th>文件</th><th>行数</th></tr>
+<tr><td>Repository</td><td>xinzhi_repository.py（7 表）</td><td>500</td></tr>
+<tr><td>Services</td><td>radar/prime/pricing/guide/neighbor/merchant/mode/whitepaper_service.py</td><td>2,931</td></tr>
+<tr><td>Routes</td><td>xinzhi_routes.py（25 端点）</td><td>623</td></tr>
+<tr><td>测试</td><td>test_xinzhi_p0~p5.py（146 断言）</td><td>2,376</td></tr>
+<tr><td>实机验收</td><td>verify_xinzhi_p5_live.py（56 断言）</td><td>544</td></tr>
+<tr><td>配置</td><td>docker-compose.yml（XINZHI_MODE 脚手架）</td><td>+7</td></tr>
+<tr><td><strong>合计</strong></td><td>12 后端文件</td><td><strong>6,974</strong></td></tr>
+</table>
+</div>
+
+<!-- 九 -->
+<h2 class="section">九、与巨头差异化（文档"借鉴表"的工程答案）</h2>
+<div class="card">
+<table>
+<tr><th>巨头</th><th>本项目落地</th></tr>
+<tr><td>京东供应链确定性</td><td>37号同盟+41号代驾履约 → 商家 S-A-D 评级驱动臻选位</td></tr>
+<tr><td>天猫品牌种草</td><td>40号 P5b 创作工坊 → 种草内容经信值深审（拒虚假种草）</td></tr>
+<tr><td>淘宝长尾公平曝光</td><td>信值加权排序含互助贡献——诚信小商家公平曝光</td></tr>
+<tr><td>美团本地生活</td><td><strong>67号叫帮 LBS 互助大厅零成本联动——全站最大差异点</strong></td></tr>
+</table>
+<div class="note"><strong>独有护城河</strong>：购物+互助一体（买酒可叫邻里代驾/求购可唤邻里互助/消费累积碳积分）——"15 分钟信值生活圈"在既有 67号上的零成本实现。</div>
+</div>
+
+<footer class="finale">
+  <strong>结语</strong>：68号五期全链收官——信值五维雷达（账户）→臻选货架（决策）→透明定价与导购（体验）→互助购物生态（生态）→灰度护栏与白皮书（治理），全链确定性实现、LLM 禁入判定链、处罚永不自动、观测面永不关停；编排式创新零重复建设，60+ 模块信用资产一次盘活。
+</footer>
+
+</div>
+</body>
+</html>
