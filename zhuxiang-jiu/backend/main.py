@@ -456,6 +456,11 @@ register_drama85_routes(app)
 from routes.nexus74_routes import register_nexus74_routes
 register_nexus74_routes(app)
 
+# 抖音开放平台对接(2026-10-17 入驻收口: 小程序「竹香酒馆」
+# access_token 生命周期 + OpenAPI 骨架; 视频发布待能力开通)
+from routes.douyin_routes import register_douyin_routes
+register_douyin_routes(app)
+
 # 小竹合规引擎运营后台(2026-10-04 用户方案二期: 规则CRUD/
 # 白名单豁免/命中打标闭环/发布热更/测试沙箱)
 from routes.guardrail_admin_routes import (
