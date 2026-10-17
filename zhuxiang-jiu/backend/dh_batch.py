@@ -1,9 +1,9 @@
 """73号(sv)·数字人 GPU 轨批量编排器(生产拆链正式化, 2026-10-01 实录)
 
-用法: python dh_batch.py --sids sv73_xxx[,sv73_yyy] [--boot] [--no-shutdown]
+用法: python dh_batch.py --sids sv73_xxx[,sv73_yyy] [--no-boot] [--no-shutdown]
       python dh_batch.py --sid sv73_xxx                      # 单条
-      python dh_batch.py --boot --sids s1,s2                 # 自动开机+跑批+自动关机
-      python dh_batch.py --boot --pro --sids s1,s2           # Pro 实例全自动(API 开关机)
+      python dh_batch.py --sids s1,s2                        # 自动开机+跑批+自动关机
+      python dh_batch.py --pro <uuid> --sids s1,s2           # 指定 Pro 实例全自动
 
 模板支持(2026-10-04 A1 起):
   dh_oral  单镜 15s 口播(原形态)
@@ -14,7 +14,8 @@
 连跑, 摊薄模型加载 60-90s(周中段可 --no-shutdown 补批)。
 
 链路(build_dh_dev 四步的拆链形式——GPU 机 import 巨网不可控的分段铁律):
-  0.(--boot) AutoDL API 开机(adh_power on) → 轮询 SSH 就绪
+  0. AutoDL 自动开机(ensure 候选回退: --pro > ADH_PRO_UUIDS >
+     ADH_INSTANCE_UUID; 无库存自动换下一台) → snapshot 实时坐标
   1. 拉生产 storyboard(SSH 容器管道取 token)
   2. 本地 TTS(78号竹语; LLM_API_KEY 经生产容器管道注入, 不落盘;
      dh_mix 仅 TTS 口播镜 voiceover——全量拼接会拉长 GPU 出片)
@@ -518,9 +519,10 @@ def main() -> int:
     ap.add_argument("--sid", help="单条剧本号")
     ap.add_argument("--sids", help="逗号分隔多条")
     ap.add_argument("--boot", action="store_true",
-                    help="先 AutoDL API 开机(需 ADH_API_TOKEN; 普通实例"
-                         "不在 API 体系——控制台人工开机, 见 adh_power.py"
-                         "形态实证)")
+                    help="(兼容保留, 空操作——2026-10-17 起自动开机默认开)")
+    ap.add_argument("--no-boot", action="store_true",
+                    help="跳过自动开机(实例已在线, 或 ADH_* env 手工坐标"
+                         "直连模式)")
     ap.add_argument("--no-shutdown", action="store_true",
                     help="跑完不自动关机(默认关——按量计费形态, 保持在线"
                          "=持续扣费; 仅同一会话连续补批时用, 用完记得"
@@ -528,8 +530,8 @@ def main() -> int:
     ap.add_argument("--min-balance", type=float, default=10.0,
                     help="余额止损阈值(¥, 默认 10; 低于即退出不跑)")
     ap.add_argument("--pro", default="",
-                    help="容器实例Pro uuid(缺省读 ADH_INSTANCE_UUID env——"
-                         "create 成功时 setx 自动持久化)——snapshot 动态"
+                    help="首选 Pro 实例 uuid(优先级最高; 缺省读 "
+                         "ADH_PRO_UUIDS 有序清单)——snapshot 动态"
                          "取 SSH 连接, 跑批后 API power_off")
     ap.add_argument("--outfit", default="default",
                     help="装束档(default=常装, spring=春节装——IP 双主角"
@@ -557,20 +559,27 @@ def main() -> int:
     else:
         print("[余额] ADH_API_TOKEN 未配置, 跳过检查")
 
-    if args.boot:
-        print("[0/5] AutoDL API 开机 ...")
-        r = subprocess.run([sys.executable, "adh_power.py", "on"],
-                           capture_output=True, text=True, timeout=300)
-        print(r.stdout[-400:])
-        if "POWER_ON OK" not in r.stdout:
-            return 1
-
-    # SSH 连接: --pro=API snapshot 动态取(Pro 实例每次 create 连接信息
-    # 都变) / 缺省=普通实例 ADH env 硬编码
+    # SSH 连接(2026-10-17 全自动开关机): ensure 候选序
+    # (--pro > ADH_PRO_UUIDS > ADH_INSTANCE_UUID)——已 running 直接用,
+    # 未开机则 power_on, 无库存自动回退下一台; snapshot 取实时坐标
+    # (Pro 每次开机连接信息都变)。--no-boot: 指定实例仅取 snapshot,
+    # 未指定则 ADH_* env 手工坐标直连(无 API 开机能力)
     overrides = None
+    used_uuid = ""
     pro_uuid = args.pro or os.environ.get("ADH_INSTANCE_UUID", "").strip()
-    if pro_uuid:
-        print(f"[Pro] snapshot 动态连接 ({pro_uuid[:12]}...) ...")
+    from adh_power import candidate_uuids, ensure as adh_ensure
+    if not args.no_boot and candidate_uuids(args.pro):
+        print("[0/5] AutoDL 自动开机(ensure 候选回退) ...")
+        c = adh_ensure(args.pro)
+        if not c:
+            print("  全部候选实例不可用(见上)——退出")
+            return 1
+        overrides = {"host": c["host"], "port": int(c["port"]),
+                     "user": "root", "password": c["password"]}
+        used_uuid = c["uuid"]
+        print(f"  [实例] {used_uuid} @ {c['host']}:{c['port']}")
+    elif args.no_boot and pro_uuid:
+        print("[0/5] --no-boot: 跳过开机, snapshot 取坐标 ...")
         from adh_power import call as adl_call
         b = adl_call("GET", "/api/v1/dev/instance/pro/snapshot",
                      {"instance_uuid": pro_uuid})
@@ -582,7 +591,10 @@ def main() -> int:
                      "port": int(d.get("ssh_port") or 0),
                      "user": "root",
                      "password": d.get("root_password", "")}
+        used_uuid = pro_uuid
         print(f"  {overrides['host']}:{overrides['port']}")
+    else:
+        print("[0/5] 无 Pro 实例配置——ADH_* env 手工坐标直连(无自动开机)")
     print("[SSH] 就绪轮询 ...")
     ssh = ssh_connect(overrides=overrides)
 
@@ -614,12 +626,12 @@ def main() -> int:
 
     print(f"== 批量完成: {ok} ok / {fail} fail ==")
     if not args.no_shutdown:
-        if pro_uuid:
-            print("[关机] Pro API power_off ...")
+        if used_uuid:
+            print(f"[关机] Pro API power_off ({used_uuid}) ...")
             from adh_power import call as adl_call
             ssh.close()
             b = adl_call("POST", "/api/v1/dev/instance/pro/power_off",
-                         {"instance_uuid": pro_uuid})
+                         {"instance_uuid": used_uuid})
             print("    power_off:", b.get("code"), b.get("msg", ""))
         else:
             print("[关机] 容器内 shutdown(官方指令) ...")

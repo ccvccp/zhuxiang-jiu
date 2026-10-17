@@ -49,8 +49,15 @@ def main() -> int:
 
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(HOST, port=PORT, username=USER, password=PASSWORD,
-                look_for_keys=False, allow_agent=False)
+    try:
+        ssh.connect(HOST, port=PORT, username=USER, password=PASSWORD,
+                    look_for_keys=False, allow_agent=False)
+    except Exception:
+        # 全自动开关机(2026-10-17): 连不上→ensure 候选序开机回退→
+        # snapshot 实时坐标重连; 无候选配置则抛原异常
+        from adh_power import ssh_connect_auto
+        if not ssh_connect_auto(ssh):
+            raise
     remote_b64 = "/tmp/_up.b64"
     _, so, _ = ssh.exec_command(f"rm -f {remote_b64}")
     so.channel.recv_exit_status()

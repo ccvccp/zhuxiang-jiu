@@ -1,7 +1,9 @@
 """AutoDL 实例 API 开关机工具(数字人 GPU 轨自动编排配套)
 
-用法: python adh_power.py <on|off|status|list|balance|images|create|snapshot>
+用法: python adh_power.py <on|off|status|list|balance|images|create|snapshot|ensure>
       on/off/status [--uuid <uuid>]          实例电源(Pro 形态)
+      ensure [--uuid <uuid>]                 自动确保一台 running(候选回退,
+                                             输出 ENSURE_JSON 实时连接信息)
       balance                               余额(¥, 通用)
       images                                私有镜像列表(image_uuid)
       create --image <uuid> [--gpu 5090-p] [--disk 0] [--name x]
@@ -116,6 +118,85 @@ def _resolve_uuid(argv: list) -> str:
     raise SystemExit("多实例——ADH_INSTANCE_UUID 指定其一")
 
 
+def candidate_uuids(preferred: str = "") -> list:
+    """有序候选实例: preferred(--pro) > ADH_PRO_UUIDS(逗号有序) >
+    ADH_INSTANCE_UUID(旧单实例键); 去重保序"""
+    out: list = []
+    for u in [preferred.strip(),
+              *[x.strip() for x in
+                os.environ.get("ADH_PRO_UUIDS", "").split(",")],
+              os.environ.get("ADH_INSTANCE_UUID", "").strip()]:
+        if u and u not in out:
+            out.append(u)
+    return out
+
+
+def ensure(preferred: str = "", wait_s: int = 120, verbose=True) -> dict | None:
+    """全自动开关机核心(2026-10-17): 确保一台 Pro 实例 running 并返回
+    实时 SSH 连接信息。按候选序: 已 running 直接用; 否则 power_on
+    (无库存 InternalError 自动回退下一台); 全军覆没返回 None。
+    返回 {uuid, host, port, password}——Pro 每次开机连接信息都变,
+    须以 snapshot 为准而非手工缓存坐标。"""
+    errs = []
+    for u in candidate_uuids(preferred):
+        if not u:
+            continue
+        st = call("GET", "/api/v1/dev/instance/pro/status",
+                  {"instance_uuid": u}).get("data") or ""
+        if st != "running":
+            if verbose:
+                print(f"[ensure] {u} {st or '?'} → power_on ...")
+            b = call("POST", "/api/v1/dev/instance/pro/power_on",
+                     {"instance_uuid": u, "payload": "gpu"})
+            if b.get("code") != "Success":
+                errs.append(f"{u}: {b.get('msg') or b.get('code')}")
+                if verbose:
+                    print(f"[ensure] 回退下一台({errs[-1][:80]})")
+                continue
+            for _ in range(max(1, wait_s // 5)):
+                time.sleep(5)
+                st = call("GET", "/api/v1/dev/instance/pro/status",
+                          {"instance_uuid": u}).get("data") or ""
+                if st == "running":
+                    break
+            if st != "running":
+                errs.append(f"{u}: 开机超时({st})")
+                continue
+        b = call("GET", "/api/v1/dev/instance/pro/snapshot",
+                 {"instance_uuid": u})
+        d = b.get("data") or {}
+        if b.get("code") == "Success" and d.get("proxy_host"):
+            if verbose:
+                print(f"[ensure] {u} running @ "
+                      f"{d['proxy_host']}:{d.get('ssh_port')}")
+            return {"uuid": u, "host": d.get("proxy_host"),
+                    "port": int(d.get("ssh_port") or 0),
+                    "password": d.get("root_password", "")}
+        errs.append(f"{u}: snapshot 失败 {str(b.get('msg'))[:60]}")
+    if verbose and errs:
+        print("[ensure] 全部候选失败:", "; ".join(errs)[:200])
+    return None
+
+
+def ssh_connect_auto(client) -> bool:
+    """paramiko client 连不上时的自动开机重连(单发工具用):
+    ensure 候选序开机回退 → snapshot 实时坐标 → 连接; 成功 True。
+    无候选配置/仍失败返回 False(调用方 re-raise 原异常)。
+    注意: 只自动开机不自动关机——关机生命周期归 dh_batch(避免
+    连续单发命令反复开关机)。"""
+    try:
+        c = ensure()
+        if not c:
+            return False
+        client.connect(c["host"], port=c["port"], username="root",
+                       password=c["password"], timeout=30,
+                       look_for_keys=False, allow_agent=False)
+        print(f"[auto-power] 已接通 {c['uuid']}", file=sys.stderr)
+        return True
+    except Exception:
+        return False
+
+
 def main() -> int:
     argv = sys.argv[2:] if len(sys.argv) > 2 else []
     action = sys.argv[1] if len(sys.argv) > 1 else "status"
@@ -199,6 +280,16 @@ def main() -> int:
              "password": d.get("root_password"),
              "status_note": d.get("usage_info", {}).get("valid")},
             ensure_ascii=False))
+        return 0
+
+    if action == "ensure":
+        # 全自动开关机入口: 候选(--uuid > ADH_PRO_UUIDS > ADH_INSTANCE_UUID)
+        # 逐台开机回退, 输出实时 SSH 坐标(ENSURE_JSON)
+        c = ensure(_uuid(argv))
+        if not c:
+            print("ensure: 无可用候选(配置 ADH_PRO_UUIDS 或 --uuid)")
+            return 1
+        print("ENSURE_JSON", json.dumps(c, ensure_ascii=False))
         return 0
 
     u = _resolve_uuid(argv)

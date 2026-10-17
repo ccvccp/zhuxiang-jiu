@@ -22,9 +22,16 @@ def run(cmd: str, timeout: int = 300) -> int:
         return 2
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(HOST, port=PORT, username=USER,
-                   password=PASSWORD, timeout=30,
-                   look_for_keys=False, allow_agent=False)
+    try:
+        client.connect(HOST, port=PORT, username=USER,
+                       password=PASSWORD, timeout=30,
+                       look_for_keys=False, allow_agent=False)
+    except Exception:
+        # 全自动开关机(2026-10-17): 连不上→ensure 候选序开机回退→
+        # snapshot 实时坐标重连; 无候选配置则抛原异常
+        from adh_power import ssh_connect_auto
+        if not ssh_connect_auto(client):
+            raise
     try:
         stdin, stdout, stderr = client.exec_command(cmd, timeout=timeout)
         out = stdout.read().decode("utf-8", "replace")
