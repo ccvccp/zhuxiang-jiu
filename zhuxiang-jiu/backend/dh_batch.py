@@ -310,6 +310,10 @@ def run(ssh, cmd, timeout=290):
     return code, out, se.read().decode("utf-8", "replace")
 
 
+# push 拼参组大小探测记忆(跨文件复用, 避免每文件重复撞代理击杀区)
+_PUSH_TARGET = [360000]
+
+
 def push(ssh, local: Path, remote: str, chunk=90000):
     """分块 base64 上传 + md5 双端校验(2026-10-01 b64 未解码坑修复版;
     2026-10-17 chunk 60K→90K——exec 通道轮次延迟敏感, 轮次↓1/3,
@@ -324,15 +328,13 @@ def push(ssh, local: Path, remote: str, chunk=90000):
     ssh.exec_command(f"rm -f '{remote}'")[1].channel.recv_exit_status()
     parts = [b64[i:i + chunk] for i in range(0, len(b64), chunk)]
     # 慢链批量拼参(2026-10-17 west-E 实证): 逐块 exec 往返太慢; 单参数
-    # 上限 128KB(90K 安全), 命令行总额理论 ~2MB 但代理上限更低且超限
-    # 即断链(EOFError 空串, 会话同死)。故小步起发(2 参/组)成功翻倍、
-    # 失败减半重排——自动收敛到该链路可承受的最大单命令; 断链由
-    # 外层 attempt 重连 + md5 跳过续传兜底
+    # 上限 128KB(90K 安全)。代理对超长命令行敏感(1.4M+ 实证即 10054
+    # 断链), 故组上限 720K(击杀区之下), 探测记忆跨文件复用(_PUSH_TARGET
+    # 模块级, 失败减半成功倍增), 断链由外层重连 + md5 跳过续传兜底
     from collections import deque
     q = deque(parts)
-    target = chunk * 2
     while q:
-        n = max(1, target // chunk)
+        n = max(1, _PUSH_TARGET[0] // chunk)
         group = [q.popleft() for _ in range(min(n, len(q)))]
         try:
             args = " ".join(f"'{p}'" for p in group)
@@ -342,14 +344,14 @@ def push(ssh, local: Path, remote: str, chunk=90000):
         except Exception:  # noqa: BLE001  断链/超大命令 EOFError 等
             ok, err = False, "exec 异常(断链或命令超限)"
         if ok:
-            target = min(target * 2, 1800000)
+            _PUSH_TARGET[0] = min(_PUSH_TARGET[0] * 2, 720000)
             continue
         if len(group) == 1:
             raise RuntimeError(
                 f"上传分块失败 {local.name}: {str(err)[:100]}")
         for p in reversed(group):
             q.appendleft(p)
-        target = max(target // 2, chunk)
+        _PUSH_TARGET[0] = max(_PUSH_TARGET[0] // 2, chunk)
     code, out, _ = run(
         ssh, f"base64 -d '{remote}' > '{remote}.bin' && mv"
              f" '{remote}.bin' '{remote}' && md5sum '{remote}'")
@@ -394,7 +396,7 @@ def push_many(ssh, items, parallel=1, label="", reconnect=None):
     def one(t):
         nonlocal ssh
         local, remote = t
-        for i in range(3):
+        for i in range(5):
             try:
                 push(ssh, local, remote)
                 return
