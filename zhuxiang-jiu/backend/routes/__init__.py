@@ -128,6 +128,8 @@ from routes.help_routes import register_help_routes
 from routes.zyh_routes import register_zyh_routes
 from routes.synapse_routes import register_synapse_routes
 from routes.zjian_routes import register_zjian_routes
+# 竹智·Arch-Agent 架构大脑(MVP: 23 模块灰度态势只读汇聚+竹林隐喻态)
+from routes.arch_routes import register_arch_routes
 # 时空情景感知模块(P0: IP 城市解析+天气+代理权益+情景问候)
 from routes.scene_routes import register_scene_routes
 # AI智能安全管理模块(43号·安全网关+威胁评分+挑战验证+申诉)
@@ -215,6 +217,7 @@ __all__ = [
     "register_zyh_routes",
     "register_synapse_routes",
     "register_zjian_routes",
+    "register_arch_routes",
     "register_scene_routes",
     "register_security_routes",
     "register_dpo_routes",

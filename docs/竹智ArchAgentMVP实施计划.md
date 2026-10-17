@@ -35,6 +35,9 @@
 - e2e：observe 公开可达/admin 401 边界/dashboard 渲染+回落
 - 生产：随下次部署（或单独云助手），挂每日巡检
 
-## 四、完成记录
+## 四、完成记录（2026-10-17）
 
-（实施后补）
+- **实现**：arch_agent_service.py（24 模块注册表双形态懒加载/并行采集 fail-soft/竹林隐喻三态/Redis+内存双轨留痕滚动 50）+ arch_routes.py（observe 公开/status·history admin）+ main.py/__init__ 注册 + auth_middleware 公开白名单 + arch-dashboard.html/js（live+回落范式）。
+- **验证**：observe 23/23 healthy"竹林微风"；status/history 403 边界正确（compat 剥伪造头）；e2e 8/8（live 渲染/矩阵/回落/errBar/零 pageerror）。
+- **踩坑**：mode_service 存在类式与模块级函数式两种形态（zy/zk/zd/qr70 为函数式）——_load_service 双形态适配（先 import_module 整路径再类式拆解）。
+- **后续**：生产部署（后端 3 文件+白名单+2 前端文件，随下次部署通道）；观察期巡检可追加 arch snapshot 采集。

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>竹智·Arch-Agent 架构态势</title>
+<link rel="stylesheet" href="css/style.css">
+<style>
+.arch-hero{display:flex;align-items:center;gap:16px;padding:20px;border:1px solid var(--color-border,#e5e5e5);border-radius:12px;background:var(--color-bg,#fafafa);margin:16px 0}
+.arch-emoji{font-size:44px}
+.arch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin:14px 0}
+.arch-card{border:1px solid var(--color-border,#e5e5e5);border-radius:8px;padding:12px;background:var(--color-bg,#fff)}
+.arch-card .m{font-size:13px;color:var(--color-text-main,#333)}
+.arch-card .l{font-size:12px;color:var(--color-muted,#8a8a8a);margin-top:2px}
+.stat-row{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0}
+.stat{border:1px solid var(--color-border,#e5e5e5);border-radius:8px;padding:10px 16px;min-width:110px}
+.stat b{font-size:22px;display:block}
+.stat span{font-size:12px;color:var(--color-muted,#8a8a8a)}
+</style>
+</head>
+<body>
+<header class="dash-header"><h1>竹智 · Arch-Agent 架构态势</h1>
+  <div><span id="lastUpdate">--</span> <button class="btn" onclick="load()">手动刷新</button></div>
+</header>
+<div id="errBar" style="display:none;color:var(--color-danger,#c0392b);padding:8px 0"></div>
+<div class="arch-hero"><span class="arch-emoji" id="bambooEmoji">--</span>
+  <div><b id="bambooLabel" style="font-size:20px">加载中…</b>
+    <div id="bambooDesc" style="color:var(--color-muted,#8a8a8a)"></div></div>
+</div>
+<div class="stat-row">
+  <div class="stat"><b id="stTotal">--</b><span>模块总数</span></div>
+  <div class="stat"><b id="stHealthy">--</b><span>健康</span></div>
+  <div class="stat"><b id="stDegraded">--</b><span>降级/离线</span></div>
+  <div class="stat"><b id="stPaused">--</b><span>护栏暂停</span></div>
+</div>
+<h3>模块矩阵</h3>
+<div class="arch-grid" id="moduleGrid"></div>
+<footer style="color:var(--color-text-faint,#aaa);font-size:12px;margin:20px 0">
+  竹智 MVP 只读汇聚 23 个模块灰度态 · 数据源 /api/arch/observe · admin 详情 /api/arch/status</footer>
+<script src="js/arch-dashboard.js"></script>
+</body>
+</html>

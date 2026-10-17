@@ -124,6 +124,9 @@ PUBLIC_EXACT = {
     "/api/search-ai/feedback",
     # 智搜隐式转化回流(P2): 动作卡点击正样本, 红线同上
     "/api/search-ai/action-click",
+    # 竹智·Arch-Agent 架构大脑观测面(态势+竹林隐喻态, 游客可查——
+    # 对齐 zyh/synapse/zjian 公开 GET 范式; admin 详情仍走 JWT)
+    "/api/arch/observe",
 }
 
 # 公开前缀(仅 GET): 游客浏览类接口
