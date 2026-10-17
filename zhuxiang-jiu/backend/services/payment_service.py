@@ -755,6 +755,32 @@ class PaymentService:
                 )
             if order["status"] == PAY_STATUS_CLOSED:
                 return {"success": True, "payNo": pay_no, "idempotent": True}
+            # 渠道侧先查后关(2026-10-17 六件套补全): alipay/huabei
+            # 渠道已支付 → 拒关并经幂等链补记; 未支付 → 渠道关单
+            # (fail-soft: 无凭证/渠道异常不阻断本地关单, 留痕即可)
+            if (order.get("payChannel") or "").lower() in ("alipay", "huabei"):
+                try:
+                    from services.pay_gateway_service import (
+                        AlipayGateway, _default_http_post)
+                    gw = AlipayGateway(_default_http_post)
+                    q = await gw.trade_query(pay_no)
+                    if q["paid"]:
+                        # 已支付拒关——不在本锁内调 pay_callback(同锁
+                        # 重入死锁), 由查询端点/异步通知补记状态
+                        raise ValueError(
+                            "渠道已支付, 不可关闭(请经支付查询端点"
+                            "同步支付状态)")
+                    try:
+                        await gw.trade_close(pay_no)
+                    except Exception as e:
+                        logger.warning("payment_channel_close_skip payNo=%s"
+                                       " err=%s", pay_no, e)
+                except ValueError:
+                    raise
+                except Exception as e:
+                    logger.warning("payment_channel_query_skip payNo=%s"
+                                   " err=%s(渠道侧跳过, 走本地关单)",
+                                   pay_no, e)
             await self.repo.update_order_fields(pay_no, {
                 "status": PAY_STATUS_CLOSED,
                 "failReason": reason,
@@ -921,8 +947,15 @@ class PaymentService:
 
             if decision == "approved":
                 new_status = REFUND_STATUS_APPROVED
-                # 触发渠道退款(实际场景: 调用渠道退款 API)
-                # 这里仅更新状态, 渠道退款通过 refund_callback 异步完成
+                # 渠道退款执行(2026-10-17 AI 网页应用收款六件套补全):
+                # alipay/huabei 走 alipay.trade.refund——先渠道后落状态,
+                # 失败 raise 管理员可重审(状态仍 pending);
+                # fund_change=Y 经幂等链标 refunded, 落状态与之对齐
+                if refund.get("refundChannel") in ("alipay", "huabei"):
+                    r = await self._execute_alipay_refund(refund)
+                    if r.get("refunded"):
+                        new_status = REFUND_STATUS_REFUNDED
+                # 其他渠道: 仅更新状态, 渠道退款通过 refund_callback 异步完成
             else:
                 new_status = REFUND_STATUS_REJECTED
                 # 退款被拒, 支付单状态回退: refunding → paid
@@ -958,6 +991,82 @@ class PaymentService:
                 "statusName": REFUND_STATUS_NAMES[new_status],
                 "auditor": auditor,
             }
+
+    async def _execute_alipay_refund(self, refund: dict) -> dict:
+        """支付宝渠道退款执行(alipay.trade.refund):
+
+        - fund_change=Y → 复用 refund_callback 幂等链标记已退款
+        - 受理但 fund_change=N → 返回待确认(可经退款查询核实)
+        - 渠道异常 → 冒泡(审核状态未落, 管理员重审;
+          幂等保证: out_request_no=refundNo 恒定, 重试不重复退款)
+        """
+        from services.pay_gateway_service import (
+            AlipayGateway, _default_http_post)
+        gw = AlipayGateway(_default_http_post)
+        r = await gw.trade_refund(
+            refund["payNo"], float(refund["refundAmount"]),
+            out_request_no=refund["refundNo"],
+            reason=refund.get("refundReason") or "")
+        if r["fundChanged"]:
+            await self.refund_callback(
+                refund["refundNo"], r["raw"], refund["refundNo"])
+            return {"refunded": True}
+        logger.info("refund_channel_pending refundNo=%s "
+                    "fund_change=N(已受理待确认)",
+                    refund["refundNo"])
+        return {"refunded": False}
+
+    async def query_refund_channel(self, refund_no: str) -> dict:
+        """渠道侧退款查询(alipay.trade.fastpay.refund.query):
+        REFUND_SUCCESS 时经幂等链落已退款"""
+        refund = await self.repo.get_refund(refund_no)
+        if not refund:
+            raise KeyError(f"退款单 {refund_no} 不存在")
+        if refund.get("refundChannel") not in ("alipay", "huabei"):
+            raise ValueError("仅支持 alipay/huabei 渠道退款查询")
+        from services.pay_gateway_service import (
+            AlipayGateway, _default_http_post)
+        r = await AlipayGateway(_default_http_post).refund_query(
+            refund["payNo"], out_request_no=refund["refundNo"])
+        if r["refundSuccess"] and refund["status"] != REFUND_STATUS_REFUNDED:
+            await self.refund_callback(
+                refund_no, r["raw"], refund_no)
+        return {"success": True, "refundNo": refund_no,
+                "refundStatus": r["refundStatus"],
+                "refundSuccess": r["refundSuccess"],
+                "refundAmount": r["refundAmount"]}
+
+    async def query_pay(self, pay_no: str) -> dict:
+        """主动渠道查询(契约兜底: 未收通知/状态未知时确认支付结果)。
+
+        alipay/huabei → alipay.trade.query; 渠道已支付而本地未支付时
+        经 pay_callback 幂等链补记; 其余渠道返回本地状态。
+        """
+        order = await self.repo.get_order(pay_no)
+        if not order:
+            raise KeyError(f"支付单 {pay_no} 不存在")
+        channel = (order.get("payChannel") or "").lower()
+        if channel not in ("alipay", "huabei"):
+            return {"success": True, "payNo": pay_no,
+                    "channel": channel, "channelQueried": False,
+                    "status": order["status"],
+                    "statusName": PAY_STATUS_NAMES.get(order["status"])}
+        from services.pay_gateway_service import (
+            AlipayGateway, _default_http_post)
+        r = await AlipayGateway(_default_http_post).trade_query(pay_no)
+        synced = False
+        if r["paid"] and order["status"] != PAY_STATUS_PAID:
+            await self.pay_callback(r["tradeNo"], r["raw"], pay_no)
+            synced = True
+        return {"success": True, "payNo": pay_no, "channel": channel,
+                "channelQueried": True, "channelState": r["state"],
+                "tradeStatus": r["tradeStatus"], "tradeNo": r["tradeNo"],
+                "synced": synced,
+                "status": (PAY_STATUS_PAID if r["paid"]
+                           else order["status"]),
+                "statusName": (PAY_STATUS_NAMES.get(PAY_STATUS_PAID)
+                               if r["paid"]
+                               else PAY_STATUS_NAMES.get(order["status"]))}
 
     async def refund_callback(self, channel_refund_no: str,
                                 callback_content: dict,

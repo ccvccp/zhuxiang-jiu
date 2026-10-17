@@ -217,8 +217,9 @@ class AlipayGateway:
                 "private_key": _load_private_key("PAY60_ALIPAY_PRIVATE_KEY")}
 
     def _signed_params(self, method: str, biz_content: dict,
-                       notify_url: str) -> dict:
-        """构造 RSA2 签名请求参数(参数升序拼接 & 排除 sign/sign_type)"""
+                       notify_url: str, return_url: str = "") -> dict:
+        """构造 RSA2 签名请求参数(参数升序拼接 & 排除 sign/sign_type;
+        notify_url/return_url 空值不入参——公共参数缺省须整键省略)"""
         params = {
             "app_id": self._credentials()["app_id"],
             "method": method,
@@ -227,9 +228,12 @@ class AlipayGateway:
             "sign_type": "RSA2",
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "version": "1.0",
-            "notify_url": notify_url,
             "biz_content": json.dumps(biz_content, ensure_ascii=False),
         }
+        if notify_url:
+            params["notify_url"] = notify_url
+        if return_url:
+            params["return_url"] = return_url
         plain = "&".join(
             f"{k}={params[k]}" for k in sorted(params)
             if params[k] != "" and k not in ("sign", "sign_type"))
@@ -264,7 +268,7 @@ class AlipayGateway:
             params = self._signed_params("alipay.trade.page.pay", {
                 "out_trade_no": out_trade_no, "total_amount": amount,
                 "subject": subject, "product_code": "FAST_INSTANT_TRADE_PAY",
-            }, notify_url)
+            }, notify_url, return_url=_env("PAY60_ALIPAY_RETURN_URL"))
             # B10: 同上, 参数需 URL 编码后拼接
             pay_url = ALIPAY_GATEWAY + "?" + urlencode(
                 {k: params[k] for k in sorted(params)})
@@ -286,6 +290,82 @@ class AlipayGateway:
             return {"prepay": {"gateway": "alipay", "method": "qr"},
                     "payParams": {"qrCode": qr}}
         raise ValueError(f"支付宝不支持该方式: {method}(仅 wap/page/qr)")
+
+    # ============================================================
+    # 渠道侧交易操作(AI 网页应用收款六件套补全, 2026-10-17):
+    # 查询/退款/退款查询/关闭——与下单共用 RSA2 签名链
+    # ============================================================
+
+    async def _post_signed(self, method: str, biz: dict) -> dict:
+        """签名 POST 网关, 返回业务响应体(alipay_xxx_response)"""
+        params = self._signed_params(method, biz, notify_url="")
+        status, resp = await self._http_post(
+            ALIPAY_GATEWAY, form=params, headers={})
+        resp = resp if isinstance(resp, dict) else {}
+        if status != 200:
+            raise ValueError(
+                f"支付宝网关 HTTP {status}: {str(resp)[:200]}")
+        return resp.get(method.replace(".", "_") + "_response", {})
+
+    async def trade_query(self, out_trade_no: str) -> dict:
+        """alipay.trade.query(契约: 调用成功≠支付成功, 状态显式映射)"""
+        body = await self._post_signed("alipay.trade.query", {
+            "out_trade_no": out_trade_no})
+        if body.get("code") != "10000":
+            raise ValueError(f"支付宝查询失败: {body.get('sub_code')} "
+                             f"{body.get('sub_msg')}")
+        status = body.get("trade_status") or ""
+        return {
+            "tradeStatus": status,
+            "paid": status in ("TRADE_SUCCESS", "TRADE_FINISHED"),
+            "state": {"TRADE_SUCCESS": "PAID",
+                      "TRADE_FINISHED": "PAID",
+                      "WAIT_BUYER_PAY": "PENDING_PAYMENT",
+                      "TRADE_CLOSED": "CLOSED"}.get(status, "UNKNOWN"),
+            "tradeNo": body.get("trade_no", ""),
+            "totalAmount": body.get("total_amount", ""),
+            "raw": body,
+        }
+
+    async def trade_close(self, out_trade_no: str) -> bool:
+        """alipay.trade.close(未付款关单; 渠道侧无可关交易返回 False)"""
+        body = await self._post_signed("alipay.trade.close", {
+            "out_trade_no": out_trade_no})
+        return body.get("code") == "10000"
+
+    async def trade_refund(self, out_trade_no: str, refund_amount: float,
+                           out_request_no: str, reason: str = "") -> dict:
+        """alipay.trade.refund(code=10000 仅受理; fund_change=Y 才资金变动;
+        同一退款重试必须复用原 out_request_no)"""
+        biz = {"out_trade_no": out_trade_no,
+               "refund_amount": f"{float(refund_amount):.2f}",
+               "out_request_no": out_request_no}
+        if reason:
+            biz["refund_reason"] = reason
+        body = await self._post_signed("alipay.trade.refund", biz)
+        if body.get("code") != "10000":
+            raise ValueError(f"支付宝退款失败: {body.get('sub_code')} "
+                             f"{body.get('sub_msg')}")
+        return {"accepted": True,
+                "fundChanged": body.get("fund_change") == "Y",
+                "refundFee": body.get("refund_fee", ""),
+                "raw": body}
+
+    async def refund_query(self, out_trade_no: str,
+                           out_request_no: str) -> dict:
+        """alipay.trade.fastpay.refund.query(退款结果不确定时确认,
+        建议距退款请求 ≥10s)"""
+        body = await self._post_signed("alipay.trade.fastpay.refund.query", {
+            "out_trade_no": out_trade_no,
+            "out_request_no": out_request_no})
+        if body.get("code") != "10000":
+            raise ValueError(
+                f"支付宝退款查询失败: {body.get('sub_code')}")
+        return {"refundSuccess":
+                    body.get("refund_status") == "REFUND_SUCCESS",
+                "refundStatus": body.get("refund_status") or "",
+                "refundAmount": body.get("refund_amount", ""),
+                "raw": body}
 
 
 class HuabeiGateway(AlipayGateway):

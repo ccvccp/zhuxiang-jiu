@@ -103,6 +103,9 @@ PUBLIC_EXACT = {
     "/api/payment/callback/pay",      # 支付回调(资金链路)
     "/api/payment/callback/refund",   # 退款回调
     "/api/payment/callback/payout",   # 付款回调
+    "/api/payment/return",            # 支付宝同步回跳结果页(浏览器
+                                      # 跳转无 JWT; 安全性由 RSA2 验签
+                                      # + 服务端查询确认, 2026-10-17)
     "/api/logistics/callback/track",  # 物流轨迹回调
     # 健康检查探针: decision/health 为真存活探针(路由无门控, 匿名 200)
     # 注意: monitor/maintenance 两端点系"AI监控/维护模块"的管理员业务

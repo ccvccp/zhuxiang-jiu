@@ -33,7 +33,7 @@ import logging
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel as PydBaseModel, Field
 
 from services.payment_service import PaymentService
@@ -360,7 +360,11 @@ async def close_pay(
     x_member_id: str | None = Header(None, alias="X-Member-Id"),
     x_role: str | None = Header(None, alias="X-Role"),
 ):
-    """关闭支付单(待支付/支付中 → 已关闭; 归属会员/admin, 游客单凭单号)"""
+    """关闭支付单(待支付/支付中 → 已关闭; 归属会员/admin, 游客单凭单号)
+
+    alipay/huabei 渠道先查后关(2026-10-17 六件套补全): 渠道已支付
+    拒关(409), 未支付同步 alipay.trade.close(渠道侧跳过不阻断本地)。
+    """
     try:
         pay = await _service.get_pay(pay_no)
     except KeyError as e:
@@ -372,6 +376,99 @@ async def close_pay(
         raise _map_key_error(e) from e
     except ValueError as e:
         raise _map_value_error(e) from e
+
+
+@router.get("/api/payment/{pay_no}/query", tags=["收款管理"])
+async def query_pay(
+    pay_no: str,
+    x_member_id: str | None = Header(None, alias="X-Member-Id"),
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """主动渠道支付查询(未收通知/状态未知时的契约兜底; 归属会员/admin)
+
+    alipay/huabei → alipay.trade.query; 渠道已支付而本地未支付时
+    经幂等链补记(TRADE_SUCCESS/TRADE_FINISHED → 已支付)。
+    """
+    try:
+        pay = await _service.get_pay(pay_no)
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    _check_pay_access(pay, x_member_id, x_role)
+    try:
+        return {"code": 0, "data": await _service.query_pay(pay_no)}
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+@router.post("/api/payment/refunds/{refund_no}/channel-query",
+             tags=["收款管理"])
+async def refund_channel_query(
+    refund_no: str,
+    x_role: str | None = Header(None, alias="X-Role"),
+):
+    """渠道侧退款查询(admin; alipay/huabei 经 fastpay.refund.query,
+    REFUND_SUCCESS 时幂等落已退款——fund_change=N 受理单的确认入口)"""
+    if (x_role or "").strip().lower() != "admin":
+        raise HTTPException(status_code=403, detail="admin only")
+    try:
+        return {"code": 0,
+                "data": await _service.query_refund_channel(refund_no)}
+    except KeyError as e:
+        raise _map_key_error(e) from e
+    except ValueError as e:
+        raise _map_value_error(e) from e
+
+
+_RETURN_PAGE = """<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>支付结果</title></head>
+<body style="font-family:system-ui,sans-serif;background:#faf9f5;
+display:flex;align-items:center;justify-content:center;min-height:100vh;
+margin:0">
+<div style="text-align:center;padding:40px 28px;background:#fff;
+border:1px solid #e8e6dc;border-radius:14px;max-width:420px">
+<div style="font-size:40px">{icon}</div>
+<h2 style="font-size:20px;margin:14px 0 8px">{title}</h2>
+<p style="color:#6b6a63;font-size:14px;line-height:1.7;margin:0">{detail}</p>
+</div></body></html>"""
+
+
+@router.get("/api/payment/return", tags=["收款管理"])
+async def alipay_return(request: Request):
+    """支付宝同步回跳结果页(page.pay return_url, 2026-10-17 六件套补全)
+
+    回跳参数先 RSA2 验签, 再经服务端 alipay.trade.query 确认最终结果
+    ——同步参数本身不作为支付成功依据; 无参数/验签失败渲染中性安全页。
+    """
+    params = dict(request.query_params)
+    verified = False
+    if params.get("sign"):
+        try:
+            verify_alipay_callback(params)
+            verified = True
+        except CallbackVerificationError:
+            verified = False
+    status_line = "正在确认支付结果，请稍候在订单页查看最终状态。"
+    icon, title = "&#8987;", "支付结果确认中"
+    if verified:
+        out_trade_no = params.get("out_trade_no") or ""
+        try:
+            q = await _service.query_pay(out_trade_no)
+            if q.get("statusName"):
+                icon = "&#9989;"
+                title = f"支付状态: {q['statusName']}"
+                status_line = (
+                    f"订单 {out_trade_no} 当前状态: {q['statusName']}"
+                    + ("（已按渠道结果同步）" if q.get("synced") else ""))
+        except Exception:
+            pass
+    html = (_RETURN_PAGE.replace("{icon}", icon)
+            .replace("{title}", title)
+            .replace("{detail}", status_line))
+    return HTMLResponse(content=html)
 
 
 @router.post("/api/payment/callback/pay", tags=["收款管理"])
