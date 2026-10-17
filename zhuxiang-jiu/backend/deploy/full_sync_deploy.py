@@ -29,9 +29,10 @@ HOST = "root@47.236.61.117"
 REMOTE_BACKEND = "/opt/zhuxiang/zhuxiang-jiu/backend"
 BACKUP_DIR = "/opt/zhuxiang/backup"
 
-# 打包排除(本地测试依赖/缓存/二进制资产, 与 2026-10-18 对齐口径一致)
+# 打包排除(本地测试依赖/缓存/二进制资产/开发机渲染产物, 口径一致)
 TAR_EXCLUDES = [".deps", ".pip_libs", ".git", "__pycache__",
-                ".pytest_cache", "assets", "*.tar.gz", "*.log"]
+                ".pytest_cache", "assets", "sv73_videos",
+                "*.tar.gz", "*.log"]
 
 
 def run(cmd: list[str] | str, shell: bool = False,
