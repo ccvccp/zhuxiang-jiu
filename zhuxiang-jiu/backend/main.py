@@ -461,6 +461,12 @@ register_nexus74_routes(app)
 from routes.douyin_routes import register_douyin_routes
 register_douyin_routes(app)
 
+# 合规引流钩子Agent(86号 P0, 2026-10-18 外部方案甄别落地:
+# 真缺口=C端留资表+用户级24h频控+渠道码归因; 意图/合规闸/Agent
+# 编排复用既有件; 载体=小程序竹香酒馆 webview 内 H5)
+from routes.hook86_routes import register_hook86_routes
+register_hook86_routes(app)
+
 # 小竹合规引擎运营后台(2026-10-04 用户方案二期: 规则CRUD/
 # 白名单豁免/命中打标闭环/发布热更/测试沙箱)
 from routes.guardrail_admin_routes import (

@@ -70,6 +70,12 @@ PUBLIC_EXACT = {
     "/api/member/login",
     "/api/member/register",
     "/api/member/login/bonus",
+    # 合规引流钩子Agent(86号): 匿名访客面(小程序竹香酒馆 webview 内
+    # H5)——chat 意图对话/lead 留资本身无敏感读操作, 路由层自带
+    # 合规闸(输入/输出双向)+手机号校验+24h≤2次频控; 恶意刷量由
+    # 前置 security_gateway 威胁闸兜底(chat 为纯规则引擎, 零 LLM)
+    "/api/hook86/chat",
+    "/api/hook86/lead",
     # 后台管理登录
     "/api/admin/login",
     # AI智能网站入口管理模块(39号): 入口预判/统一登录/注册/
@@ -150,6 +156,8 @@ PUBLIC_GET_PREFIXES = (
     "/api/v1/memberships/plans",    # 76号: 超级会员套餐表(GET 公开;
                                     # grant/revoke POST 走登录+admin)
     "/api/activity/list",           # 活动列表
+    "/api/hook86/status",           # 86号: 模块诊断(无敏感数据;
+                                    # /leads /channels 走登录+admin)
     "/api/activity/stats/",         # 活动统计
     "/api/activity/leaderboard/",   # 擂台榜单
     "/api/promo-cover/",            # 36号笔记封面品牌卡片(确定性
