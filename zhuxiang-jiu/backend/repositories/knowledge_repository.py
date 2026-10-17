@@ -244,7 +244,11 @@ class KnowledgeRepository:
 
     async def list_entries(self, status: str = None, category: str = None,
                            source: str = None, limit: int = 100) -> list[dict]:
-        """查询条目(支持状态/分类/来源筛选, 按创建时间倒序)"""
+        """查询条目(支持状态/分类/来源筛选, 按创建时间倒序)
+
+        limit<=0 返回全量(统计/重建场景); 2026-10-17 修复: 去掉
+        redis 侧 ids 无序采样截断(超限随机丢条目致计数失真),
+        排序在全部命中条目上做后再截断"""
         if is_redis_mode():
             client = await get_redis_client()
             if status:
@@ -253,7 +257,7 @@ class KnowledgeRepository:
             else:
                 ids = await client.smembers(_k("knowledge", "entry", "index"))
             entries = []
-            for eid in list(ids)[:SEARCH_SCAN_LIMIT]:
+            for eid in ids:
                 raw = await client.get(_k("knowledge", "entry", int(eid)))
                 if raw:
                     entries.append(json.loads(raw))
@@ -267,7 +271,7 @@ class KnowledgeRepository:
         if source:
             entries = [e for e in entries if e.get("source") == source]
         entries.sort(key=lambda e: (e.get("createdAt") or ""), reverse=True)
-        return entries[:limit]
+        return entries if not limit or limit <= 0 else entries[:limit]
 
     async def transition_status(self, entry_id: int, old_status: str,
                                  new_status: str) -> None:
@@ -597,7 +601,7 @@ class KnowledgeRepository:
         return self.store["knowledge_gaps"].get(gap_id)
 
     async def list_gaps(self, status: str = None, limit: int = 100) -> list[dict]:
-        """查询缺口队列(按提问次数倒序)"""
+        """查询缺口队列(按提问次数倒序; limit<=0 全量)"""
         if is_redis_mode():
             client = await get_redis_client()
             if status:
@@ -617,7 +621,7 @@ class KnowledgeRepository:
                 gaps = [g for g in gaps if g.get("status") == status]
         gaps.sort(key=lambda g: (-int(g.get("askCount", 1)),
                                  g.get("createdAt") or ""))
-        return gaps[:limit]
+        return gaps if not limit or limit <= 0 else gaps[:limit]
 
     # ============================================================
     # 教学会话(P1: 对话式教学)
@@ -772,8 +776,8 @@ class KnowledgeRepository:
     # ============================================================
 
     async def stats(self) -> dict:
-        """知识库统计概览"""
-        entries = await self.list_entries(limit=SEARCH_SCAN_LIMIT)
+        """知识库统计概览(limit=0 全量——totalEntries 计数不失真)"""
+        entries = await self.list_entries(limit=0)
         by_status = {}
         by_source = {}
         hits = misses = 0
@@ -783,7 +787,7 @@ class KnowledgeRepository:
                 by_source.get(e.get("source", SOURCE_MANUAL), 0) + 1
             hits += int(e.get("hitCount", 0))
             misses += int(e.get("missCount", 0))
-        gaps = await self.list_gaps(limit=SEARCH_SCAN_LIMIT)
+        gaps = await self.list_gaps(limit=0)
         open_gaps = [g for g in gaps if g["status"] == GAP_STATUS_OPEN]
         total_q = hits + misses
         return {
