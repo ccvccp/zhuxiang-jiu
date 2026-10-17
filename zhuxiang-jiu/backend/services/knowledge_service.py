@@ -22,6 +22,7 @@
     - ValueError → 409(状态非法/参数非法/违禁词/重复知识等)
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -728,17 +729,22 @@ class KnowledgeService:
                 "以上信息仅供参考, 如需人工服务可联系在线客服。")
 
     @staticmethod
-    def _rag_llm_synthesize(question: str, hits: list[dict]) -> str | None:
+    def _rag_llm_synthesize(question: str, hits: list[dict],
+                            persona_system: str | None = None) -> str | None:
         """llm 轨融合生成(P3.3): top-k 条目为上下文让大模型合成答案
 
         幻觉治理: system prompt 限定仅依据给定资料回答, 不编造;
         失败返回 None(调用方回退 rule 轨 _rag_synthesize)。
+        竹韵 V0.5: persona_system 非空时作为前缀注入(人格=风格层,
+        幻觉治理=事实层, 两层兼容; None=既有行为零变化)。
         """
         from services.llm_client import provider_client
         context = "\n".join(
             f"[{i}] 问题: {h['question']}\n    内容: {h['answer']}"
             for i, h in enumerate(hits, start=1))
-        system = ("你是知识库问答助手。仅依据给定的编号资料回答用户问题, "
+        prefix = f"{persona_system}\n\n" if persona_system else ""
+        system = (prefix
+                  + "你是知识库问答助手。仅依据给定的编号资料回答用户问题, "
                   "回答开头用 [编号] 标注引用的资料(如 [1]), "
                   "不得编造资料以外的信息; 若资料不足以回答请如实说明。")
         user = (f"参考资料:\n{context}\n\n用户问题: {question}\n"
@@ -963,7 +969,8 @@ class KnowledgeService:
 
     async def rag_answer(self, question: str,
                           provider: str = "rule",
-                          category: str = None) -> dict:
+                          category: str = None,
+                          persona_system: str | None = None) -> dict:
         """RAG 问答(P3.1, D-18): 检索增强问答统一入口
 
         L3 category 专属检索(直播等消费方): category 非空时检索范围
@@ -1012,16 +1019,23 @@ class KnowledgeService:
         # L3: 缓存 key 加 category 维度——同问题不同类答案不同,
         # 防跨类污染; category=None 维持旧 key 形态 "{question}|{provider}",
         # 既有缓存命中不受影响
+        # 竹韵 V0.5: persona_system 维度入 key(同问不同人格/场景两答);
+        # persona 为 None 时维持旧形态(既有命中零影响)
         from core.metrics import rag_cache_hits_total
         cache = _CACHES["result"]
-        key = (f"{question}|{provider}|{category}" if category
-               else f"{question}|{provider}")
+        persona_tag = ""
+        if persona_system:
+            persona_tag = "|" + hashlib.sha1(
+                persona_system.encode("utf-8")).hexdigest()[:8]
+        key = (f"{question}|{provider}|{category}{persona_tag}" if category
+               else f"{question}|{provider}{persona_tag}")
         cached = cache.get(key)
         if cached is not None and cached[0] > time.time():
             rag_cache_hits_total.inc({"layer": "result", "hit": "yes"})
             return cached[1]
         result = await self._rag_answer_uncached(question, provider,
-                                                 category)
+                                                 category,
+                                                 persona_system)
         cache[key] = (time.time() + KnowledgeService._RESULT_CACHE_TTL,
                       result)
         if len(cache) > KnowledgeService._RESULT_CACHE_MAX:
@@ -1057,7 +1071,9 @@ class KnowledgeService:
 
     async def _rag_answer_uncached(self, question: str,
                                     provider: str,
-                                    category: str = None) -> dict:
+                                    category: str = None,
+                                    persona_system: str | None = None
+                                    ) -> dict:
         """RAG 问答主链路(rag_answer 的无缓存实现)
 
         L3: category 非空时先按该类检索; 该类零命中自动回退全库
@@ -1126,7 +1142,8 @@ class KnowledgeService:
                                                   category_fallback)
                 logger.info("knowledge_dual_fallback_single_track")
             if provider == "llm":
-                answer = self._rag_llm_synthesize(question, hits)
+                answer = self._rag_llm_synthesize(
+                    question, hits, persona_system)
                 if answer is None:
                     logger.info(
                         "knowledge_rag_llm_fallback_rule_synthesize")

@@ -25,6 +25,7 @@
 
 import contextlib
 import logging
+from datetime import datetime
 
 from core.locks import get_lock
 from core.helpers import ts
@@ -45,6 +46,8 @@ from services.ai_scoring_ext_service import MessageContentScorer
 from services.knowledge_service import KnowledgeService
 # P3 三态灰度(LLM 轨 off/shadow/assist + 护栏)
 from services.chat_mode_service import ChatModeService
+# 竹韵 V0.5 人格层(关怀护栏/场景注入/LLM 轨 system 前缀)
+from services.zhuyun_persona import care_gate, detect_scene, build_system
 
 SENSITIVE_WORDS = MessageContentScorer.SENSITIVE_WORDS
 
@@ -764,8 +767,32 @@ class ChatService:
         - assist: LLM 轨(未配置 key/失败自动回退 rule 轨, 行为同 off)
                   旧 KNOWLEDGE_CHAT_LLM=on 映射为 assist(兼容)。
 
+        竹韵 V0.5 编排(先于轨道):
+        1. care_gate 关怀护栏——借酒消愁类意图直接返回关怀回复
+           (ragMode=zhuyun_care), 绝不推酒, 含 shadow 期同样前置;
+        2. detect_scene 确定性场景(深夜/送礼/客诉) + 竹韵人格基座
+           → persona_system 注入 LLM 轨(rule 轨不受影响);
+        3. 结果附 zhuyun 元数据(scene/persona)供观测。
+
         RAG unsolved 或新库异常不阻断对话(best-effort 降级旧库)。
         """
+        # 竹韵 V0.5 ①关怀护栏(先于一切轨道——含 shadow 留痕)
+        care = care_gate(user_content)
+        if care:
+            return {"id": None, "answer": care, "citations": [],
+                    "confidence": 1.0, "ragMode": "zhuyun_care",
+                    "zhuyun": {"scene": "care", "persona": False}}
+
+        # 竹韵 V0.5 ②场景判定(确定性) + 人格 system 组装
+        scene = detect_scene(user_content, datetime.now().hour)
+        persona_system = build_system(scene) or None
+
+        def _zhuyun_meta(k: dict) -> dict:
+            if isinstance(k, dict):
+                k.setdefault("zhuyun", {"scene": scene,
+                                        "persona": persona_system is not None})
+            return k
+
         mode = (await self.mode_svc.current_mode())["mode"]
         provider = "llm" if mode == "assist" else "rule"
 
@@ -789,10 +816,12 @@ class ChatService:
             if knowledge is None:
                 legacy = await self.repo.search_knowledge(user_content, limit=1)
                 knowledge = legacy[0] if legacy else None
-            # best-effort LLM 留痕(失败静默——影子对比不阻断主流程)
+            # best-effort LLM 留痕(失败静默——影子对比不阻断主流程);
+            # 竹韵人格注入 LLM 留痕轨(审计人格质量)
             try:
                 llm_rag = await self.knowledge_svc.rag_answer(
-                    user_content, provider="llm")
+                    user_content, provider="llm",
+                    persona_system=persona_system)
                 if llm_rag.get("answer") and knowledge is not None:
                     knowledge["shadowLlm"] = {
                         "answer": llm_rag["answer"],
@@ -802,18 +831,19 @@ class ChatService:
                     }
             except Exception:
                 pass
-            return knowledge
+            return _zhuyun_meta(knowledge)
 
         try:
             rag = await self.knowledge_svc.rag_answer(
-                user_content, provider=provider)
+                user_content, provider=provider,
+                persona_system=persona_system)
             if rag["mode"] != "unsolved" and rag["answer"]:
-                return _rag_to_knowledge(rag)
+                return _zhuyun_meta(_rag_to_knowledge(rag))
         except Exception:
             pass
-        # 旧 FAQ 兜底(迁移过渡期)
+        # 旧 FAQ 兜底(迁移过渡期; 旧库无 LLM 轨, 人格不生效)
         legacy = await self.repo.search_knowledge(user_content, limit=1)
-        return legacy[0] if legacy else None
+        return _zhuyun_meta(legacy[0] if legacy else None)
 
     async def _record_knowledge_gap(self, user_content: str,
                                      session_id: str) -> None:

@@ -110,7 +110,12 @@ var AIHubWidget = (function () {
         try {
             var sid = await ensureSession();
             var msgs = (await apiJson('/api/chat/sessions/' + encodeURIComponent(sid) + '/messages?limit=50')) || [];
-            msgs.forEach(function (m) { appendMessage(m.senderType, m.content, null); });
+            msgs.forEach(function (m) {
+                /* 竹韵呈现层: 后端 rule 轨 system 欢迎语在挂件内跳过
+                   (本地已先行渲染竹韵开场, 仅显示层替换, 后端零变化) */
+                if (m.senderType === 'system' && m.content.indexOf('欢迎咨询') >= 0) return;
+                appendMessage(m.senderType, m.content, null);
+            });
         } catch (err) {
             appendMessage('system', '历史消息加载失败：' + err.message);
         }
@@ -520,9 +525,9 @@ var AIHubWidget = (function () {
         var root = document.createElement('div');
         root.id = 'hub-root';
         root.innerHTML =
-            '<button id="cw-fab" title="竹香AI 智能助手">🤖</button>' +
+            '<button id="cw-fab" title="竹韵 · 数字酿造师">🤖</button>' +
             '<div id="cw-panel">' +
-              '<div id="cw-head"><b>竹香AI<span id="cw-sub">智能中枢 · 语音/文字/图片多模态入口</span></b>' +
+              '<div id="cw-head"><b>竹韵<span id="cw-sub">数字酿造师 · 以竹为骨 以酒为魂 · 语音/文字/图片</span></b>' +
                 '<button onclick="AIHubWidget.transferHuman()">转人工</button>' +
                 '<button onclick="AIHubWidget.newSession()">新会话</button>' +
                 '<button onclick="AIHubWidget.toggle()">收起</button></div>' +
@@ -561,9 +566,11 @@ var AIHubWidget = (function () {
             panel.classList.add('show');
             fab.textContent = '✕';
             document.getElementById('cw-input').focus();
+            /* 竹韵开场先行渲染(loadHistory 会置 loaded, 须在其前判断;
+               后端 system 欢迎语由 loadHistory 呈现层跳过, 避免重复) */
+            if (!state.loaded) appendMessage('system', '您好，我是竹韵——竹香酒的数字酿造师。今日风清，想寻一杯怎样的滋味？文字、按住🎤说话、📷图片皆可～');
             loadHistory();
             probeHub();
-            if (!state.loaded) appendMessage('system', '您好，我是竹香AI助手。支持文字、按住🎤说话、📷图片多种方式提问～');
         } else {
             panel.classList.remove('show');
             fab.textContent = '🤖';
