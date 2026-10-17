@@ -1,11 +1,13 @@
-"""76/84 号·边更边锁+时长双档+复读机标题专项测试(2026-10-17)
+"""76/84 号·边更边锁+时长双档+标题/标签矩阵专项测试(2026-10-17)
 
-覆盖三批改动:
+覆盖四批改动:
     A. 76 号边更边锁: published_eps/public_view/release_episode 三态语义、
        episode_states 未放送集隐藏、create clamp、酒剧分批、checkpoint 守卫
-    B. 84 号时长双档: episode_length_plan 档位、_normalize_durations clamp、
-       rule 轨时长按档、score_series pacing 双档达标
-    C. 84 号登记: register_episode 标题复读机(goldenFinger 拼接)+#AI短剧 标签
+    B. 84 号时长双档: episode_length_plan 档位、_normalize_durations clamp
+       (含 30s 微档)、rule 轨时长按档、score_series pacing 双档达标
+    C. 84 号登记: register_episode 单集标题爽文钩(hook 四字前置)+
+       标签矩阵(#剧名三变体)+goldenFinger 拼接
+    D. 76 号卡点弹性: release 端点 free_episodes 动态调整(对标点众免费窗)
 
 运行: cd backend && python -m pytest test_drama_rolling_release.py -q
 """
@@ -205,11 +207,26 @@ class TestLengthDualBand:
         s = {"episodes": [
             {"ep": 1, "duration": 60},     # 长集低于下限 → 90
             {"ep": 2, "duration": 200},    # 短集超上限 → 90
+            {"ep": 2, "duration": 10},     # 微档下限内 → 拉回 30(微档)
             {"ep": 5, "duration": 0},      # 缺失 → 长档中值 120
-            {"ep": 6, "duration": None},   # 脏值 → 短档中值 67
+            {"ep": 6, "duration": None},   # 脏值 → 短档中值 60
         ]}
         Drama84ScriptService._normalize_durations(s)
-        assert [e["duration"] for e in s["episodes"]] == [90, 90, 120, 67]
+        assert [e["duration"] for e in s["episodes"]] == \
+            [90, 90, 30, 120, 60]
+
+    def test_micro_band_30s(self):
+        # 微档(2026-10-17 对标第四篇·滑州田影): lint 下限 45→30
+        def flaws_of(dur):
+            ep = {"ep": 2, "duration": dur,
+                  "beats": {k: "x" for k in
+                            ("hook", "twist", "cliffhanger")},
+                  "lines": [{"persona": "zhuxiaomei",
+                             "text": "ok"}] * 4}
+            return [f for f in d84.lint_series({"episodes": [ep]})
+                    if "时长" in f]
+        assert flaws_of(30) == []        # 30s 短集合法
+        assert flaws_of(29)              # 29s 仍越界
 
     def test_rule_series_durations_by_plan(self):
         svc = Drama84ScriptService()
@@ -228,13 +245,16 @@ class TestLengthDualBand:
             "episodes": [
                 {"ep": 1, "duration": 150},   # 长集达标(90-180)
                 {"ep": 2, "duration": 130},   # 短集超 120 → 不达标
+                {"ep": 2, "duration": 30},    # 微档 30s → 达标
+                {"ep": 3, "duration": 29},    # 低于微档下限 → 不达标
                 {"ep": 5, "duration": 150},   # 长集达标
             ]}, ensure_ascii=False), "utf-8")
         snap = asyncio.run(Drama84ScriptService().score_series(
             "d84_pacing", unlocks=0, online_days=1.0))
         pacing = next(f for f in snap["factors"]
                       if f["name"] == "pacing")
-        assert pacing["score"] == 66.7       # 2/3 达标
+        assert pacing["score"] == 60.0       # 3/5 达标
+        assert "短集30-120s" in pacing["detail"]
 
 
 # ============================================================
@@ -255,13 +275,16 @@ def d84_env(tmp_path, monkeypatch):
 
 class TestRegisterEpisodeTitle:
 
-    def test_title_appends_golden_finger(self, d84_env):
+    def test_title_hook_prefix_and_golden_finger(self, d84_env):
         svc, series, repo = d84_env
         content = asyncio.run(svc.register_episode(
             "d84_rr", 1, "https://v.zyjiu.com/t1.mp4", 120))
-        assert " | " in content["title"]
+        # 单集标题独立爽文钩(对标小乔剧院): hook 首四字+! 前置
+        # (rule 轨 ep1 hook="第1集: 囤货风波又起" → "囤货风波!")
+        assert content["title"].startswith("囤货风波!")
+        assert "竹香酒馆·囤货·第1集" in content["title"]
         assert series["goldenFinger"] in content["title"]
-        assert content["title"].startswith("竹香酒馆·囤货·第1集")
+        assert " | " in content["title"]
 
     def test_title_fallback_without_gf(self, d84_env, tmp_path):
         svc, series, _ = d84_env
@@ -271,13 +294,19 @@ class TestRegisterEpisodeTitle:
         content = asyncio.run(svc.register_episode(
             "d84_rr", 2, "https://v.zyjiu.com/t2.mp4", 70))
         assert " | " not in content["title"]
+        assert content["title"].endswith("转机")
 
-    def test_hashtags_carry_ai_tag(self, d84_env):
+    def test_hashtags_matrix(self, d84_env):
         svc, _, _ = d84_env
         content = asyncio.run(svc.register_episode(
             "d84_rr", 3, "https://v.zyjiu.com/t3.mp4", 70))
-        assert "#AI短剧" in content["hashtags"].split()
-        assert "#独白短剧" in content["hashtags"].split()
+        tags = content["hashtags"].split()
+        # 标签矩阵(对标滑州田影): #剧名三变体 + 两泛垂类
+        assert "#竹香酒馆·囤货" in tags
+        assert "#竹香酒馆·囤货短剧" in tags
+        assert "#竹香酒馆·囤货后续" in tags
+        assert "#独白短剧" in tags and "#AI短剧" in tags
+        assert len(tags) == 5
 
     def test_register_idempotent(self, d84_env):
         svc, _, _ = d84_env
@@ -286,3 +315,66 @@ class TestRegisterEpisodeTitle:
         c2 = asyncio.run(svc.register_episode(
             "d84_rr", 4, "https://v.zyjiu.com/t4.mp4", 70))
         assert c1["contentId"] == c2["contentId"]
+
+
+# ============================================================
+# D. 76 号卡点弹性(free_episodes 动态调整, 对标点众免费窗)
+# ============================================================
+
+class TestFreeEpisodesFlex:
+
+    def test_release_moves_checkpoint(self, env):
+        svc, _ = env
+        # 张力峰在第 4 集 → 免费窗 2→3 + 放送到 4: 卡点=第4集
+        d = asyncio.run(svc.release_episode(
+            "drama_rr", up_to=4, free_episodes=3))
+        assert d["free_episodes"] == 3
+        assert d["published_episodes"] == 4
+        eps = svc.episode_states(d)
+        cp = next(e for e in eps if e["is_checkpoint"])
+        assert cp["episode_number"] == 4
+        assert cp["status"] == "locked" and not cp["is_unlocked"]
+
+    def test_free_only_no_extra_release(self, env):
+        svc, _ = env
+        # 只调卡点不额外放送: up_to=当前 published
+        d = asyncio.run(svc.release_episode(
+            "drama_rr", up_to=2, free_episodes=1))
+        assert d["free_episodes"] == 1
+        assert d["published_episodes"] == 2
+
+    def test_free_bounds(self, env):
+        svc, _ = env
+        with pytest.raises(ValueError):   # 0: 无免费集
+            asyncio.run(svc.release_episode(
+                "drama_rr", up_to=2, free_episodes=0))
+        with pytest.raises(ValueError):   # =total: 无卡点集
+            asyncio.run(svc.release_episode(
+                "drama_rr", up_to=2, free_episodes=6))
+
+    def test_first_release_uses_new_free(self, env):
+        svc, _ = env
+        async def run():
+            await svc.create({**FUN6_BODY, "drama_id": "drama_rr4",
+                              "published_episodes": 0})
+            return await svc.release_episode(
+                "drama_rr4", free_episodes=4)
+        d = asyncio.run(run())
+        # 首次启用: 放送到新免费集数(4)而非旧值(2)
+        assert d["free_episodes"] == 4
+        assert d["published_episodes"] == 4
+
+    def test_release_route_with_free(self, client):
+        r = client.post("/api/v1/dramas/drama_rr/release",
+                        json={"up_to": 3, "free_episodes": 3},
+                        headers={"x-role": "admin"})
+        assert r.status_code == 200
+        body = r.json()["data"]
+        assert body["free_episodes"] == 3
+        assert body["published_episodes"] == 3
+
+    def test_release_route_free_invalid(self, client):
+        r = client.post("/api/v1/dramas/drama_rr/release",
+                        json={"up_to": 3, "free_episodes": 6},
+                        headers={"x-role": "admin"})
+        assert r.status_code == 409

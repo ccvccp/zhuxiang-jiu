@@ -187,17 +187,30 @@ class DramaSeriesService:
         return d
 
     async def release_episode(self, drama_id: str,
-                              up_to: int | None = None) -> dict:
+                              up_to: int | None = None,
+                              free_episodes: int | None = None
+                              ) -> dict:
         """放送分集(边更边锁·admin, 2026-10-17 对标懒趴趴):
         首周连发 3-4 集抢合集连续推荐窗口, published=0 首次
         调用放送到免费集数(启用分批); up_to 直接指定放送到第
-        几集(可回拨); 越界 ValueError"""
+        几集(可回拨); 越界 ValueError。
+        free_episodes(2026-10-17 对标第四篇·点众付费墙): 卡点
+        弹性调整——新剧首周观察张力峰后把免费窗 2-4 集动态挪位,
+        1<=free<total 越界 ValueError。"""
         self._ensure_table()
         drama = await self.repo._get(self.TABLE, drama_id)
         if not drama:
             raise KeyError(drama_id)
         total = len(drama.get("episodes") or [])
         pub = int(drama.get("published_episodes") or 0)
+        # 卡点弹性: 先落 free 再算放送(首次启用=放送到新免费集数;
+        # 只调卡点不额外放送 → up_to=当前 published 显式传入)
+        if free_episodes is not None:
+            free_episodes = int(free_episodes)
+            if not (1 <= free_episodes < total):
+                raise ValueError(
+                    f"free_episodes 越界(1-{total - 1}, 须小于总集数)")
+            drama["free_episodes"] = free_episodes
         # up_to None: 首次启用放送到免费集数, 否则放送下一集
         pub = (max(int(drama.get("free_episodes") or 0), 1)
                if pub <= 0 else pub + 1) \
@@ -207,8 +220,9 @@ class DramaSeriesService:
         drama["published_episodes"] = pub
         drama["updated_at"] = _now()
         await self.repo._save(self.TABLE, drama_id, drama)
-        logger.info("drama76_released drama=%s published=%d/%d",
-                    drama_id, pub, total)
+        logger.info("drama76_released drama=%s published=%d/%d free=%s",
+                    drama_id, pub, total,
+                    free_episodes if free_episodes is not None else "-")
         return drama
 
     def episode_states(self, drama: dict, is_member: bool = False,

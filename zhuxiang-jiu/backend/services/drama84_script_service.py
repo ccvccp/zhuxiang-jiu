@@ -43,9 +43,10 @@ MIN_LINES_PER_EP = 4
 
 # 时长双档(2026-10-17 对标懒趴趴短剧): 第 1/5/9…集为长集
 # (建世界观+充值锚点), 其余短集(爆发集抢完播率)——
-# 长档 90-150s/台词 5-8 句, 短档 45-90s/台词 4-6 句
+# 长档 90-150s/台词 5-8 句, 短档 30-90s/台词 4-6 句
+# (短档下限 45→30: 2026-10-17 对标第四篇·滑州田影 30s 微档)
 LONG_DURATION = (90, 150)
-SHORT_DURATION = (45, 90)
+SHORT_DURATION = (30, 90)
 
 
 def episode_length_plan(ep_no: int) -> str:
@@ -63,7 +64,7 @@ ALLOWED_CAST = ("zhuxiaomei", "xiaozhushuaige",
 D84_WEIGHTS = {
     "theme_appeal": 25.0,   # 题材吸引力(热点分值归一)
     "cast_fit": 20.0,       # 人设匹配(IP 主角满配/角色数)
-    "pacing": 20.0,         # 节奏(单集时长 45-120s 达标率)
+    "pacing": 20.0,         # 节奏(单集时长 30-120s 达标率)
     "script_quality": 15.0, # 剧本质量(lint 零瑕疵+LLM 轨)
     "traffic_value": 20.0,  # 引流值(76号解锁转化, 累计观测)
 }
@@ -109,8 +110,8 @@ def lint_series(series: dict) -> list:
             if not _clip(beats.get(k), 60):
                 flaws.append(f"第{i}集缺节拍 {k}")
         dur = int(ep.get("duration") or 0)
-        if not (45 <= dur <= 180):
-            flaws.append(f"第{i}集时长越界({dur}s, 须 45-180)")
+        if not (30 <= dur <= 180):
+            flaws.append(f"第{i}集时长越界({dur}s, 须 30-180)")
         lines = ep.get("lines") or []
         if len(lines) < MIN_LINES_PER_EP:
             flaws.append(f"第{i}集台词不足({len(lines)}<"
@@ -209,7 +210,7 @@ class Drama84ScriptService:
     @staticmethod
     def _normalize_durations(series: dict) -> None:
         """按集号双档 clamp duration(LLM 出界时拉回档内;
-        缺失给档中值)——长 90-150s / 短 45-90s"""
+        缺失给档中值)——长 90-150s / 短 30-90s"""
         for ep in series.get("episodes") or []:
             lo, hi = (LONG_DURATION if episode_length_plan(
                 ep.get("ep")) == "long" else SHORT_DURATION)
@@ -260,7 +261,7 @@ class Drama84ScriptService:
                 "(不硬广), 每集至少一处品牌或产品自然出现;\n"
                 "6. 禁暴力低俗/未成年相关/功效宣称/绝对化用语;\n"
                 "7. 时长双档: 第1/5/9…集为长集(90-150秒, lines "
-                "5-8句, 建世界观+情绪锚点), 其余短集(45-90秒, "
+                "5-8句, 建世界观+情绪锚点), 其余短集(30-90秒, "
                 "lines 4-6句, 抢完播率)——本条覆盖铁律1的句数;\n"
                 "8. 命名句式(按题材五选一, 例均为≤10字合格品): "
                 "冲突前置(高危场景+危机+反转决定, 如'家宴受辱她退场')"
@@ -404,6 +405,23 @@ class Drama84ScriptService:
         gf = _clip(series.get("goldenFinger"), 40)
         base = f"{series['title']}·第{ep_no}集 " \
                f"{ep.get('title') or ''}".strip()
+        # 单集标题独立爽文钩(2026-10-17 对标第四篇·小乔剧院):
+        # beats.hook 首四字爽点+感叹号前置——单条视频在信息流/
+        # 搜索可独立成钩, 与铁律 8 命名句式联动(剥 rule 轨
+        # "第N集:" 前缀后取词)
+        hook = re.sub(r"^第\d+集[:：\s]*", "", _clip(
+            (ep.get("beats") or {}).get("hook"), 40)).strip()
+        hook4 = hook[:4]
+        prefix = f"{hook4}!" if len(hook4) >= 4 else ""
+        title = " ".join(x for x in
+                         (prefix, base, f"| {gf}" if gf else "")
+                         if x)
+        # 标签矩阵(2026-10-17 对标第四篇·滑州田影): #剧名三变体
+        # (原词/短剧/后续——覆盖三种搜索意图) + 两泛垂类静态标签
+        name = _clip(series.get("title"), 12).replace(" ", "")
+        hashtags = (f"#{name} #{name}短剧 #{name}后续 "
+                    f"#独白短剧 #AI短剧") if name else \
+            "#独白短剧 #AI短剧"
         import datetime as _dt
         content = {
             "contentId": await repo.next_id("content"),
@@ -411,9 +429,9 @@ class Drama84ScriptService:
             "hotspotId": int((series.get("hotspot") or {})
                              .get("hotspotId") or 0),
             "platform": "douyin",
-            "title": (f"{base} | {gf}" if gf else base)[:60],
+            "title": title[:60],
             "body": " ".join(ln["text"] for ln in ep["lines"]),
-            "hashtags": "#独白短剧 #AI短剧",
+            "hashtags": hashtags,
             "cta": "",
             "coverHint": "84号连续短剧(数字人分镜轮切)",
             "complianceScore": (100 if not flaws else 60),
@@ -545,11 +563,11 @@ class Drama84ScriptService:
         cast_n = len(cast)
 
         def _pacing_ok(ep: dict) -> bool:
-            """双档达标(2026-10-17): 长集 90-180s / 短集 45-120s"""
+            """双档达标(2026-10-17): 长集 90-180s / 短集 30-120s"""
             dur = int(ep.get("duration") or 0)
             return (LONG_DURATION[0] <= dur <= 180 if
                     episode_length_plan(ep.get("ep")) == "long"
-                    else 45 <= dur <= 120)
+                    else SHORT_DURATION[0] <= dur <= 120)
 
         pacing_ok = sum(1 for e in eps if _pacing_ok(e))
         factors = [
@@ -569,7 +587,7 @@ class Drama84ScriptService:
                  100 * pacing_ok / max(1, len(eps)), 1),
              "weight": D84_WEIGHTS["pacing"],
              "detail": f"{pacing_ok}/{len(eps)} 集达标"
-                       f"(长集90-180s/短集45-120s)"},
+                       f"(长集90-180s/短集30-120s)"},
             {"name": "script_quality",
              "score": (100.0 if not flaws and
                        (series.get("track") or "")

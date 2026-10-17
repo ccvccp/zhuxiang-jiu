@@ -87,16 +87,20 @@ async def create_drama(body: DramaCreateRequest,
 
 class ReleaseRequest(BaseModel):
     up_to: int | None = None     # None=放送下一集(首次启用=放送到免费集数)
+    free_episodes: int | None = None  # 卡点弹性: 免费集数 1..total-1 动态调整
 
 
 @router.post("/{drama_id}/release")
 async def release_drama(drama_id: str, body: ReleaseRequest,
                         x_role: str | None = Header(default=None)):
     """放送分集(边更边锁·admin, 2026-10-17 对标懒趴趴短剧):
-    首周连发 3-4 集抢合集连续推荐窗口, 卡点落在热度峰而非第 2 集"""
+    首周连发 3-4 集抢合集连续推荐窗口, 卡点落在热度峰而非第 2 集;
+    free_episodes 卡点弹性(对标第四篇·点众免费窗第 9 集)——首周
+    观察张力峰后动态挪免费窗, 一次请求可同时放送+调卡点"""
     _require_admin(x_role)
     try:
-        drama = await _svc.release_episode(drama_id, body.up_to)
+        drama = await _svc.release_episode(
+            drama_id, body.up_to, body.free_episodes)
     except KeyError:
         raise HTTPException(status_code=404,
                             detail="drama not found") from None
