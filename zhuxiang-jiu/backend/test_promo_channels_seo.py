@@ -209,8 +209,8 @@ class TestBaiduPush:
                empty["success"] == 0 and empty["error"], f"实际{empty}")
 
         # mock 轨(无 token): 全部受理确定性回执
-        urls = ["https://zhuxiang-jiu.com/r/A-ABC123",
-                "https://zhuxiang-jiu.com/sitemap.xml"]
+        urls = ["https://zyjiu.com/r/A-ABC123",
+                "https://zyjiu.com/sitemap.xml"]
         result = await svc.baidu_push(urls)
         record("百度-mock全部受理",
                result["mode"] == CHANNEL_MODE_MOCK
@@ -221,7 +221,7 @@ class TestBaiduPush:
                f"实际{result['remain']}")
 
         # real 轨失败回退(注入真实推送异常; 动态读免 reload)
-        os.environ["BAIDU_PUSH_SITE"] = "zhuxiang-jiu.com"
+        os.environ["BAIDU_PUSH_SITE"] = "zyjiu.com"
         os.environ["BAIDU_PUSH_TOKEN"] = "bad-token"
         try:
             async def _push_fail(urls_):
@@ -245,10 +245,10 @@ class TestSeoPushFlow:
         # URL 收集: sitemap + 已发布落地页
         urls = await svc.channel.collect_published_urls()
         record("SEO-URL收集含sitemap",
-               "https://zhuxiang-jiu.com/sitemap.xml" in urls,
+               "https://zyjiu.com/sitemap.xml" in urls,
                f"实际{urls}")
         record("SEO-URL收集含已发布落地页",
-               f"https://zhuxiang-jiu.com/r/{published['shortCode']}"
+               f"https://zyjiu.com/r/{published['shortCode']}"
                in urls, f"实际{urls}")
 
         # 发布链路已自动推送(best-effort): 记录 1 条, 提交全部 URL
@@ -274,7 +274,7 @@ class TestSeoPushFlow:
         published2 = await _publish_one(svc, hotspot_index=1)
         pushes_after = await svc.channel.list_pushes()
         latest = pushes_after[0]
-        new_url = f"https://zhuxiang-jiu.com/r/{published2['shortCode']}"
+        new_url = f"https://zyjiu.com/r/{published2['shortCode']}"
         record("SEO-自动推送记录累计(4条)",
                len(pushes_after) == 4,
                f"实际{len(pushes_after)}")
@@ -451,9 +451,9 @@ class TestEndpointCalibration:
             os.environ["PROMO_CHANNEL_MODE"] = "mock"
 
         # ---------- 百度错误响应体解析(实测口径) ----------
-        os.environ["BAIDU_PUSH_SITE"] = "zhuxiang-jiu.com"
+        os.environ["BAIDU_PUSH_SITE"] = "zyjiu.com"
         os.environ["BAIDU_PUSH_TOKEN"] = "bad-token"
-        urls = ["https://zhuxiang-jiu.com/sitemap.xml"]
+        urls = ["https://zyjiu.com/sitemap.xml"]
         try:
             # HTTP 400 + {"error":400,"message":"token invalid"}(实测)
             def _baidu_400(req, timeout=None):

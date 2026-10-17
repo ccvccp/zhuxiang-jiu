@@ -761,7 +761,10 @@ class TrafficService:
             import uuid
             short_uuid = uuid.uuid4().hex[:8].upper()
             promo_code = f"KOL{influencer_id}_{platform}_{short_uuid}"
-            promo_link = f"https://zhuxiang-jiu.com/r/{promo_code}"
+            # 2026-10-17 域名口径: 硬编码 zhuxiang-jiu.com(死域)改
+            # SITE_BASE_URL 单一来源(与 attract/blogger 短链同口径)
+            from repositories.attract_repository import SITE_BASE_URL
+            promo_link = f"{SITE_BASE_URL}/r/{promo_code}"
 
             code_data = {
                 "influencerId": influencer_id,

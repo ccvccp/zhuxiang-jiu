@@ -129,7 +129,7 @@ class AttractService:
             "hook": f"最近在挑{keywords}的看过来！",
             "detail": detail,
             "offer": "新客下单立减, 老客复购有礼",
-            "link": "https://zhuxiang-jiu.com/r/{短链}",  # 发布时替换为分发短链
+            "link": f"{SITE_BASE_URL}/r/{{短链}}",  # 发布时替换为分发短链
             **disclaimers,
         }
         bodies = {}

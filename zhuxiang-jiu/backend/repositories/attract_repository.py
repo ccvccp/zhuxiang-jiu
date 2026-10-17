@@ -109,8 +109,11 @@ CHANNEL_SEEDS = (
 # ============================================================
 
 # 站点域名(sitemap/短链拼接用, 可被环境变量覆盖)
+# 2026-10-17 域名口径统一: 生产/支付回调均为 zyjiu.com(实证存活);
+# 旧默认 zhuxiang-jiu.com 与生产容器曾配 zxjiu.com 均为死域——
+# 生产容器 env 已同步改 https://zyjiu.com
 import os
-SITE_BASE_URL = os.environ.get("SITE_BASE_URL", "https://zhuxiang-jiu.com")
+SITE_BASE_URL = os.environ.get("SITE_BASE_URL", "https://zyjiu.com")
 
 # 关键词初始种子(竹香型白酒核心词)
 SEO_KEYWORD_SEEDS = (

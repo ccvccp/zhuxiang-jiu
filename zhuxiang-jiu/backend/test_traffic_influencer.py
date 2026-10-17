@@ -347,7 +347,7 @@ class TestPromoCode:
 
         # test 28: 推广码包含推广链接
         record("test_28_promo_link_generated",
-               code["promoLink"].startswith("https://zhuxiang-jiu.com/r/KOL"),
+               code["promoLink"].startswith("https://zyjiu.com/r/KOL"),
                f"expected https url, got {code.get('promoLink')}")
 
         # test 29: 推广码状态为 active

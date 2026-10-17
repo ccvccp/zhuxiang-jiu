@@ -9,7 +9,7 @@
 """
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import logging
 
 from services.drama76_growth_service import (
@@ -101,6 +101,30 @@ async def release_drama(drama_id: str, body: ReleaseRequest,
     try:
         drama = await _svc.release_episode(
             drama_id, body.up_to, body.free_episodes)
+    except KeyError:
+        raise HTTPException(status_code=404,
+                            detail="drama not found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409,
+                            detail=str(exc)) from None
+    return {"code": 0, "data": _svc.public_view(drama)}
+
+
+class EpisodeReviewRequest(BaseModel):
+    episode_number: int
+    approved: bool = Field(..., description="三审结论: True=过审可放送 / False=驳回")
+
+
+@router.post("/{drama_id}/episodes/review")
+async def review_episode(drama_id: str, body: EpisodeReviewRequest,
+                         x_role: str | None = Header(default=None)):
+    """分集三审人工过审(2026-10-17 风险⑥·admin): 对齐 36号
+    pending→approved/rejected 惯例——放送闸(release)只放行
+    approved 或已放送的集, 未过审即放送返回 409"""
+    _require_admin(x_role)
+    try:
+        drama = await _svc.review_episode(
+            drama_id, body.episode_number, body.approved)
     except KeyError:
         raise HTTPException(status_code=404,
                             detail="drama not found") from None

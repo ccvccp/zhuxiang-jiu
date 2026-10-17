@@ -59,6 +59,11 @@ def env():
     async def seed():
         await svc.create(FUN6_BODY)
         await svc.create(ALC4_BODY)
+        # 三审闸(2026-10-17 风险⑥)后新建集默认 pending——种子剧走
+        # 真实流程: 逐集过审(admin review)后放送闸才放行
+        for did, total in (("drama_rr", 6), ("drama_alc_rr", 4)):
+            for n in range(1, total + 1):
+                await svc.review_episode(did, n, approved=True)
 
     asyncio.run(seed())
     return svc, shared
@@ -112,6 +117,9 @@ class TestRollingRelease:
         async def run():
             await svc.create({**FUN6_BODY, "drama_id": "drama_rr2",
                               "published_episodes": 0})
+            # 首发放送的前 free 集须先过审(三审闸)
+            for n in (1, 2):
+                await svc.review_episode("drama_rr2", n, approved=True)
             return await svc.release_episode("drama_rr2")
         d = asyncio.run(run())
         assert d["published_episodes"] == 2   # 首次启用=放送到免费集数
@@ -133,6 +141,74 @@ class TestRollingRelease:
             asyncio.run(svc.release_episode("drama_rr", up_to=7))
         with pytest.raises(KeyError):
             asyncio.run(svc.release_episode("drama_nope"))
+
+
+# ============================================================
+# A2. 76 号三审闸(2026-10-17 风险⑥): 未过审集不得放送
+# ============================================================
+
+class TestEpisodeReviewGate:
+
+    @pytest.fixture()
+    def pending_drama(self, env):
+        """新建剧(默认全 pending, published=2 构造边更中状态——
+        闸对已放送集既往不究, 只拦后续未过审集)"""
+        svc, _ = env
+
+        async def mk():
+            await svc.create({**FUN6_BODY, "drama_id": "drama_gate",
+                              "published_episodes": 2})
+            return await svc.get("drama_gate")
+        return svc, asyncio.run(mk())
+
+    def test_new_episodes_default_pending(self, env):
+        svc, _ = env
+        async def mk():
+            await svc.create({**FUN6_BODY, "drama_id": "drama_gate2",
+                              "published_episodes": 0})
+            return await svc.get("drama_gate2")
+        d = asyncio.run(mk())
+        assert all(e["review_status"] == "pending"
+                   for e in d["episodes"])
+
+    def test_release_blocked_without_review(self, pending_drama):
+        svc, d = pending_drama
+        # 已放送 2 集(存量无字段=既往有效), 第 3 集 pending → 放送被拦
+        with pytest.raises(ValueError, match="未过三审"):
+            asyncio.run(svc.release_episode("drama_gate"))
+
+    def test_approve_unlocks_release(self, pending_drama):
+        svc, d = pending_drama
+        asyncio.run(svc.review_episode("drama_gate", 3, approved=True))
+        d = asyncio.run(svc.release_episode("drama_gate"))   # 2→3
+        assert d["published_episodes"] == 3
+        # 第 4 集仍 pending → 继续放送被拦
+        with pytest.raises(ValueError, match="未过三审"):
+            asyncio.run(svc.release_episode("drama_gate"))
+
+    def test_rejected_blocks_and_rollback_allowed(self, pending_drama):
+        svc, d = pending_drama
+        asyncio.run(svc.review_episode("drama_gate", 3, approved=False))
+        # rejected → 拦; 回拨 up_to=1(已放送域)不受审闸影响
+        with pytest.raises(ValueError, match="未过三审"):
+            asyncio.run(svc.release_episode("drama_gate"))
+        d = asyncio.run(svc.release_episode("drama_gate", up_to=1))
+        assert d["published_episodes"] == 1
+
+    def test_review_endpoint_admin_flow(self, client, env):
+        svc, _ = env
+        r = client.post("/api/v1/dramas/drama_rr/episodes/review",
+                        headers={"X-Role": "admin"},
+                        json={"episode_number": 7, "approved": True})
+        assert r.status_code == 409          # 第 7 集不存在
+        r = client.post("/api/v1/dramas/drama_rr/episodes/review",
+                        headers={"X-Role": "admin"},
+                        json={"episode_number": 3, "approved": True})
+        assert r.status_code == 200
+        assert r.json()["data"]["drama_id"] == "drama_rr"
+        r = client.post("/api/v1/dramas/drama_rr/episodes/review",
+                        json={"episode_number": 3, "approved": True})
+        assert r.status_code == 403          # 非 admin 拒绝
 
     def test_public_view_keeps_total(self, env):
         svc, _ = env
@@ -357,6 +433,9 @@ class TestFreeEpisodesFlex:
         async def run():
             await svc.create({**FUN6_BODY, "drama_id": "drama_rr4",
                               "published_episodes": 0})
+            # 首发放送的 1-4 集先过审(三审闸)
+            for n in range(1, 5):
+                await svc.review_episode("drama_rr4", n, approved=True)
             return await svc.release_episode(
                 "drama_rr4", free_episodes=4)
         d = asyncio.run(run())

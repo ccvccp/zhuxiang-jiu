@@ -423,7 +423,7 @@ class TestSeo:
         # sitemap/robots
         sitemap = await svc.generate_sitemap()
         record("SEO-sitemap含域名与基础页",
-               "zhuxiang-jiu.com" in sitemap
+               "zyjiu.com" in sitemap
                and "<urlset" in sitemap and "/products" in sitemap)
         robots = await svc.generate_robots()
         record("SEO-robots含允许与sitemap指引",

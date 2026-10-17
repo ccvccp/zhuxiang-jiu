@@ -36,6 +36,10 @@ class EpisodeRef(BaseModel):
     video_url: str = ""          # /videos/drama/xxx.mp4 (dist 相对)
     duration_seconds: int = 0
     cliff_note: str = ""         # 本集钩子(上集悬念→本集)
+    # 三审状态(2026-10-17 风险⑥): pending=待审 / approved=过审可放送 /
+    # rejected=驳回。存量数据无此字段按 approved 既往有效(兼容);
+    # 新建剧集默认 pending——放送闸只放行 approved 或已放送的集
+    review_status: str = "pending"
 
 
 class DramaSeries(BaseModel):
@@ -120,7 +124,8 @@ class DramaSeriesService:
                 title=str(e.get("title") or f"第{i}集"),
                 video_url=str(e.get("video_url") or ""),
                 duration_seconds=int(e.get("duration_seconds") or 0),
-                cliff_note=str(e.get("cliff_note") or "")))
+                cliff_note=str(e.get("cliff_note") or ""),
+                review_status=str(e.get("review_status") or "pending")))
         if not eps:
             raise ValueError("episodes 为空")
         pub_n = min(max(0, int(body.get("published_episodes") or 0)),
@@ -217,6 +222,23 @@ class DramaSeriesService:
             if up_to is None else int(up_to)
         if not (0 <= pub <= total):
             raise ValueError(f"up_to 越界(0-{total})")
+        # 三审闸(2026-10-17 风险⑥): 放送不得越过未过审集——从已放送
+        # 数起, 逐集要求 review_status=approved(存量无字段=既往有效);
+        # 未过审即止, pub 越过该边界 → 409 提示先过审
+        allowed = int(drama.get("published_episodes") or 0)
+        for e in sorted(drama.get("episodes") or [],
+                        key=lambda x: int(x.get("episode_number") or 0)):
+            n = int(e.get("episode_number") or 0)
+            if n <= allowed:
+                continue
+            if (e.get("review_status") or "approved") == "approved":
+                allowed = n
+            else:
+                break
+        if pub > allowed:
+            raise ValueError(
+                f"第 {allowed + 1}-{pub} 集未过三审(review_status!=approved),"
+                f" 先经 POST /api/v1/dramas/{drama_id}/episodes/review 过审")
         drama["published_episodes"] = pub
         drama["updated_at"] = _now()
         await self.repo._save(self.TABLE, drama_id, drama)
@@ -225,9 +247,29 @@ class DramaSeriesService:
                     free_episodes if free_episodes is not None else "-")
         return drama
 
+    async def review_episode(self, drama_id: str, episode_number: int,
+                             approved: bool) -> dict:
+        """三审人工过审(2026-10-17 风险⑥·admin): 对齐 36号
+        pending→approved/rejected 惯例; 放送闸只认 approved"""
+        self._ensure_table()
+        drama = await self.repo._get(self.TABLE, drama_id)
+        if not drama:
+            raise KeyError(drama_id)
+        n = int(episode_number)
+        ep = next((e for e in (drama.get("episodes") or [])
+                   if int(e.get("episode_number") or 0) == n), None)
+        if not ep:
+            raise ValueError(f"第 {n} 集不存在")
+        ep["review_status"] = "approved" if approved else "rejected"
+        drama["updated_at"] = _now()
+        await self.repo._save(self.TABLE, drama_id, drama)
+        logger.info("drama76_episode_reviewed drama=%s ep=%d -> %s",
+                    drama_id, n, ep["review_status"])
+        return drama
+
     def episode_states(self, drama: dict, is_member: bool = False,
-                       unlocked_dramas: set | None = None
-                       ) -> list[dict[str, Any]]:
+                        unlocked_dramas: set | None = None
+                        ) -> list[dict[str, Any]]:
         """分集+解锁状态:
         酒类品牌剧(2026-10-09 定案)——全集免注册无障碍观看;
         其余剧: 编号<=free → free; 会员 → member_only; 用户已解锁本剧
