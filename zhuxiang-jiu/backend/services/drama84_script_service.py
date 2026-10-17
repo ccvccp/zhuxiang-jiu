@@ -392,6 +392,11 @@ class Drama84ScriptService:
                     == sbid):
                 return c
         flaws = lint_series(series)
+        # 简介复读机(2026-10-17 对标夫仔): 标题拼入金手指卖点句
+        # ——单条视频即完整钩子, 脱离合集上下文也能转化
+        gf = _clip(series.get("goldenFinger"), 40)
+        base = f"{series['title']}·第{ep_no}集 " \
+               f"{ep.get('title') or ''}".strip()
         import datetime as _dt
         content = {
             "contentId": await repo.next_id("content"),
@@ -399,10 +404,9 @@ class Drama84ScriptService:
             "hotspotId": int((series.get("hotspot") or {})
                              .get("hotspotId") or 0),
             "platform": "douyin",
-            "title": f"{series['title']}·第{ep_no}集 "
-                     f"{ep.get('title') or ''}".strip()[:40],
+            "title": (f"{base} | {gf}" if gf else base)[:60],
             "body": " ".join(ln["text"] for ln in ep["lines"]),
-            "hashtags": "#独白短剧",
+            "hashtags": "#独白短剧 #AI短剧",
             "cta": "",
             "coverHint": "84号连续短剧(数字人分镜轮切)",
             "complianceScore": (100 if not flaws else 60),
