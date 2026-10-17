@@ -71,6 +71,17 @@ async def run_scheduled_learning() -> dict:
             })
             logger.info("ai_learning_scheduled scorer=%s %s promoted=%s",
                         scorer_id, learned["newVersion"], learned["promoted"])
+            try:
+                from services.evolution_chronicle_service import record
+                await record(
+                    "ai_learning",
+                    "learn_promoted" if learned["promoted"] else "learn",
+                    scorer_id,
+                    f"评分器学习周期 v{learned['newVersion']}"
+                    f"(样本 {learned['learnedFrom']})"
+                    + (" 挑战者晋升" if learned["promoted"] else ""))
+            except Exception:
+                pass  # 编年史 fail-soft
         except ValueError:
             # 反馈数在读取与学习之间被并发消费 → 本轮跳过, 下轮再学
             continue

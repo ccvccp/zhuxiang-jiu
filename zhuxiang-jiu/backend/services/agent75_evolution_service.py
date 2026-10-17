@@ -29,6 +29,15 @@ from services.agent75_orchestrator_service import (
 
 logger = logging.getLogger(__name__)
 
+
+def _chronicle(ev_type: str, target: str, summary: str) -> None:
+    """进化编年史埋点(fail-soft, 同步上下文 fire-and-forget)"""
+    try:
+        from services.evolution_chronicle_service import record_bg
+        record_bg("agent75", ev_type, target, summary)
+    except Exception:
+        pass
+
 EVOLUTION_TYPES = ("prompt", "skill")   # P3a: +技能层候选
 INTENTS = ("chat", "summary", "draft")
 MODEL_IDS = ("glm-flash", "glm-reason")
@@ -126,6 +135,8 @@ class AgentEvolutionService:
         self._save_cands(cands)
         logger.info("agent75_evolution_proposed id=%s intent=%s",
                     cand.evolution_id, cand.intent)
+        _chronicle("propose", cand.evolution_id,
+                   f"{cand.type}层·{cand.intent} 提案")
         return cand
 
     def _validate(self, data: dict | None,
@@ -207,6 +218,8 @@ class AgentEvolutionService:
         c["applied_at"] = self._now()
         cands[evolution_id] = c
         self._save_cands(cands)
+        _chronicle("approve", evolution_id,
+                   f"{c['type']}层·{c['intent']} 生效")
         return c
 
     def reject(self, evolution_id: str) -> dict[str, Any]:
@@ -219,6 +232,8 @@ class AgentEvolutionService:
         c["validation_status"] = CandidateStatus.REJECTED.value
         cands[evolution_id] = c
         self._save_cands(cands)
+        _chronicle("reject", evolution_id,
+                   f"{c['type']}层·{c['intent']} 驳回")
         return c
 
     def rollback(self, intent: str) -> dict[str, str]:
@@ -233,6 +248,7 @@ class AgentEvolutionService:
             if (c["intent"] == intent and c["validation_status"]
                     == CandidateStatus.APPROVED.value):
                 c["validation_status"] = CandidateStatus.ROLLED_BACK.value
+        _chronicle("rollback", intent, "prompt 层回退内置注册表")
         return {"intent": intent, "active": sorted(active)}
 
     def rollback_candidate(self, evolution_id: str) -> dict[str, Any]:

@@ -496,6 +496,9 @@ register_mood_routes(app)
 # 一句话开店向导(同盟商城 Agent 方案: 想法→开店方案→入盟申请)
 from routes.store_wizard_routes import register_store_wizard_routes
 register_store_wizard_routes(app)
+# 进化观测面(编年史/陈酿指数/Elo 角斗场, 生态地图短板补齐)
+from routes.evolution_routes import register_evolution_routes
+register_evolution_routes(app)
 
 
 # ============================================================

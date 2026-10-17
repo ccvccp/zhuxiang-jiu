@@ -370,6 +370,7 @@ class Voice82EvolutionService:
             "params": params, "promotedAt": ts(),
             "fromChallengerAt": cand.get("createdAt") or ""})
         await self._del(TBL_CHALLENGER, key)
+        await self._chronicle("promote", key, "challenger 人工转正 effective")
         return {"success": True, "key": key, "params": params,
                 "note": "effective 已落——仅 assist 模式消费"}
 
@@ -379,9 +380,21 @@ class Voice82EvolutionService:
         key = f"m{int(member_id)}"
         n1 = await self._del(TBL_CHALLENGER, key)
         n2 = await self._del(TBL_EFFECTIVE, key)
+        await self._chronicle(
+            "discard", key,
+            f"弃候选/撤 effective(cleared={n1}/{n2})")
         return {"success": True, "key": key,
                 "clearedChallenger": n1, "clearedEffective": n2,
                 "reason": reason or ""}
+
+    async def _chronicle(self, ev_type: str, target: str,
+                         summary: str) -> None:
+        """进化编年史埋点(fail-soft 观测层)"""
+        try:
+            from services.evolution_chronicle_service import record
+            await record("voice82", ev_type, target, summary)
+        except Exception:
+            pass
 
     async def effective_params(self, member_id) -> dict:
         """生效参数: assist 且过放量闸且有 effective → 覆盖; 否则 params_for

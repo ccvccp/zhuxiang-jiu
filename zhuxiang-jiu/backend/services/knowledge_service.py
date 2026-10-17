@@ -545,6 +545,8 @@ class KnowledgeService:
                 "publishedBy": publisher_id,
                 "publishedAt": entry["publishedAt"],
             })
+            await self._chronicle_kb("publish", entry_id,
+                                     f"知识条目发布 v{entry['version']}")
             return _public(entry)
 
     async def retire_entry(self, entry_id: int) -> dict:
@@ -566,7 +568,17 @@ class KnowledgeService:
             await self.repo.transition_status(
                 entry_id, ENTRY_STATUS_PUBLISHED, ENTRY_STATUS_RETIRED)
             await self._save_entry(entry)
+            await self._chronicle_kb("retire", entry_id, "知识条目退役")
             return _public(entry)
+
+    async def _chronicle_kb(self, ev_type: str, entry_id: int,
+                            summary: str) -> None:
+        """进化编年史埋点(fail-soft 观测层)"""
+        try:
+            from services.evolution_chronicle_service import record
+            await record("kb57", ev_type, str(entry_id), summary)
+        except Exception:
+            pass
 
     async def list_versions(self, entry_id: int) -> list[dict]:
         """查询版本历史
