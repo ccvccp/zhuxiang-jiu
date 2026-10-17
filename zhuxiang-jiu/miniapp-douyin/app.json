@@ -1,0 +1,12 @@
+{
+  "pages": [
+    "pages/index/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "竹香酒馆",
+    "navigationBarBackgroundColor": "#16233c",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f6f8fb",
+    "backgroundTextStyle": "dark"
+  }
+}

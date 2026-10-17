@@ -1,0 +1,5 @@
+/* 全局样式: 与 H5 站点基调一致 */
+page {
+  background: #f6f8fb;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
