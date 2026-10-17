@@ -1,0 +1,5 @@
+{
+  "action": "probe",
+  "probeUrl": "https://mp.toutiao.com/profile_v4/xigua/upload-video",
+  "waitLoginMinutes": 2
+}

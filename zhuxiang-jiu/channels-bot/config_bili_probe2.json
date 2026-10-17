@@ -1,0 +1,5 @@
+{
+  "action": "probe",
+  "probeUrl": "https://member.bilibili.com/platform/upload-manager/article",
+  "waitLoginMinutes": 3
+}

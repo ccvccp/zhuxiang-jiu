@@ -1,0 +1,17 @@
+# RPA bot 运行产物与登录态防护(2026-10-17 入库治理)
+# 登录态(cookie/会话)保存在源目录 D:\网站架构设计\channels-bot\*-profile\
+# ——严禁复制入本目录; 本仓库只版本管理脚本与发布配置
+node_modules/
+snapshots/
+*-profile/
+*.png
+*.log
+*.lock
+*.wake
+*login_state*.json
+*dump*.json
+*status*.json
+*result*.json
+*_urls.json
+*items*.json
+*history*.json

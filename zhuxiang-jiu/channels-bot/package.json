@@ -1,0 +1,20 @@
+{
+  "name": "channels-bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test test_xhs_draft_db.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "jimp": "^1.6.1",
+    "jsqr": "^1.4.0",
+    "puppeteer-core": "^24.43.1"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5"
+  }
+}
