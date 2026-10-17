@@ -13,7 +13,7 @@ sys.path.insert(0, r'C:\backend')
 from repositories.knowledge_repository import KnowledgeRepository
 from services.knowledge_service import KnowledgeService
 
-CLEAN_IDS = [50]  # 本次退役对象
+CLEAN_IDS = [46, 100, 178, 205, 237, 267]  # 维基爬取编码损坏批次(#50 已于上轮退役)
 
 def mojibake_stats(text):
     """统计疑似编码损坏字符(C1控制/替换符/西里尔/拉丁扩展/希腊)"""
@@ -58,8 +58,9 @@ async def main():
             lines.append('RETIRE #%d FAILED: %s' % (eid, ex))
 
     # ---- 3. 核验 ----
-    e = await repo.get_entry(50)
-    lines.append('verify #50 status: %s' % (e.get('status') if e else 'GONE'))
+    for eid in CLEAN_IDS:
+        e = await repo.get_entry(eid)
+        lines.append('verify #%d status: %s' % (eid, e.get('status') if e else 'GONE'))
     pub2 = await repo.list_entries(status='published', limit=2000)
     lines.append('published after: %d' % len(pub2))
 
