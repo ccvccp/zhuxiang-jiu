@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>AI 选酒顾问 - 竹香酒馆</title>
+<style>
+:root{--ink:#1a2332;--sub:#5a6b85;--brand:#16233c;--accent:#2b7a4b;--accent2:#8db600;--bg:#f4f7f4;--card:#fff;--line:#e3e9e3;--user:#16233c;--err:#c0392b}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;max-width:640px;margin:0 auto}
+header{background:linear-gradient(135deg,var(--brand) 0%,#2b5fd9 130%);color:#fff;padding:14px 16px;display:flex;align-items:center;gap:10px;flex:none}
+header .logo{width:34px;height:34px;border-radius:9px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:18px}
+header h1{font-size:16px;font-weight:600}
+header .sub{font-size:11px;opacity:.8;margin-top:2px}
+#chat{flex:1;overflow-y:auto;padding:14px 12px 6px;-webkit-overflow-scrolling:touch}
+.msg{display:flex;margin-bottom:12px;animation:fadein .25s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.msg .bubble{max-width:82%;padding:10px 13px;border-radius:14px;font-size:14.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+.msg.ai .bubble{background:var(--card);border:1px solid var(--line);border-top-left-radius:4px;box-shadow:0 1px 3px rgba(22,35,60,.05)}
+.msg.me{justify-content:flex-end}
+.msg.me .bubble{background:var(--user);color:#fff;border-top-right-radius:4px}
+.msg .tag{font-size:10.5px;color:var(--accent);margin-top:6px;border-top:1px dashed var(--line);padding-top:5px}
+.msg .tag.blocked{color:var(--err)}
+/* 留资卡片 */
+.leadcard{margin:-2px 0 12px 0;background:#fff;border:1px solid #cfe3d2;border-radius:14px;padding:13px;box-shadow:0 2px 8px rgba(43,122,75,.08)}
+.leadcard h3{font-size:13.5px;color:var(--accent);margin-bottom:4px}
+.leadcard p{font-size:12px;color:var(--sub);margin-bottom:10px}
+.leadrow{display:flex;gap:8px}
+.leadrow input{flex:1;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:15px;outline:none}
+.leadrow input:focus{border-color:var(--accent)}
+.leadrow button{flex:none;background:var(--accent);color:#fff;border:none;border-radius:10px;padding:0 18px;font-size:14px;font-weight:600}
+.leadrow button:disabled{background:#a8c5b0}
+.leadmsg{font-size:12px;margin-top:8px;color:var(--sub)}
+.leadmsg.ok{color:var(--accent)}
+.leadmsg.err{color:var(--err)}
+/* 快捷提问 */
+.chips{display:flex;gap:8px;overflow-x:auto;padding:8px 12px;flex:none;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chips button{flex:none;background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:999px;padding:7px 14px;font-size:13px}
+.chips button:active{border-color:var(--accent);color:var(--accent)}
+/* 输入区 */
+footer{flex:none;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid var(--line)}
+.inrow{display:flex;gap:8px}
+.inrow input{flex:1;border:1px solid var(--line);border-radius:12px;padding:11px 14px;font-size:15px;outline:none;background:var(--bg)}
+.inrow input:focus{border-color:var(--accent);background:#fff}
+.inrow button{flex:none;width:46px;height:44px;border:none;border-radius:12px;background:var(--brand);color:#fff;font-size:16px}
+.inrow button:disabled{opacity:.5}
+.disclaimer{text-align:center;font-size:10.5px;color:var(--sub);margin-top:7px}
+.typing{display:inline-flex;gap:4px;padding:4px 2px}
+.typing i{width:6px;height:6px;border-radius:50%;background:#b8c4b8;animation:blink 1.2s infinite}
+.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🎋</div>
+  <div>
+    <h1>AI 选酒顾问</h1>
+    <div class="sub">竹香酒馆 · 智能选酒助手</div>
+  </div>
+</header>
+
+<div id="chat"></div>
+
+<div class="chips" id="chips">
+  <button data-q="送长辈礼盒，推荐一款">🎁 送人选酒</button>
+  <button data-q="自己喝，入门选哪款">🍵 自饮推荐</button>
+  <button data-q="现在多少钱，有优惠吗">💰 价格优惠</button>
+  <button data-q="竹香酒的工艺和度数">🍶 品鉴知识</button>
+</div>
+
+<footer>
+  <div class="inrow">
+    <input id="input" type="text" maxlength="120" placeholder="说说您的需求，如：送礼预算 300 内">
+    <button id="send" aria-label="发送">➤</button>
+  </div>
+  <div class="disclaimer">理性饮酒：未成年人禁止饮酒，过量饮酒有害健康</div>
+</footer>
+
+<script>
+'use strict';
+/* 86号合规引流钩子Agent·C端对话页(小程序竹香酒馆 webview 内 H5)
+ * 对接: POST /api/hook86/chat(意图对话·匿名) + POST /api/hook86/lead(留资·24h≤2次)
+ * 渠道码: URL ?channel=xxx 带入归因; 指纹: localStorage 随机稳定。 */
+(function () {
+  var chatEl = document.getElementById('chat');
+  var inputEl = document.getElementById('input');
+  var sendEl = document.getElementById('send');
+  var sending = false;
+
+  var LS_FP = 'hook86.fp';
+  var qs = new URLSearchParams(location.search);
+  var channel = (qs.get('channel') || qs.get('utm_content') || '').slice(0, 40);
+
+  function fingerprint() {
+    var fp = localStorage.getItem(LS_FP);
+    if (!fp) {
+      fp = 'fp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      localStorage.setItem(LS_FP, fp);
+    }
+    return fp;
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function scrollBottom() {
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
+  function addAi(html) {
+    var d = document.createElement('div');
+    d.className = 'msg ai';
+    d.innerHTML = '<div class="bubble">' + html + '</div>';
+    chatEl.appendChild(d);
+    scrollBottom();
+    return d;
+  }
+
+  function addMe(text) {
+    var d = document.createElement('div');
+    d.className = 'msg me';
+    d.innerHTML = '<div class="bubble">' + esc(text) + '</div>';
+    chatEl.appendChild(d);
+    scrollBottom();
+  }
+
+  function typing() {
+    var d = addAi('<span class="typing"><i></i><i></i><i></i></span>');
+    return function replace(html) { d.querySelector('.bubble').innerHTML = html; };
+  }
+
+  /* 留资卡片(action=lead_form 时渲染) */
+  function leadCard(intent) {
+    var d = document.createElement('div');
+    d.className = 'leadcard';
+    d.innerHTML =
+      '<h3>预约 1v1 选酒顾问</h3>' +
+      '<p>留下手机号，顾问 24 小时内回访，为您定制选酒方案（每人每天限 2 次）</p>' +
+      '<div class="leadrow">' +
+      '<input type="tel" maxlength="11" placeholder="11 位手机号" inputmode="numeric">' +
+      '<button>提交</button></div>' +
+      '<div class="leadmsg"></div>';
+    chatEl.appendChild(d);
+    scrollBottom();
+    var phoneEl = d.querySelector('input');
+    var btn = d.querySelector('button');
+    var msg = d.querySelector('.leadmsg');
+    btn.addEventListener('click', async function () {
+      var phone = phoneEl.value.trim();
+      if (!/^1[3-9]\d{9}$/.test(phone)) {
+        msg.className = 'leadmsg err';
+        msg.textContent = '请输入正确的 11 位手机号';
+        return;
+      }
+      btn.disabled = true;
+      try {
+        var res = await fetch('/api/hook86/lead', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone: phone, channelCode: channel,
+            intent: intent, fingerprint: fingerprint()
+          })
+        });
+        var body = await res.json();
+        var data = body && body.data;
+        if (!res.ok || !data || !data.ok) {
+          var reason = data && data.reason === 'freq_limited'
+            ? '今日提交次数已达上限，请明天再试' : '提交失败，请稍后再试';
+          msg.className = 'leadmsg err';
+          msg.textContent = reason;
+        } else {
+          msg.className = 'leadmsg ok';
+          msg.textContent = data.duplicate
+            ? '您已提交过，顾问将尽快与您联系'
+            : '提交成功！顾问将在 24 小时内与您联系';
+          phoneEl.disabled = true;
+        }
+      } catch (e) {
+        msg.className = 'leadmsg err';
+        msg.textContent = '网络异常，请稍后再试';
+      }
+      btn.disabled = false;
+    });
+  }
+
+  async function ask(text) {
+    if (sending || !text.trim()) return;
+    sending = true;
+    sendEl.disabled = true;
+    addMe(text);
+    inputEl.value = '';
+    var done = typing();
+    try {
+      var res = await fetch('/api/hook86/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text, fingerprint: fingerprint(), channelCode: channel
+        })
+      });
+      var body = await res.json();
+      var d = body && body.data;
+      if (!res.ok || !d) throw new Error('HTTP ' + res.status);
+      var tag = '';
+      if (d.blocked) {
+        tag = '<div class="tag blocked">内容未通过合规校验</div>';
+      } else if (d.action === 'lead_form') {
+        tag = '<div class="tag">识别意图：' + esc(d.label) + '</div>';
+      }
+      done(esc(d.reply) + tag);
+      if (!d.blocked && d.action === 'lead_form') leadCard(d.intent);
+    } catch (e) {
+      done('服务暂时不可用，请稍后再试 🙏');
+    }
+    sending = false;
+    sendEl.disabled = false;
+    inputEl.focus();
+  }
+
+  sendEl.addEventListener('click', function () { ask(inputEl.value); });
+  inputEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') ask(inputEl.value);
+  });
+  document.getElementById('chips').addEventListener('click', function (e) {
+    var q = e.target.getAttribute && e.target.getAttribute('data-q');
+    if (q) ask(q);
+  });
+
+  /* 欢迎语(本地静态, 零请求) */
+  addAi('您好，我是竹香酒馆的 AI 选酒顾问 🎋<div class="tag">可为您推荐选酒、解答品鉴、查询价格与活动</div>');
+})();
+</script>
+</body>
+</html>
