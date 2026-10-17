@@ -14,12 +14,18 @@ import paramiko
 HOST = os.environ.get("ADH_HOST", "connect.weste.seetacloud.com")
 PORT = int(os.environ.get("ADH_PORT", "37632"))
 USER = os.environ.get("ADH_USER", "root")
-PASSWORD = os.environ.get("ADH_PASSWORD", "dtFrMiCbH2qM")
+# 凭证治理(2026-10-17): 明文默认已移除, 须 env 注入
+PASSWORD = os.environ.get("ADH_PASSWORD", "").strip()
 
 CHUNK = 60000
 
 
 def main() -> int:
+    if not PASSWORD:
+        print("ADH_PASSWORD 未配置(环境变量注入: $env:ADH_PASSWORD=...——"
+              "明文默认 2026-10-17 已移除, 见 .env.example)",
+              file=sys.stderr)
+        return 2
     local_dir = sys.argv[1]
     remote_parent = sys.argv[2]
     # tar 打包(仅 .py, 排除 __pycache__/数据/测试产物)

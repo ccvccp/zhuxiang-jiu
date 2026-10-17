@@ -10,10 +10,16 @@ import paramiko
 HOST = os.environ.get("ADH_HOST", "connect.weste.seetacloud.com")
 PORT = int(os.environ.get("ADH_PORT", "37632"))
 USER = os.environ.get("ADH_USER", "root")
-PASSWORD = os.environ.get("ADH_PASSWORD", "dtFrMiCbH2qM")
+# 凭证治理(2026-10-17): 明文默认已移除, 须 env 注入
+PASSWORD = os.environ.get("ADH_PASSWORD", "").strip()
 
 
 def run(cmd: str, timeout: int = 300) -> int:
+    if not PASSWORD:
+        print("ADH_PASSWORD 未配置(环境变量注入: $env:ADH_PASSWORD=...——"
+              "明文默认 2026-10-17 已移除, 见 .env.example)",
+              file=sys.stderr)
+        return 2
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(HOST, port=PORT, username=USER,

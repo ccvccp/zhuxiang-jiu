@@ -7,9 +7,20 @@
 """
 import base64
 import json
+import os
 import subprocess
 
 HOST = "root@47.236.61.117"
+
+# 凭证治理(2026-10-17): 明文默认已移除, 须 env 注入
+# (经 .env 或环境变量; 键名对齐 backend/.env.example 第七节)
+PHONE = os.environ.get("PROD_ADMIN_PHONE", "").strip()
+PWD = os.environ.get("PROD_ADMIN_PASSWORD", "").strip()
+# 自有 env 凭证, 仅放行数字/字母(拼入远端脚本, 防注入)
+if not (PHONE and PWD and PHONE.isdigit() and PWD.isalnum()):
+    raise SystemExit(
+        "PROD_ADMIN_PHONE/PROD_ADMIN_PASSWORD 未配置或含非法字符"
+        "(须纯数字手机号/字母数字密码; 见 backend/.env.example)")
 
 INNER = r'''
 import asyncio, json, urllib.request
@@ -27,9 +38,9 @@ async def mint():
     from services.auth_service import AuthService
     try:
         r = await AuthService().register(
-            phone="13800000731", password="test123456", role="admin")
+            phone="__PHONE__", password="__PWD__", role="admin")
     except ValueError:
-        r = await AuthService().login("13800000731", "test123456")
+        r = await AuthService().login("__PHONE__", "__PWD__")
     return r.get("accessToken", "")
 
 token = asyncio.run(mint())
@@ -54,7 +65,7 @@ for name, path in EPS:
 print("@@BEGIN@@")
 print(json.dumps(out, ensure_ascii=False, default=str))
 print("@@END@@")
-'''
+'''.replace("__PHONE__", PHONE).replace("__PWD__", PWD)
 
 
 def main():

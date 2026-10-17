@@ -43,18 +43,26 @@ def _get_token(args) -> str:
     env = os.environ.get("SV73_TOKEN", "").strip()
     if env:
         return env
+    phone = os.environ.get("PROD_ADMIN_PHONE", "").strip()
+    pwd = os.environ.get("PROD_ADMIN_PASSWORD", "").strip()
+    # 自有 env 凭证, 仅放行数字/字母(拼入远端 pipe 字符串, 防注入)
+    if not (phone and pwd and phone.isdigit() and pwd.isalnum()):
+        raise RuntimeError(
+            "PROD_ADMIN_PHONE/PROD_ADMIN_PASSWORD 未配置或含非法字符"
+            "(须纯数字手机号/字母数字密码; 明文默认 2026-10-17 已移除, "
+            "见 .env.example)")
     pipe = (
         "import asyncio\n"
         "async def m():\n"
         "    from services.auth_service import AuthService\n"
         "    try:\n"
         "        r = await AuthService().register(\n"
-        "            phone='13800000731',\n"
-        "            password='test123456',\n"
+        f"            phone='{phone}',\n"
+        f"            password='{pwd}',\n"
         "            role='admin')\n"
         "    except ValueError:\n"
         "        r = await AuthService().login(\n"
-        "            '13800000731', 'test123456')\n"
+        f"            '{phone}', '{pwd}')\n"
         "    print(r.get('accessToken', ''))\n"
         "asyncio.run(m())\n"
     )

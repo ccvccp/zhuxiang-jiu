@@ -196,17 +196,34 @@ REMOTE_SVC = "/root/services/sv73_digital_human_service.py"
 
 # ---------- 生产管道 ----------
 
+def prod_admin_creds() -> tuple[str, str]:
+    """生产 admin 凭证(2026-10-17 治理): 明文默认已移除, 须 env 注入"""
+    phone = os.environ.get("PROD_ADMIN_PHONE", "").strip()
+    pwd = os.environ.get("PROD_ADMIN_PASSWORD", "").strip()
+    if not (phone and pwd):
+        raise RuntimeError(
+            "PROD_ADMIN_PHONE/PROD_ADMIN_PASSWORD 未配置"
+            "(环境变量注入, 本脚本不读 .env——明文默认 2026-10-17 已移除, "
+            "见 .env.example)")
+    # 自有 env 凭证, 仅放行数字/字母: 该值拼入远端 pipe 字符串, 防注入
+    if not (phone.isdigit() and pwd.isalnum()):
+        raise ValueError(
+            "PROD_ADMIN_PHONE 须纯数字 / PROD_ADMIN_PASSWORD 须字母数字")
+    return phone, pwd
+
+
 def prod_token() -> str:
+    phone, pwd = prod_admin_creds()
     pipe = (
         "import asyncio\n"
         "async def m():\n"
         "    from services.auth_service import AuthService\n"
         "    try:\n"
         "        r = await AuthService().register("
-        "phone='13800000731', password='test123456', role='admin')\n"
+        f"phone='{phone}', password='{pwd}', role='admin')\n"
         "    except ValueError:\n"
         "        r = await AuthService().login("
-        "'13800000731', 'test123456')\n"
+        f"'{phone}', '{pwd}')\n"
         "    print(r.get('accessToken', ''))\n"
         "asyncio.run(m())\n"
     )
