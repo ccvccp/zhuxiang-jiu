@@ -10,30 +10,24 @@ Info ("nssm env: " + (@($envReg) -join ' | '))
 $keySet = Select-String -Path C:\backend\.env -Pattern '^LLM_API_KEY=\S' -Quiet
 Info ("LLM_API_KEY in .env: " + $keySet)
 Write-Host '==> [2/3] Redis chat 会话/消息统计(最近24h)'
-$keys = & C:\redis\redis-cli.exe --scan --pattern 'zhuxiang:chat:*' 2>$null
-Info ("chat 键总数: " + @($keys).Count)
-$msgKeys = @($keys | Where-Object { $_ -match 'msg' })
-Info ("消息类键: " + $msgKeys.Count)
+$msgKeys = & C:\redis\redis-cli.exe KEYS 'zhuxiang:chat:message:*' 2>$null
+Info ("chat 键总数(含消息): " + @($msgKeys).Count)
 # 抽样: 消息键里 shadowLlm 非空计数 + ragMode 分布(最近200条扫描)
 $slm = 0; $care = 0; $sample = @()
 foreach ($k in ($msgKeys | Select-Object -Last 200)) {
     $v = & C:\redis\redis-cli.exe GET $k 2>$null
     if (-not $v) { continue }
     if ($v -match '"shadowLlm":\s*\{') { $slm++ }
-    if ($v -match 'zhuyun_care') { $care++ }
+    if ($v -match '12356|zhuyun_care') { $care++ }
     if ($sample.Count -lt 3 -and $v -match '"shadowLlm":\s*\{') { $sample += $k }
 }
 Info ("扫描200条: shadowLlm留痕=$slm care命中=$care")
 Write-Host '==> [3/3] shadowLlm 样本抽检(前3条留痕, 人格质量)'
 foreach ($k in $sample) {
     $v = & C:\redis\redis-cli.exe GET $k 2>$null
-    try {
-        $j = $v | ConvertFrom-Json
-        $sl = $j.shadowLlm
-        if ($sl -and $sl.answer) {
-            $a = [string]$sl.answer
-            Info ($k + ' -> ' + $a.Substring(0, [Math]::Min(120, $a.Length)))
-        }
-    } catch { Info ($k + ' (解析跳过)') }
+    if ($v -match '"shadowLlm":\s*\{[^}]*"answer":\s*"((?:[^"\\]|\\.){0,160})') {
+        $a = $Matches[1] -replace '\\n', ' ' -replace '\\"', '"'
+        Info ($k + ' -> ' + $a)
+    } else { Info ($k + ' (无 answer 字段)') }
 }
 Write-Host 'OBSERVE-DONE'
