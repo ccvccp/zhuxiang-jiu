@@ -1,12 +1,10 @@
 {
   "miniprogramRoot": "./",
   "projectname": "zhuxiang-jiuguan",
-  "description": "竹香酒馆·品牌资讯与互动营销(webview 内嵌 zyjiu.com)",
   "appid": "tt90cde6700eb49cef01",
   "setting": {
     "es6": true,
-    "minified": true,
-    "urlCheck": true
-  },
-  "version": "1.0.0"
+    "urlCheck": true,
+    "autoCompile": true
+  }
 }
