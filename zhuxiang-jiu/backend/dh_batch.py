@@ -86,9 +86,13 @@ def wallet_balance() -> float | None:
         return None
     return None
 
+# 凭证治理(2026-10-17): 明文默认已移除, ADH_* env 注入(同 adh_run;
+# Pro 实例经 --pro/snapshot 动态覆盖不受影响)
 ADH = {
-    "host": "connect.weste.seetacloud.com",
-    "port": 26657, "user": "root", "password": "/u9tQeN02hTs",
+    "host": os.environ.get("ADH_HOST", "connect.westd.seetacloud.com"),
+    "port": int(os.environ.get("ADH_PORT", "31568")),
+    "user": os.environ.get("ADH_USER", "root"),
+    "password": os.environ.get("ADH_PASSWORD", "").strip(),
 }
 # 口播基准图: persona → (本地, 远端)——每次跑批前全部自动上传远端
 # (md5 校验); 2026-10-05 第二人设小竹帅哥入列(竹林帅哥解说竹奕酒
@@ -272,6 +276,10 @@ def http(method, path, body=None, token=""):
 def ssh_connect(tries=30, wait=10, overrides=None):
     last = ""
     conn = dict(ADH, **(overrides or {}))
+    if not conn.get("password"):
+        raise RuntimeError(
+            "ADH_PASSWORD 未配置(环境变量注入, 见 .env.example; "
+            "Pro 实例经 --pro/snapshot 自动取)")
     for _ in range(tries):
         try:
             c = paramiko.SSHClient()

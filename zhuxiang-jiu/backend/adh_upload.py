@@ -11,8 +11,8 @@ from pathlib import Path
 
 import paramiko
 
-HOST = os.environ.get("ADH_HOST", "connect.weste.seetacloud.com")
-PORT = int(os.environ.get("ADH_PORT", "37632"))
+HOST = os.environ.get("ADH_HOST", "connect.westd.seetacloud.com")
+PORT = int(os.environ.get("ADH_PORT", "31568"))
 USER = os.environ.get("ADH_USER", "root")
 # 凭证治理(2026-10-17): 明文默认已移除, 须 env 注入
 PASSWORD = os.environ.get("ADH_PASSWORD", "").strip()
