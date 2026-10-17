@@ -48,6 +48,7 @@
 
 import argparse
 import base64
+import functools
 import hashlib
 import json
 import os
@@ -58,6 +59,9 @@ import urllib.request
 from pathlib import Path
 
 import paramiko
+
+# 长跑进度实时(2026-10-17): 管道下 python 块缓冲曾致 30 分钟无输出
+print = functools.partial(print, flush=True)  # noqa: A001
 
 PROD_HOST = "root@47.236.61.117"
 PROD_CONTAINER = "zhuxiang-backend-1"
@@ -303,8 +307,10 @@ def run(ssh, cmd, timeout=290):
     return code, out, se.read().decode("utf-8", "replace")
 
 
-def push(ssh, local: Path, remote: str, chunk=60000):
-    """分块 base64 上传 + md5 双端校验(2026-10-01 b64 未解码坑修复版)"""
+def push(ssh, local: Path, remote: str, chunk=90000):
+    """分块 base64 上传 + md5 双端校验(2026-10-01 b64 未解码坑修复版;
+    2026-10-17 chunk 60K→90K——exec 通道轮次延迟敏感, 轮次↓1/3,
+    90K base64 字符仍在 Linux 单参数 128KB 上限内)"""
     data = local.read_bytes()
     md5 = hashlib.md5(data).hexdigest()
     b64 = base64.b64encode(data).decode()
@@ -327,19 +333,59 @@ def push(ssh, local: Path, remote: str, chunk=60000):
     print(f"    upload {local.name}: {len(data)}B md5 ok")
 
 
+def _remote_md5s(ssh, remotes: list) -> dict:
+    """一次 exec 批量取远端 md5(md5sum 多文件; 缺失/报错行自然跳过)"""
+    script = " ".join(f"'{r}'" for r in remotes)
+    _, out, _ = run(ssh, f"md5sum {script} 2>/dev/null", timeout=120)
+    m = {}
+    for line in out.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and len(parts[0]) == 32:
+            m[parts[1].strip()] = parts[0]
+    return m
+
+
+def push_many(ssh, items, parallel=4, label=""):
+    """批量上传(2026-10-17 提速): ①远端 md5 一次批量预检, 未变文件
+    直接跳过(实例文件随盘持久, 同实例复跑 24 图秒级过) ②差异文件
+    ThreadPool 并发推(paramiko 多通道并发安全)。exec 通道瓶颈在
+    轮次延迟非流量, 故并行轮次 > tar 合流(体积不降)"""
+    from concurrent.futures import ThreadPoolExecutor
+    need, skipped = [], 0
+    remote_md5 = _remote_md5s(ssh, [r for _, r in items])
+    for local, remote in items:
+        h = hashlib.md5(Path(local).read_bytes()).hexdigest()
+        if remote_md5.get(remote) == h:
+            skipped += 1
+        else:
+            need.append((local, remote))
+    print(f"    {label}{len(items)} 项: 未变跳过 {skipped} / 待传 {len(need)}")
+    if not need:
+        return
+    with ThreadPoolExecutor(max_workers=parallel) as ex:
+        list(ex.map(lambda t: push(ssh, t[0], t[1]), need))
+
+
 def pull(ssh, remote: str, local: Path):
-    code, out, _ = run(ssh, f"md5sum '{remote}'")
+    """下载(md5 校验)——2026-10-17 修复 O(n²): 原实现 base64|dd bs=1
+    skip=N 在管道上不可 lseek, 逐字节丢弃前缀(7MB 累计 6200 万次单字
+    节读, 实测 18 分钟+)。现改 b64 先落盘, dd 对常规文件大块切片
+    (lseek O(1), 轮次线性)。"""
+    _, out, _ = run(ssh, f"md5sum '{remote}'")
     rmd5 = (out.split() or [""])[0]
-    code, out, _ = run(ssh, f"wc -c < '{remote}'")
-    size = int(out.strip() or "0")
+    tmp = f"/tmp/_pull_{Path(remote).name}.b64"
+    _, out, _ = run(ssh, f"base64 '{remote}' > '{tmp}'"
+                          f" && wc -c < '{tmp}'")
+    size = int(out.strip().splitlines()[-1] or "0") if out.strip() else 0
     buf = b""
-    chunk = 800000
-    for i in range(0, size * 2 + chunk, chunk):
-        _, out, _ = run(ssh, f"base64 '{remote}' | dd bs=1 skip={i}"
-                               f" count={chunk} 2>/dev/null")
+    chunk = 900000
+    for k in range(0, (size + chunk - 1) // chunk):
+        _, out, _ = run(ssh, f"dd if='{tmp}' bs={chunk} skip={k}"
+                              f" count=1 2>/dev/null")
         if not out:
             break
         buf += out.encode()
+    run(ssh, f"rm -f '{tmp}'")
     data = base64.b64decode(buf)
     if hashlib.md5(data).hexdigest() != rmd5:
         raise RuntimeError(f"下载 md5 不一致: {local.name}")
@@ -613,9 +659,10 @@ def main() -> int:
             return 1
     run(ssh, f"mkdir -p {DH_IMAGE_REMOTE.rsplit('/', 1)[0]}"
              f" {REMOTE_ROOT} {REMOTE_SVC.rsplit('/', 1)[0]}")
-    for persona, (local, remote) in DH_IMAGES.items():
-        push(ssh, local, remote)
-    push(ssh, DH_SVC_LOCAL, REMOTE_SVC)
+    push_many(ssh,
+              [(local, remote) for local, remote in DH_IMAGES.values()]
+              + [(DH_SVC_LOCAL, REMOTE_SVC)],
+              label="[基准图] ")
 
     ok = fail = 0
     for sid in sids:
