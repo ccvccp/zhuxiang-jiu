@@ -65,6 +65,48 @@
         .sec-title b { font-size: 17px; color: #2d3a32; letter-spacing: 1px; }
         .sec-title span { font-size: 12px; color: #97a49a; }
 
+        /* ===== 一句话开店向导 ===== */
+        .wiz-box { background: var(--color-white); border: 1px solid #e5eae2;
+            border-radius: 16px; padding: 20px 18px; margin: 18px 0 6px;
+            box-shadow: 0 4px 18px rgba(53,92,68,.06); }
+        .wiz-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+        .wiz-head b { font-size: 17px; color: #2d3a32; }
+        .wiz-head span { font-size: 12px; color: #97a49a; }
+        .wiz-input-row { display: flex; gap: 10px; }
+        .wiz-input-row input { flex: 1; min-width: 0; padding: 10px 14px;
+            border: 1px solid #dfe5dc; border-radius: 10px; font-size: 14px; outline: none; }
+        .wiz-input-row input:focus { border-color: var(--color-primary); }
+        .wiz-btn { background: linear-gradient(135deg, #4a7c59, #355c44);
+            color: var(--color-white); border: 0; border-radius: 10px;
+            padding: 10px 18px; font-size: 14px; cursor: pointer; white-space: nowrap; }
+        .wiz-btn:disabled { opacity: .6; cursor: wait; }
+        .wiz-plan { margin-top: 16px; border-top: 1px dashed #e0e6dd; padding-top: 14px; }
+        .wiz-plan-cat { display: inline-block; padding: 4px 14px; border-radius: 999px;
+            background: rgba(74,124,89,.12); color: var(--color-primary-dark);
+            font-size: 13px; margin-bottom: 12px; }
+        .wiz-sec { margin: 12px 0; }
+        .wiz-sec label { display: block; font-size: 12px; color: #97a49a;
+            letter-spacing: 1px; margin-bottom: 6px; }
+        .wiz-sec p { margin: 0; font-size: 14px; color: #3c4a3f; line-height: 1.7; }
+        .wiz-sec ul, .wiz-sec ol { margin: 0; padding-left: 20px;
+            font-size: 14px; color: #3c4a3f; line-height: 1.9; }
+        .wiz-names { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+        .wiz-name { padding: 6px 14px; border-radius: 999px; border: 1px solid #cfd9d0;
+            background: #f7faf5; font-size: 13px; cursor: pointer; }
+        .wiz-name.on { background: var(--color-primary); color: var(--color-white);
+            border-color: var(--color-primary-dark); }
+        #wizName { width: 100%; box-sizing: border-box; padding: 9px 12px;
+            border: 1px solid #dfe5dc; border-radius: 10px; font-size: 14px; }
+        .wiz-actions { margin-top: 14px; display: flex; align-items: center; gap: 12px;
+            flex-wrap: wrap; }
+        .wiz-tip { font-size: 12px; color: #97a49a; }
+        .wiz-result { margin-top: 12px; padding: 12px 14px; border-radius: 10px;
+            font-size: 14px; line-height: 1.8; background: #f2f7f0; color: #3c4a3f; }
+        .wiz-result.fail { background: #fdf2f0; color: #8a4a3f; }
+        @media (max-width: 640px) {
+            .wiz-input-row { flex-direction: column; }
+        }
+
         /* 商户卡片 */
         .shop-grid { display: grid; gap: 16px;
             grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
@@ -206,8 +248,37 @@
             <div class="mall-stats" id="mallStats">加载中…</div>
         </div>
 
-        <!-- 商户目录 -->
+        <!-- 一句话开店向导(同盟商城 Agent 方案: 想法→方案→入盟申请) -->
         <div id="viewDirectory">
+        <div class="wiz-box" id="wizBox">
+            <div class="wiz-head">
+                <b>✨ 一句话开店</b>
+                <span>说出想法，AI 为您生成开店方案</span>
+            </div>
+            <div class="wiz-input-row">
+                <input id="wizIdea" maxlength="120" placeholder="如：我想开一家卖武夷山岩茶的店，走礼盒路线">
+                <button class="wiz-btn" id="wizGo">生成方案</button>
+            </div>
+            <div class="wiz-plan" id="wizPlan" style="display:none">
+                <div class="wiz-plan-cat" id="wizCat"></div>
+                <div class="wiz-sec"><label>店名候选（点选可改）</label>
+                    <div class="wiz-names" id="wizNames"></div>
+                    <input id="wizName" maxlength="20" placeholder="或直接输入您想要的店名">
+                </div>
+                <div class="wiz-sec"><label>一句话定位</label><p id="wizPos"></p></div>
+                <div class="wiz-sec"><label>选品建议</label><ul id="wizPicks"></ul></div>
+                <div class="wiz-sec"><label>视觉风格</label><p id="wizStyle"></p></div>
+                <div class="wiz-sec"><label>营销首推</label><ul id="wizMkt"></ul></div>
+                <div class="wiz-sec"><label>开店七日清单</label><ol id="wizChk"></ol></div>
+                <div class="wiz-actions">
+                    <button class="wiz-btn" id="wizSubmit">提交入盟申请</button>
+                    <span class="wiz-tip">须超级会员 · AI 预审 80 分快车道</span>
+                </div>
+                <div class="wiz-result" id="wizResult" style="display:none"></div>
+            </div>
+        </div>
+
+        <!-- 商户目录 -->
             <div class="sec-title"><b>同盟商户</b><span>点击进店 · 选购该店系列产品与服务</span></div>
             <div class="shop-grid" id="shopGrid"></div>
         </div>
@@ -455,6 +526,89 @@
         cartClose();
         $('rslMask').classList.add('show');
     }
+
+    /* ---------- 一句话开店向导 ---------- */
+    var wizPlanData = null;
+    function wizGenerate() {
+        var idea = $('wizIdea').value.trim();
+        if (!idea) { $('wizIdea').focus(); toast('先说说您的开店想法'); return; }
+        var btn = $('wizGo'); btn.disabled = true; btn.textContent = '生成中…';
+        fetch('/api/store/wizard', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idea: idea.slice(0, 120) }),
+        }).then(function (r) { return r.json().then(function (b) {
+            return { ok: r.ok && b.success === true, b: b }; }); })
+        .catch(function (e) { return { ok: false, b: { error: String(e) } }; })
+        .then(function (res) {
+            btn.disabled = false; btn.textContent = '生成方案';
+            if (!res.ok) { toast((res.b && (res.b.detail || res.b.error)) || '生成失败'); return; }
+            var d = res.b.data; wizPlanData = d;
+            $('wizPlan').style.display = '';
+            $('wizResult').style.display = 'none';
+            $('wizCat').textContent = d.categoryLabel + ' · ' + d.category;
+            $('wizNames').innerHTML = d.shopNames.map(function (n) {
+                return '<span class="wiz-name" data-n="' + esc(n) + '">' + esc(n) + '</span>';
+            }).join('');
+            $('wizName').value = d.shopNames[0] || '';
+            $('wizPos').textContent = d.positioning;
+            $('wizPicks').innerHTML = d.picks.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('');
+            $('wizStyle').textContent = d.style;
+            $('wizMkt').innerHTML = d.marketing.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('');
+            $('wizChk').innerHTML = d.checklist.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('');
+            $('wizPlan').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+    }
+    function wizSubmit() {
+        if (!wizPlanData) return;
+        var name = ($('wizName').value || '').trim();
+        if (!name) { $('wizName').focus(); toast('先选定一个店名'); return; }
+        if (!window.Auth || !Auth.isLoggedIn()) {
+            toast('入盟申请须先登录');
+            setTimeout(function () { location.href = 'login.html'; }, 900);
+            return;
+        }
+        var info = Auth.getInfo();
+        var headers = Auth.apiHeaders();
+        headers['Content-Type'] = 'application/json';
+        headers['X-Member-Id'] = String(info.memberId);
+        var btn = $('wizSubmit'); btn.disabled = true; btn.textContent = '提交中…';
+        fetch('/api/alliance/apply', {
+            method: 'POST', headers: headers,
+            body: JSON.stringify({
+                memberId: info.memberId, category: wizPlanData.category,
+                shopName: name,
+                credentials: ['开店想法: ' + wizPlanData.idea],
+            }),
+        }).then(function (r) { return r.json().then(function (b) {
+            return { ok: r.ok && b.success === true, b: b }; }); })
+        .catch(function (e) { return { ok: false, b: { error: String(e) } }; })
+        .then(function (res) {
+            btn.disabled = false; btn.textContent = '提交入盟申请';
+            var box = $('wizResult'); box.style.display = '';
+            if (res.ok) {
+                var d = res.b.data || {};
+                box.className = 'wiz-result';
+                box.textContent = '✅ 入盟申请已提交' +
+                    (d.precheckScore != null ? '（AI 预审 ' + d.precheckScore + ' 分）' : '') +
+                    '，审核结果将以站内消息通知。';
+            } else {
+                box.className = 'wiz-result fail';
+                box.textContent = '❌ ' + ((res.b && (res.b.error || res.b.detail)) || '提交失败') +
+                    '（若提示须超级会员，可先升级会员后再试）';
+            }
+        });
+    }
+    document.addEventListener('click', function (e) {
+        var n = e.target.closest && e.target.closest('.wiz-name');
+        if (n) {
+            document.querySelectorAll('.wiz-name').forEach(function (x) { x.classList.remove('on'); });
+            n.classList.add('on');
+            $('wizName').value = n.dataset.n || n.textContent;
+        }
+    });
+    $('wizGo').addEventListener('click', wizGenerate);
+    $('wizIdea').addEventListener('keydown', function (e) { if (e.key === 'Enter') wizGenerate(); });
+    $('wizSubmit').addEventListener('click', wizSubmit);
 
     /* ---------- 路由与启动 ---------- */
     function route() {

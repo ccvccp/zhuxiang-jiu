@@ -138,6 +138,8 @@ from routes.security_routes import register_security_routes
 from routes.dpo_routes import register_dpo_routes
 # 心境·酒签公开端点(首页 Agent AI 模块① 轻量版: 游客心境→RAG 酒签)
 from routes.mood_routes import register_mood_routes
+# 一句话开店向导(同盟商城 Agent 方案: 想法→开店方案→入盟申请)
+from routes.store_wizard_routes import register_store_wizard_routes
 
 __all__ = [
     # 已有(15)
@@ -224,4 +226,5 @@ __all__ = [
     "register_security_routes",
     "register_dpo_routes",
     "register_mood_routes",
+    "register_store_wizard_routes",
 ]

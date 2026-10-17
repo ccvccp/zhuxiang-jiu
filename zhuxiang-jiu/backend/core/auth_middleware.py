@@ -116,6 +116,9 @@ PUBLIC_EXACT = {
     # 无身份, 单端点精确放行; 限流在 routes/mood_routes(进程内
     # 按 IP 滑动窗), 不放宽 /api/mood/ 前缀
     "/api/mood/wine",
+    # 一句话开店向导(同盟商城 Agent 方案): 游客生成开店方案——
+    # 纯规则零外呼不落库; 限流同 mood 范式(进程内 IP 滑动窗)
+    "/api/store/wizard",
     # 开店申请城市/区县选择数据源(游客浏览申请页所需——344 市/3028 区县
     # 区划册只读; 时空情景感知 scene.html 切换城市同源)
     "/api/citystore/cities/available",
