@@ -2240,3 +2240,119 @@ textarea.form-control {
         margin-bottom: calc(16px + env(safe-area-inset-bottom));
     }
 }
+
+/* ===== 心境·酒签(首页 Agent AI 模块① 轻量版) ===== */
+.mood-section {
+    background: linear-gradient(180deg, #f2f7f0 0%, #ffffff 100%);
+}
+
+.mood-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: center;
+    margin-bottom: 18px;
+}
+
+.mood-tag {
+    padding: 10px 20px;
+    border-radius: 999px;
+    border: 1px solid var(--color-primary-light);
+    background: #ffffff;
+    color: var(--color-primary-dark);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all .2s ease;
+}
+
+.mood-tag:hover {
+    background: #eaf3ec;
+    transform: translateY(-1px);
+}
+
+.mood-tag.active {
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
+    border-color: var(--color-primary-dark);
+    color: #ffffff;
+}
+
+.mood-custom {
+    display: flex;
+    gap: 10px;
+    max-width: 520px;
+    margin: 0 auto 24px;
+}
+
+.mood-custom input {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 16px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md, 8px);
+    font-size: 14px;
+    outline: none;
+}
+
+.mood-custom input:focus {
+    border-color: var(--color-primary);
+}
+
+.mood-card {
+    max-width: 640px;
+    margin: 0 auto;
+    background: #fffdf6;
+    border: 1px solid #dde7d8;
+    border-left: 4px solid var(--color-primary);
+    border-radius: 12px;
+    padding: 24px 26px 20px;
+    box-shadow: 0 6px 24px rgba(53, 92, 68, .08);
+    position: relative;
+}
+
+.mood-card-ribbon {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 999px;
+    background: rgba(74, 124, 89, .12);
+    color: var(--color-primary-dark);
+    font-size: 13px;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+}
+
+.mood-card-body {
+    font-size: 15px;
+    line-height: 1.9;
+    color: #3c4a3f;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.mood-card-body.pouring {
+    color: var(--color-primary-light);
+    animation: mood-pour 1.2s ease-in-out infinite;
+}
+
+@keyframes mood-pour {
+    0%, 100% { opacity: .55; }
+    50% { opacity: 1; }
+}
+
+.mood-card-meta {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #93a596;
+    letter-spacing: 1px;
+}
+
+.mood-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+@media (max-width: 640px) {
+    .mood-custom { flex-direction: column; }
+    .mood-card { padding: 18px 16px 16px; }
+}

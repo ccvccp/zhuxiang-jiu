@@ -41,6 +41,31 @@
         </div>
     </section>
 
+    <!-- 心境·酒签(首页 Agent AI 模块① 轻量版: 场景标签/自定义心境 -> 竹韵 RAG -> 酒签卡) -->
+    <section class="section mood-section" id="moodSection">
+        <div class="container">
+            <div class="section-title">
+                <h2>心境<span>酒签</span></h2>
+                <p>点一个当下的心境，竹韵为您斟一盏</p>
+                <div class="deco-line"></div>
+            </div>
+            <div class="mood-tags" id="moodTags"></div>
+            <div class="mood-custom">
+                <input id="moodInput" maxlength="40" placeholder="或说说您的心情，如「今晚吃火锅想配点清爽的」…">
+                <button id="moodGo" class="btn btn-gold">斟酒</button>
+            </div>
+            <div class="mood-card" id="moodCard" style="display:none;">
+                <span class="mood-card-ribbon" id="moodRibbon"></span>
+                <div class="mood-card-body" id="moodBody"></div>
+                <div class="mood-card-meta" id="moodMeta"></div>
+                <div class="mood-card-actions">
+                    <a href="products.html" class="btn btn-gold">去竹奕系列挑酒</a>
+                    <button class="btn btn-outline" id="moodChat">与竹韵细聊</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- 金刚区 8 宫格(京东模式: 小图标大间距, 逛/购/玩/服务四类动线) -->
     <section class="section">
         <div class="container">
@@ -283,6 +308,74 @@
                 tick(); setInterval(tick, 1000);
             } catch (e) { /* 静默隐藏 */ }
         })();
+        // 心境·酒签(模块① 轻量版): 场景标签/自定义输入 -> 公开端点 /api/mood/wine
+        // 游客可用(无会话无身份, 服务端按 IP 限流); 深聊仍走竹韵挂件(登录态)
+        (function () {
+            const MOODS = [
+                { tag: '🍃 微醺独酌', q: '今晚想一个人小酌放松，帮我推荐一款适合的竹奕酒？' },
+                { tag: '🎁 长辈贺寿', q: '送长辈贺寿，选什么竹奕酒合适？想稳妥体面一些。' },
+                { tag: '🔥 火锅聚会', q: '朋友聚会吃火锅，配哪款竹香酒清爽解腻？' },
+                { tag: '🌧 雨夜温饮', q: '雨夜想温一壶酒慢慢喝，哪款竹奕酒适合温饮？' },
+                { tag: '❄ 夏日冰萃', q: '夏天想喝点冰镇清爽的酒，有推荐吗？' },
+                { tag: '🍶 佐餐小酌', q: '配家常小菜日常喝，选哪款竹奕酒合适？' },
+            ];
+            async function askMood(question, label) {
+                const card = document.getElementById('moodCard');
+                const body = document.getElementById('moodBody');
+                const meta = document.getElementById('moodMeta');
+                const ribbon = document.getElementById('moodRibbon');
+                card.style.display = '';
+                ribbon.textContent = label || '此刻心境';
+                body.classList.add('pouring');
+                body.textContent = '竹韵正在为您斟酒……';
+                meta.textContent = '';
+                card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                try {
+                    const res = await fetch('/api/mood/wine', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mood: question.slice(0, 80) }),
+                    });
+                    const b = await res.json().catch(() => null);
+                    if (!res.ok || !b || b.success !== true) {
+                        throw new Error((b && b.detail) || ('HTTP ' + res.status));
+                    }
+                    const d = b.data || {};
+                    body.classList.remove('pouring');
+                    body.textContent = d.reply || '竹韵暂时在照看别处，稍后再试一次？';
+                    const conf = (d.confidence != null) ? Math.round(d.confidence * 100) : null;
+                    meta.textContent = conf != null
+                        ? ('—— 竹韵 · 心境契合 ' + conf + '%')
+                        : '—— 竹韵为您斟上';
+                } catch (err) {
+                    body.classList.remove('pouring');
+                    body.textContent = '斟酒的手滑了一下（' + err.message + '），请稍后再试。';
+                }
+            }
+
+            document.getElementById('moodTags').innerHTML = MOODS.map((m, i) =>
+                '<button class="mood-tag" data-i="' + i + '">' + m.tag + '</button>').join('');
+            document.getElementById('moodTags').addEventListener('click', e => {
+                const btn = e.target.closest('.mood-tag');
+                if (!btn) return;
+                document.querySelectorAll('.mood-tag').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                askMood(MOODS[+btn.dataset.i].q, MOODS[+btn.dataset.i].tag);
+            });
+            const goCustom = () => {
+                const v = document.getElementById('moodInput').value.trim();
+                if (!v) { document.getElementById('moodInput').focus(); return; }
+                document.querySelectorAll('.mood-tag').forEach(b => b.classList.remove('active'));
+                askMood(v, '随心一念');
+            };
+            document.getElementById('moodGo').addEventListener('click', goCustom);
+            document.getElementById('moodInput').addEventListener('keydown', e => { if (e.key === 'Enter') goCustom(); });
+            document.getElementById('moodChat').addEventListener('click', () => {
+                if (window.AIHubWidget) AIHubWidget.toggle();
+                else location.href = 'service.html';
+            });
+        })();
+
     </script>
   <script src="js/resonance-beacon.js" defer></script>
   <!-- 竹韵 V0.5: 全站 AI 挂件(ai-hub-widget, 多模态; 探测失败 1s 内隐藏

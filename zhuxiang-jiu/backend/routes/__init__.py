@@ -136,6 +136,8 @@ from routes.scene_routes import register_scene_routes
 from routes.security_routes import register_security_routes
 # DPO 偏好对数据面(小竹蓝图 P4-10 第一批: 三源归集+人工评审环+stats)
 from routes.dpo_routes import register_dpo_routes
+# 心境·酒签公开端点(首页 Agent AI 模块① 轻量版: 游客心境→RAG 酒签)
+from routes.mood_routes import register_mood_routes
 
 __all__ = [
     # 已有(15)
@@ -221,4 +223,5 @@ __all__ = [
     "register_scene_routes",
     "register_security_routes",
     "register_dpo_routes",
+    "register_mood_routes",
 ]

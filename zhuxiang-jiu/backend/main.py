@@ -490,6 +490,9 @@ register_xinzhi_routes(app)
 # 人工评审环常闭+stats; 归集只产 pending, approved 必经人工)
 from routes.dpo_routes import register_dpo_routes
 register_dpo_routes(app)
+# 心境·酒签公开端点(首页 Agent AI 模块① 轻量版: 游客心境→RAG 酒签)
+from routes.mood_routes import register_mood_routes
+register_mood_routes(app)
 
 
 # ============================================================
