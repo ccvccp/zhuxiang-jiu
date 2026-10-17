@@ -50,6 +50,22 @@ logger = logging.getLogger(__name__)
 WECHAT_API_BASE = "https://api.mch.weixin.qq.com"
 # 支付宝开放平台网关
 ALIPAY_GATEWAY = "https://openapi.alipay.com/gateway.do"
+# Windows 手工沙箱(alipay-aipay skill, 2026-10-17): 受保护本机配置,
+# 仅在 env 凭证未配置时兜底生效——生产 env 恒优先, 零生产风险
+ALIPAY_SANDBOX_GATEWAY = (
+    "https://openapi-sandbox.dl.alipaydev.com/gateway.do")
+ALIPAY_SANDBOX_CONFIG = Path(
+    __file__).resolve().parent.parent / ".alipay-sandbox.json"
+
+
+def _alipay_sandbox_config() -> dict:
+    """读沙箱受保护配置(缺失/损坏返回空 dict——不阻断, 由
+    _credentials 的 env 校验兜底 fail-hard)"""
+    try:
+        return json.loads(
+            ALIPAY_SANDBOX_CONFIG.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 # 默认回调地址(与 nginx /api 反代同源)
 DEFAULT_NOTIFY_URL = "https://zyjiu.com/api/payment/callback/pay"
 # 微信回调时间窗(±秒, 防重放)
@@ -85,6 +101,18 @@ def _load_private_key(key: str) -> str:
     except OSError as e:
         raise ValueError(
             f"私钥文件读取失败({key}={v}): {e}") from e
+
+
+def _pem_wrap_pkcs1(raw: str) -> str:
+    """裸 base64 PKCS#1(RSA) 私钥包裹 PEM 头尾(沙箱配置为裸串,
+    cryptography load_pem_private_key 须 PEM——与 _ensure_public_pem
+    同款调用边界适配, 不写回配置文件)"""
+    v = (raw or "").strip().replace("\\n", "")
+    if "-----BEGIN" in v:
+        return v
+    return ("-----BEGIN RSA PRIVATE KEY-----\n"
+            + "\n".join(v[i:i + 64] for i in range(0, len(v), 64))
+            + "\n-----END RSA PRIVATE KEY-----\n")
 
 
 def _rsasha256_sign(message: str, private_key_pem: str) -> str:
@@ -204,21 +232,43 @@ class AlipayGateway:
 
     REQUIRED = ("PAY60_ALIPAY_APPID", "PAY60_ALIPAY_PRIVATE_KEY")
 
-    def __init__(self, http_post):
-        self._http_post = http_post
+    def __init__(self, http_post=None):
+        self._http_post = http_post or _default_http_post
+        self._sandbox = _alipay_sandbox_config()
+
+    def _sandbox_active(self) -> bool:
+        """沙箱兜底生效 = 显式开关 ALIPAY_SANDBOX=1 且 env 未配置
+        应用凭证且沙箱文件含密钥组(默认关闭——生产 fail-hard 语义
+        与既有测试不受本机沙箱文件影响)"""
+        return (os.environ.get("ALIPAY_SANDBOX", "").strip() == "1"
+                and not _env("PAY60_ALIPAY_APPID")
+                and bool(self._sandbox.get("appId"))
+                and bool(self._sandbox.get("appPrivatePkcsKey")))
+
+    def _gateway_url(self) -> str:
+        if self._sandbox_active():
+            return self._sandbox.get("gateway") or ALIPAY_SANDBOX_GATEWAY
+        return ALIPAY_GATEWAY
 
     def _credentials(self) -> dict:
         missing = [k for k in self.REQUIRED if not _env(k)]
-        if missing:
+        if missing and not self._sandbox_active():
             raise ValueError(
                 f"支付宝凭证未配置({','.join(missing)}), "
                 f"经 .env 注入——real 渠道 fail-hard 不静默降级")
+        if missing:
+            # 沙箱兜底: 非 Java 语言用 PKCS#1 私钥(appPrivatePkcsKey)
+            return {"app_id": self._sandbox["appId"],
+                    "private_key": _pem_wrap_pkcs1(
+                        self._sandbox["appPrivatePkcsKey"])}
         return {"app_id": _env("PAY60_ALIPAY_APPID"),
                 "private_key": _load_private_key("PAY60_ALIPAY_PRIVATE_KEY")}
 
     def _signed_params(self, method: str, biz_content: dict,
                        notify_url: str, return_url: str = "") -> dict:
-        """构造 RSA2 签名请求参数(参数升序拼接 & 排除 sign/sign_type;
+        """构造 RSA2 签名请求参数(参数升序拼接; sign_type 参与签名——
+        2026-10-17 沙箱网关实证: 网关验签串含 sign_type=RSA2, 排除式
+        签名报 invalid-signature(网关报错页展示验签串逐字段比对);
         notify_url/return_url 空值不入参——公共参数缺省须整键省略)"""
         params = {
             "app_id": self._credentials()["app_id"],
@@ -234,9 +284,10 @@ class AlipayGateway:
             params["notify_url"] = notify_url
         if return_url:
             params["return_url"] = return_url
+        # sign_type 参与签名(沙箱网关验签串实证含 sign_type=RSA2)
         plain = "&".join(
             f"{k}={params[k]}" for k in sorted(params)
-            if params[k] != "" and k not in ("sign", "sign_type"))
+            if params[k] != "" and k != "sign")
         params["sign"] = _rsasha256_sign(
             plain, self._credentials()["private_key"])
         return params
@@ -260,7 +311,7 @@ class AlipayGateway:
             }, notify_url)
             # B10: sign 为 base64(含 + / =), 必须经 urlencode 编码,
             # 裸拼 query 会被渠道按分隔符截断导致验签失败
-            pay_url = ALIPAY_GATEWAY + "?" + urlencode(
+            pay_url = self._gateway_url() + "?" + urlencode(
                 {k: params[k] for k in sorted(params)})
             return {"prepay": {"gateway": "alipay", "method": "wap"},
                     "payParams": {"payUrl": pay_url}}
@@ -270,7 +321,7 @@ class AlipayGateway:
                 "subject": subject, "product_code": "FAST_INSTANT_TRADE_PAY",
             }, notify_url, return_url=_env("PAY60_ALIPAY_RETURN_URL"))
             # B10: 同上, 参数需 URL 编码后拼接
-            pay_url = ALIPAY_GATEWAY + "?" + urlencode(
+            pay_url = self._gateway_url() + "?" + urlencode(
                 {k: params[k] for k in sorted(params)})
             return {"prepay": {"gateway": "alipay", "method": "page"},
                     "payParams": {"payUrl": pay_url}}
@@ -280,7 +331,12 @@ class AlipayGateway:
                 "subject": subject,
             }, notify_url)
             status, resp = await self._http_post(
-                ALIPAY_GATEWAY, form=params, headers={})
+                self._gateway_url(), form=params, headers={})
+            if isinstance(resp, str):
+                try:
+                    resp = json.loads(resp)
+                except ValueError:
+                    resp = {}
             resp = resp if isinstance(resp, dict) else {}
             if status != 200 or resp.get("alipay_trade_precreate_response",
                                          {}).get("code") != "10000":
@@ -297,10 +353,16 @@ class AlipayGateway:
     # ============================================================
 
     async def _post_signed(self, method: str, biz: dict) -> dict:
-        """签名 POST 网关, 返回业务响应体(alipay_xxx_response)"""
+        """签名 POST 网关, 返回业务响应体(alipay_xxx_response);
+        _http_post 对部分网关响应返回原始 JSON 字符串, 此处统一解析"""
         params = self._signed_params(method, biz, notify_url="")
         status, resp = await self._http_post(
-            ALIPAY_GATEWAY, form=params, headers={})
+            self._gateway_url(), form=params, headers={})
+        if isinstance(resp, str):
+            try:
+                resp = json.loads(resp)
+            except ValueError:
+                resp = {}
         resp = resp if isinstance(resp, dict) else {}
         if status != 200:
             raise ValueError(
@@ -392,7 +454,7 @@ class HuabeiGateway(AlipayGateway):
                 "hn_fq_num": str(pay_order["installments"])}
         params = self._signed_params("alipay.trade.wap.pay", biz,
                                      notify_url)
-        pay_url = ALIPAY_GATEWAY + "?" + urlencode(
+        pay_url = self._gateway_url() + "?" + urlencode(
             {k: params[k] for k in sorted(params)})
         return {"prepay": {"gateway": "huabei", "method": "wap"},
                 "payParams": {"payUrl": pay_url}}
@@ -710,6 +772,9 @@ def verify_alipay_callback(form: dict) -> None:
         raise CallbackVerificationError(
             f"app_id 不匹配(期望 {app_id}, 回调 {form.get('app_id')})")
     pub_raw = _env_or_file("PAY60_ALIPAY_PUBLIC_KEY")
+    if not pub_raw and os.environ.get("ALIPAY_SANDBOX", "").strip() == "1":
+        # 沙箱兜底(显式开关): 无 env 公钥时用受保护沙箱文件的支付宝公钥
+        pub_raw = _alipay_sandbox_config().get("alipayPublicKey") or ""
     if not pub_raw:
         raise CallbackVerificationError(
             "支付宝公钥未配置(PAY60_ALIPAY_PUBLIC_KEY 经 .env 注入)")
