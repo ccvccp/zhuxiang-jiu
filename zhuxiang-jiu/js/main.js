@@ -191,7 +191,7 @@ function renderFooter() {
                 </div>
             </div>
             <div class="footer-bottom">
-                <p>© 2026 山东瑞麒酒业有限公司 版权所有 | 鲁ICP备XXXXXXXX号 | 食品经营许可证：SCXXXXXXXXX</p>
+                <p>© 2026 山东瑞麒酒业有限公司 版权所有 | <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer" style="color:inherit">鲁ICP备2026059492号-1</a></p>
                 <p>过量饮酒有害健康 · 未成年禁止饮酒 · 饮酒后请勿驾车 · 孕妇请勿饮酒</p>
             </div>
         </div>
