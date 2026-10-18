@@ -60,6 +60,7 @@
 html {
     scroll-behavior: smooth;
     -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%; /* XWeb 无前缀版: 阻止跟随微信字体大小强制放大文字 */
 }
 
 body {
