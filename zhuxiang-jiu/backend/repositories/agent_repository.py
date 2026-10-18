@@ -315,6 +315,27 @@ class AgentRepository:
         return {"scanned": len(apps), "expired": expired,
                 "retentionDays": max_age_days}
 
+    async def purge_applies(self, max_anon_age_days: int = 365) -> dict:
+        """物理压实: 匿名化满 max_anon_age_days 的申请彻底删除
+
+        仅删已匿名化(anonymizedAt 非空)且超期的记录——
+        approved(已转签约档案)等未匿名化数据天然永久豁免。
+        指标历史由 metrics 日落点快照保留; 审计日志不在范围。
+        """
+        from datetime import datetime, timedelta
+        cutoff = (datetime.utcnow() - timedelta(
+            days=max_anon_age_days)).isoformat()
+        apps = await self.list_applies()
+        purged = 0
+        for app in apps:
+            anon = str(app.get("anonymizedAt") or "")
+            if not anon or anon >= cutoff:
+                continue
+            if await self.delete_apply(app["applyId"]):
+                purged += 1
+        return {"scanned": len(apps), "purged": purged,
+                "purgeAfterDays": max_anon_age_days}
+
     # ---------- 进货记录 ----------
 
     async def save_purchase(self, purchase_data: dict) -> dict:

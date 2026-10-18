@@ -86,6 +86,23 @@ async def run_ttl() -> dict:
             max_age_days=retention_days())
     except Exception:                     # noqa: BLE001 fail-soft 隔离
         logger.exception("hook86_ttl_agent_scan_failed")
+    # PII 推广(第三批): cooperation/agent 匿名化满 purge_days 物理压实
+    # (仅删已匿名化超期记录; 未匿名化数据天然豁免)
+    coo_purge = {"scanned": 0, "purged": 0}
+    try:
+        from repositories.cooperation_repository import (
+            CooperationRepository)
+        coo_purge = await CooperationRepository().purge_applications(
+            max_anon_age_days=purge_days)
+    except Exception:                     # noqa: BLE001 fail-soft 隔离
+        logger.exception("hook86_ttl_cooperation_purge_failed")
+    ag_purge = {"scanned": 0, "purged": 0}
+    try:
+        from repositories.agent_repository import AgentRepository
+        ag_purge = await AgentRepository().purge_applies(
+            max_anon_age_days=purge_days)
+    except Exception:                     # noqa: BLE001 fail-soft 隔离
+        logger.exception("hook86_ttl_agent_purge_failed")
     # P3 metrics 日落点(当日一份, 重复运行幂等覆盖)
     day = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     metrics = await Hook86Service().metrics()
@@ -95,13 +112,17 @@ async def run_ttl() -> dict:
                    "purgeAfterDays": purge_days,
                    "cooperationExpired": coo["expired"],
                    "agentExpired": ag["expired"],
+                   "cooperationPurged": coo_purge["purged"],
+                   "agentPurged": ag_purge["purged"],
                    "metricDay": day})
     _last_run = report
     logger.info(
         "hook86_ttl_scan scanned=%s expired=%s purged=%s coo_expired=%s "
-        "ag_expired=%s retention=%sd metric_day=%s",
+        "ag_expired=%s coo_purged=%s ag_purged=%s retention=%sd "
+        "metric_day=%s",
         report["scanned"], report["expired"], purge["purged"],
-        coo["expired"], ag["expired"], report["retentionDays"], day)
+        coo["expired"], ag["expired"], coo_purge["purged"],
+        ag_purge["purged"], report["retentionDays"], day)
     return report
 
 

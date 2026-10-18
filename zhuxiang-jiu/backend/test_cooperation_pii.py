@@ -144,3 +144,39 @@ async def _ttl_body():
     # 幂等
     again = await repo.expire_applications(max_age_days=90)
     assert again["expired"] == 0
+
+
+def test_purge_cooperation_boundary():
+    """物理压实: 匿名化满365天删除; 未满/未匿名化不动; 幂等"""
+    asyncio.run(_purge_body())
+
+
+async def _purge_body():
+    from datetime import datetime, timedelta
+    from repositories.cooperation_repository import (
+        CooperationRepository)
+    repo = CooperationRepository()
+    # 已匿名化且超 365 天 → 删
+    old = await _seed_app(99005, status="rejected", age_days=500)
+    old["anonymizedAt"] = (datetime.utcnow()
+                           - timedelta(days=400)).isoformat()
+    await repo.save_application(old)
+    # 已匿名化但未满 365 天 → 留
+    fresh = await _seed_app(99006, status="rejected", age_days=91)
+    fresh["anonymizedAt"] = datetime.utcnow().isoformat()
+    await repo.save_application(fresh)
+    # 未匿名化(approved) → 永不动
+    await _seed_app(99007, status="approved", age_days=500)
+
+    report = await repo.purge_applications(max_anon_age_days=365)
+    assert report["purged"] >= 1
+    ids = {a["id"] for a in await repo.list_applications(limit=500)}
+    assert 99005 not in ids                 # 已压实
+    assert 99006 in ids                     # 匿名化未满期
+    assert 99007 in ids                     # 未匿名化豁免
+    # 幂等
+    again = await repo.purge_applications(max_anon_age_days=365)
+    assert again["purged"] == 0
+    # 清理
+    for i in (99006, 99007):
+        await repo.delete_application(i)

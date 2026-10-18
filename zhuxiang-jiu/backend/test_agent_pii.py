@@ -123,3 +123,38 @@ async def _ttl_body():
     # 清理测试数据
     for i in (99013, 99014, 99015):
         await repo.delete_apply(i)
+
+
+def test_purge_agent_boundary():
+    """物理压实: 匿名化满365天删除; 未满/未匿名化不动; 幂等"""
+    asyncio.run(_purge_body())
+
+
+async def _purge_body():
+    from datetime import datetime, timedelta
+    from repositories.agent_repository import AgentRepository
+    repo = AgentRepository()
+    # 已匿名化且超 365 天 → 删
+    old = await _seed_apply(99016, status="rejected", age_days=500)
+    old["anonymizedAt"] = (datetime.utcnow()
+                           - timedelta(days=400)).isoformat()
+    await repo.save_apply(old)
+    # 已匿名化但未满 365 天 → 留
+    fresh = await _seed_apply(99017, status="rejected", age_days=91)
+    fresh["anonymizedAt"] = datetime.utcnow().isoformat()
+    await repo.save_apply(fresh)
+    # 未匿名化(approved) → 永不动
+    await _seed_apply(99018, status="approved", age_days=500)
+
+    report = await repo.purge_applies(max_anon_age_days=365)
+    assert report["purged"] >= 1
+    ids = {a["applyId"] for a in await repo.list_applies()}
+    assert 99016 not in ids                 # 已压实
+    assert 99017 in ids                     # 匿名化未满期
+    assert 99018 in ids                     # 未匿名化豁免
+    # 幂等
+    again = await repo.purge_applies(max_anon_age_days=365)
+    assert again["purged"] == 0
+    # 清理
+    for i in (99017, 99018):
+        await repo.delete_apply(i)

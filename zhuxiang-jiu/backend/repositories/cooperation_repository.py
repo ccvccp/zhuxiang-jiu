@@ -289,6 +289,29 @@ class CooperationRepository:
         return {"scanned": len(apps), "expired": expired,
                 "retentionDays": max_age_days}
 
+    async def purge_applications(self, max_anon_age_days: int = 365) -> dict:
+        """物理压实: 匿名化满 max_anon_age_days 的申请彻底删除
+
+        仅删已匿名化(anonymizedAt 非空)且超期的记录——
+        approved/signed 等未匿名化数据天然永久豁免。
+        指标历史由 metrics 日落点快照保留, 不受 purge 影响;
+        导出审计日志(exports 环形)亦不在 purge 范围。
+        """
+        from datetime import datetime, timedelta
+        cutoff = (datetime.utcnow() - timedelta(
+            days=max_anon_age_days)).isoformat()
+        apps = await self.list_applications(limit=100000)
+        purged = 0
+        for app in apps:
+            anon = str(app.get("anonymizedAt")
+                       or app.get("piiAntonymizedAt") or "")
+            if not anon or anon >= cutoff:
+                continue
+            if await self.delete_application(app["id"]):
+                purged += 1
+        return {"scanned": len(apps), "purged": purged,
+                "purgeAfterDays": max_anon_age_days}
+
     # --- 合作协议 ---
 
     def _mem_get_contract(self, contract_id: int) -> dict | None:
