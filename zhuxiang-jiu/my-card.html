@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>我的会员卡 · 竹香酒馆</title>
+<style>
+  :root{
+    --bg:#f2f5f1; --card:#fff; --ink:#22301f; --sub:#7d8a78;
+    --brand:#2f7d4f; --accent:#3f9d63; --line:#e2e8de;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:"PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg);color:var(--ink);min-height:100vh;padding:20px 16px 40px}
+  .wrap{max-width:420px;margin:0 auto}
+
+  /* 会员卡卡面(tier 渐变) */
+  .mcard{border-radius:18px;padding:22px 20px 18px;color:#fff;position:relative;
+    overflow:hidden;box-shadow:0 8px 24px rgba(30,50,35,.22);transition:.3s}
+  .mcard.none{background:linear-gradient(135deg,#2f7d4f,#57a878)}
+  .mcard.silver{background:linear-gradient(135deg,#5d6b78,#9aa8b5)}
+  .mcard.gold{background:linear-gradient(135deg,#9a7328,#d4af5a)}
+  .mcard.black{background:linear-gradient(135deg,#191c1a,#3c423d)}
+  .mcard::after{content:"";position:absolute;right:-36px;top:-36px;width:150px;
+    height:150px;border-radius:50%;background:rgba(255,255,255,.08)}
+  .mcard .row1{display:flex;justify-content:space-between;align-items:center}
+  .mcard .brand{font-size:12px;opacity:.85;letter-spacing:2px}
+  .mcard .tier{font-size:21px;font-weight:700;letter-spacing:1px}
+  .mcard .row2{display:flex;justify-content:space-between;align-items:flex-end;
+    margin-top:26px}
+  .mcard .who .name{font-size:15px;font-weight:600}
+  .mcard .who .phone{font-size:12px;opacity:.8;margin-top:2px;letter-spacing:1px}
+  .mcard .consume{text-align:right}
+  .mcard .consume .num{font-size:22px;font-weight:700}
+  .mcard .consume .lbl{font-size:11px;opacity:.8}
+
+  /* 升档进度 */
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:16px;margin-top:14px}
+  .panel h3{font-size:13px;color:var(--ink);margin-bottom:12px;display:flex;
+    justify-content:space-between;align-items:center}
+  .panel h3 .next{font-size:11.5px;color:var(--accent);font-weight:600}
+  .bar{height:8px;background:#e9efe9;border-radius:99px;overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:99px;
+    background:linear-gradient(90deg,var(--brand),var(--accent));transition:width .6s}
+  .barMeta{display:flex;justify-content:space-between;font-size:11px;
+    color:var(--sub);margin-top:6px}
+  .ladder{display:flex;margin-top:14px}
+  .ladder .step{flex:1;text-align:center;position:relative}
+  .ladder .step .dot{width:10px;height:10px;border-radius:50%;background:#cfd8cf;
+    margin:0 auto 5px}
+  .ladder .step.on .dot{background:var(--brand)}
+  .ladder .step .t{font-size:11px;color:var(--sub)}
+  .ladder .step.on .t{color:var(--brand);font-weight:600}
+  .ladder .step .v{font-size:10px;color:#a8b2a5;margin-top:1px}
+
+  /* 状态与标签 */
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:13px 15px}
+  .stat .lbl{font-size:11px;color:var(--sub)}
+  .stat .val{font-size:15px;font-weight:700;margin-top:3px}
+  .stat .val small{font-size:11px;color:var(--sub);font-weight:400}
+  .tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .tags span{font-size:11.5px;color:var(--brand);background:#e8f3ea;
+    border:1px solid #cfe5d4;border-radius:99px;padding:4px 11px}
+  .tags .empty{color:var(--sub);background:none;border:1px dashed var(--line)}
+
+  .foot{text-align:center;font-size:10.5px;color:var(--sub);margin-top:18px;line-height:1.7}
+  .loading{text-align:center;color:var(--sub);font-size:13px;padding:60px 0}
+  .err{text-align:center;color:#b0552a;font-size:13px;padding:60px 0;line-height:1.8}
+  .err button{margin-top:12px;background:var(--brand);color:#fff;border:none;
+    border-radius:10px;padding:9px 26px;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="app"><div class="loading">加载中…</div></div>
+  <div class="foot">会员卡按累计实付自动升档 · 理性饮酒：未成年人禁止饮酒，过量饮酒有害健康</div>
+</div>
+
+<script>
+'use strict';
+/* 我的会员卡 · C 端视图(超级会员智能库)
+ * 对接: GET /api/mtier/me(登录态, X-Member-Id 头)
+ * 身份来源: URL ?memberId=xxx(小程序 webview 宿主注入) */
+(function () {
+  var qs = new URLSearchParams(location.search);
+  var memberId = qs.get('memberId') || '';
+
+  var TIER_TXT = {
+    none: ['普通会员', 'none'], silver: ['银卡会员', 'silver'],
+    gold: ['金卡会员', 'gold'], black: ['黑金会员', 'black']
+  };
+  var LC_TXT = {
+    none: '尚未消费', new: '新客', active: '活跃', repeat: '复购',
+    dormant: '沉睡', churn_risk: '流失风险', won_back: '已挽回'
+  };
+  var TAG_TXT = {
+    price_band: { high: '高端款爱好者', mid: '中端品味', entry: '入门尝鲜' },
+    freq: { high_freq: '高频买家' },
+    consume_band: {}, lifecycle: {}
+  };
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;',
+               "'": '&#39;' }[c];
+    });
+  }
+  function money(n) {
+    return '¥' + (Number(n) || 0).toLocaleString('zh-CN');
+  }
+
+  function render(d) {
+    var tierInfo = TIER_TXT[d.tier] || TIER_TXT.none;
+    var html = '';
+
+    /* 卡面 */
+    html += '<div class="mcard ' + tierInfo[1] + '">' +
+      '<div class="row1"><span class="brand">🎋 竹香酒馆</span>' +
+      '<span class="tier">' + esc(d.tierName || tierInfo[0]) + '</span></div>' +
+      '<div class="row2"><div class="who">' +
+      '<div class="name">' + esc(d.memberName || '会员') + '</div>' +
+      '<div class="phone">' + esc(d.phoneMasked || '') + '</div></div>' +
+      '<div class="consume"><div class="num">' + money(d.totalConsume) +
+      '</div><div class="lbl">累计实付</div></div></div></div>';
+
+    /* 升档进度 */
+    var ladder = [
+      { t: '普通', v: 0, k: 'none' },
+      { t: '银卡', v: 2000, k: 'silver' },
+      { t: '金卡', v: 6000, k: 'gold' },
+      { t: '黑金', v: 20000, k: 'black' }
+    ];
+    var curIdx = 0;
+    ladder.forEach(function (s, i) { if (s.k === d.tier) curIdx = i; });
+    var pct = Math.round((d.progress || 0) * 100);
+    html += '<div class="panel"><h3>会员成长' +
+      (d.nextTier ? '<span class="next">距' + esc(d.nextTierName) +
+       ' 还差 ' + money(Math.max(0, (d.nextThreshold || 0) -
+       (d.totalConsume || 0))) + '</span>'
+       : '<span class="next">已是最高档</span>') + '</h3>' +
+      '<div class="bar"><i style="width:' + pct + '%"></i></div>' +
+      '<div class="barMeta"><span>' + pct + '%</span><span>' +
+      (d.nextTier ? money(d.nextThreshold) : 'MAX') + '</span></div>' +
+      '<div class="ladder">';
+    ladder.forEach(function (s, i) {
+      html += '<div class="step' + (i <= curIdx ? ' on' : '') +
+        '"><div class="dot"></div><div class="t">' + s.t + '</div>' +
+        '<div class="v">' + (s.v ? money(s.v) : '—') + '</div></div>';
+    });
+    html += '</div></div>';
+
+    /* 状态与标签 */
+    html += '<div class="grid">' +
+      '<div class="stat"><div class="lbl">生命周期</div><div class="val">' +
+      esc(LC_TXT[d.lifecycle] || d.lifecycle || '—') + '</div></div>' +
+      '<div class="stat"><div class="lbl">成长等级</div><div class="val">L' +
+      esc(d.memberLevel || 1) + ' <small>竹系等级</small></div></div>' +
+      '<div class="stat"><div class="lbl">累计订单</div><div class="val">' +
+      esc(d.ordersTotal || 0) + ' <small>笔</small></div></div>' +
+      '<div class="stat"><div class="lbl">最近消费</div><div class="val">' +
+      (d.lastConsumeDays >= 0 ? esc(d.lastConsumeDays) + ' <small>天前</small>'
+       : '—') + '</div></div></div>';
+
+    /* auto 标签 */
+    var tags = d.tags || {};
+    var chips = [];
+    Object.keys(tags).forEach(function (k) {
+      var v = tags[k] && tags[k].value;
+      if (!v) return;
+      var txt = (TAG_TXT[k] && TAG_TXT[k][v]) || v;
+      chips.push(txt);
+    });
+    html += '<div class="panel"><h3>我的品味标签</h3><div class="tags">' +
+      (chips.length ? chips.map(function (c) {
+        return '<span>' + esc(c) + '</span>';
+      }).join('') : '<span class="empty">消费后自动生成</span>') +
+      '</div></div>';
+
+    document.getElementById('app').innerHTML = html;
+  }
+
+  function fail(msg) {
+    document.getElementById('app').innerHTML =
+      '<div class="err">' + esc(msg) +
+      '<br><button onclick="location.reload()">重新加载</button></div>';
+  }
+
+  if (!memberId) {
+    fail('缺少会员身份参数，请从竹香酒馆小程序进入');
+    return;
+  }
+  fetch('/api/mtier/me', { headers: { 'X-Member-Id': memberId } })
+    .then(function (r) {
+      if (r.status === 401) throw new Error('请先登录竹香酒馆');
+      if (r.status === 404) throw new Error('会员信息不存在');
+      if (!r.ok) throw new Error('服务暂时不可用');
+      return r.json();
+    })
+    .then(function (body) {
+      var d = body && body.data;
+      if (!d) throw new Error('数据异常');
+      render(d);
+    })
+    .catch(function (e) { fail(e.message || '加载失败'); });
+})();
+</script>
+</body>
+</html>

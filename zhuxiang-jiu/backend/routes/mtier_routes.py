@@ -95,6 +95,27 @@ async def mtier_logs(
     return {"code": 0, "data": await _svc.logs(limit)}
 
 
+@router.get("/me")
+async def mtier_me(
+    x_member_id: Annotated[str | None,
+                           Header(alias="X-Member-Id")] = None,
+):
+    """C 端本人会员卡视图(需登录态; 仅 auto 标签, manual 内部标记不外露)"""
+    raw = (x_member_id or "").strip()
+    if not raw:
+        raise HTTPException(status_code=401,
+                            detail="未登录: 请提供 X-Member-Id 头")
+    try:
+        member_id = int(raw)
+    except ValueError:
+        raise HTTPException(status_code=401,
+                            detail="X-Member-Id 须为数字") from None
+    try:
+        return {"code": 0, "data": await _svc.me(member_id)}
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from None
+
+
 @router.post("/refresh")
 async def mtier_refresh(
     x_role: Annotated[str | None, Header(alias="X-Role")] = None,

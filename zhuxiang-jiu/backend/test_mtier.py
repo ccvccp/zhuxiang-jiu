@@ -137,3 +137,36 @@ def test_endpoints_admin_gates(client):
     # 迁移留痕端点
     assert client.get("/api/mtier/logs",
                       headers=admin).status_code == 200
+
+
+def test_me_view(client):
+    """C 端本人视图: 进度/仅 auto 标签(manual 不外露)/鉴权闸"""
+    asyncio.run(_seed_member(88004, growth=3500))
+    asyncio.run(_seed_order(88004, days_ago=12, amount=280))
+    svc = MtierService()
+    asyncio.run(svc.evaluate_member(88004))
+    asyncio.run(svc.set_tag(88004, "internal_note", "运营内部标记"))
+
+    # 无身份头 → 401
+    assert client.get("/api/mtier/me").status_code == 401
+    assert client.get("/api/mtier/me",
+                      headers={"X-Member-Id": "abc"}).status_code == 401
+    # 本人视图
+    d = client.get("/api/mtier/me",
+                   headers={"X-Member-Id": "88004"}).json()["data"]
+    assert d["tier"] == TIER_SILVER
+    assert d["nextTier"] == "gold" and d["nextThreshold"] == 6000
+    # 3500/2000-6000 区间 → (3500-2000)/4000 = 0.375
+    assert abs(d["progress"] - 0.375) < 1e-6
+    assert "internal_note" not in d["tags"]        # manual 不外露
+    assert d["tags"]["consume_band"]["source"] == "auto"
+    assert d["phoneMasked"] == "138****6666"
+    # 无画像会员即时评估(懒评估)
+    asyncio.run(_seed_member(88005, growth=800))
+    d2 = client.get("/api/mtier/me",
+                    headers={"X-Member-Id": "88005"}).json()["data"]
+    assert d2["tier"] == TIER_NONE and d2["nextTier"] == "silver"
+    # 不存在会员 → 404
+    assert client.get("/api/mtier/me",
+                      headers={"X-Member-Id": "999999"}
+                      ).status_code == 404

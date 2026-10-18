@@ -40,6 +40,13 @@ TIER_THRESHOLDS = (
     (TIER_GOLD, 6000),
     (TIER_SILVER, 2000),
 )
+# 升档阶梯(低到高, C 端进度条口径)
+TIER_LADDER = (
+    (TIER_NONE, 0),
+    (TIER_SILVER, 2000),
+    (TIER_GOLD, 6000),
+    (TIER_BLACK, 20000),
+)
 
 # ---------- 生命周期常量 ----------
 
@@ -257,6 +264,38 @@ class MtierService:
         if not profile:
             raise KeyError(f"会员 {member_id} 无画像")
         return profile
+
+    # ---------- C 端本人视图 ----------
+
+    async def me(self, member_id) -> dict:
+        """我的会员卡(本人): 无画像即时评估 + 升档进度
+
+        仅返回 auto 标签——manual 为运营内部标记不对本人外露;
+        phoneMasked 供卡面展示(出口零明文)。
+        """
+        profile = await self.repo.get_profile(member_id)
+        if not profile:
+            profile = await self.evaluate_member(member_id)
+            if not profile:
+                raise KeyError(f"会员 {member_id} 不存在")
+        tiers = [t for t, _ in TIER_LADDER]
+        idx = tiers.index(profile.get("tier") or TIER_NONE)
+        consume = float(profile.get("totalConsume") or 0)
+        if idx + 1 < len(TIER_LADDER):
+            nxt, nxt_th = TIER_LADDER[idx + 1]
+            cur_th = TIER_LADDER[idx][1]
+            progress = (max(0.0, min(consume, nxt_th)) - cur_th) / (
+                nxt_th - cur_th)
+            next_name = TIER_NAMES[nxt]
+        else:
+            nxt, nxt_th, progress = "", 0, 1.0
+            next_name = "已是最高档"
+        tags = {k: v for k, v in (profile.get("tags") or {}).items()
+                if v.get("source") == "auto"}
+        return {**profile, "tags": tags,
+                "nextTier": nxt, "nextTierName": next_name,
+                "nextThreshold": nxt_th,
+                "progress": round(max(0.0, min(1.0, progress)), 4)}
 
 
 def _now() -> str:
