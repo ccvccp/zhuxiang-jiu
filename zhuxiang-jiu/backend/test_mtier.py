@@ -161,6 +161,7 @@ def test_me_view(client):
     assert "internal_note" not in d["tags"]        # manual 不外露
     assert d["tags"]["consume_band"]["source"] == "auto"
     assert d["phoneMasked"] == "138****6666"
+    assert "会员首单券" in d["tierBenefits"]        # 银卡权益清单
     # 无画像会员即时评估(懒评估)
     asyncio.run(_seed_member(88005, growth=800))
     d2 = client.get("/api/mtier/me",

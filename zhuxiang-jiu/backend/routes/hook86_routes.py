@@ -126,9 +126,24 @@ async def hook86_delete_lead(lead_id: int,
 
 
 @router.get("/activities")
-async def hook86_activities():
-    """进行中活动卡片(公开, bridge 既有活动管理模块安全投影)"""
-    return {"code": 0, "data": await _svc.activity_cards(limit=6)}
+async def hook86_activities(memberId: str = "",
+                            fingerprint: str = ""):
+    """进行中活动卡片(公开, bridge 既有活动管理模块安全投影)
+
+    携带会员身份(memberId)时附加 tier 权益联动块
+    (超级会员智能库, 登录态由调用方保证)。
+    """
+    subj = _subject(memberId, fingerprint)
+    data = {"cards": await _svc.activity_cards(limit=6)}
+    if memberId:
+        try:
+            from services.mtier_service import MtierService
+            block = await MtierService().tier_block(subj)
+            if block:
+                data["tier"] = block
+        except Exception:                  # noqa: BLE001
+            pass
+    return {"code": 0, "data": data}
 
 
 @router.post("/activity/signup")

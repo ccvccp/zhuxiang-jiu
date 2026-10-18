@@ -39,7 +39,7 @@ def test_activities_public_projection(client):
     aid = asyncio.run(_seed_activity())
     r = client.get("/api/hook86/activities")
     assert r.status_code == 200
-    card = next(c for c in r.json()["data"]
+    card = next(c for c in r.json()["data"]["cards"]
                 if c["activityId"] == aid)
     assert card["name"] == "竹香品鉴会·测试"
     assert card["typeName"] == "互动"
@@ -47,6 +47,8 @@ def test_activities_public_projection(client):
     for k in ("budget", "rules", "applicableScope", "createdBy",
               "approvedBy", "activityNo"):
         assert k not in card
+    # 匿名不带 tier 块; 会员带(tier 权益联动)
+    assert "tier" not in r.json()["data"]
 
 
 def test_chat_activity_intent_upgraded(client):
@@ -59,6 +61,31 @@ def test_chat_activity_intent_upgraded(client):
     assert d["action"] == "activities_card"
     assert isinstance(d["activities"], list)
     assert "理性饮酒" in d["reply"]
+    # 匿名主体不带 tier 联动块
+    assert "tier" not in d
+
+
+def test_chat_member_tier_linked(client):
+    """登录会员 chat activity → 附 tier 权益联动块(懒评估)"""
+    from repositories.member_repository import MemberRepository
+
+    async def _seed():
+        await MemberRepository().save(77001, {
+            "id": 77001, "name": "联动测试", "phone": "13800009999",
+            "level": 2, "growth_value": 6500, "status": 1,
+            "points": 0,
+            "createdAt": "2026-10-18T00:00:00"})
+
+    asyncio.run(_seed())
+    r = client.post("/api/hook86/chat", json={
+        "message": "会员有什么活动福利", "memberId": "77001"})
+    assert r.status_code == 200
+    d = r.json()["data"]
+    assert d["intent"] == "activity"
+    t = d["tier"]
+    assert t["tier"] == "gold" and t["tierName"] == "金卡会员"
+    assert "品鉴会优先报名" in t["benefits"]
+    assert t["nextTierName"] == "黑金会员"
 
 
 def test_signup_gates_and_inheritance(client):

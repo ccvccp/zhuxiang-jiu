@@ -86,7 +86,15 @@
  * 身份来源: URL ?memberId=xxx(小程序 webview 宿主注入) */
 (function () {
   var qs = new URLSearchParams(location.search);
-  var memberId = qs.get('memberId') || '';
+  /* 身份: URL ?memberId=(小程序 webview 宿主注入) 优先,
+   * 否则站内登录态 localStorage zhuxiang.auth(js/auth.js 口径) */
+  var memberId = '';
+  var authToken = '';
+  try {
+    var auth = JSON.parse(localStorage.getItem('zhuxiang.auth') || '{}');
+    memberId = String(qs.get('memberId') || auth.memberId || '');
+    authToken = String(auth.token || '');
+  } catch (e) { memberId = ''; }
 
   var TIER_TXT = {
     none: ['普通会员', 'none'], silver: ['银卡会员', 'silver'],
@@ -179,20 +187,42 @@
       }).join('') : '<span class="empty">消费后自动生成</span>') +
       '</div></div>';
 
+    /* 专属权益(tier 联动) */
+    var benefits = d.tierBenefits || [];
+    if (benefits.length) {
+      html += '<div class="panel"><h3>' + esc(d.tierName) +
+        ' 专属权益</h3><div class="tags" style="display:block">' +
+        benefits.map(function (b) {
+          return '<div style="font-size:12.5px;color:var(--ink);' +
+            'padding:4px 0">🎋 ' + esc(b) + '</div>';
+        }).join('') + '</div></div>';
+    }
+
+    /* 选酒顾问入口(86号 联动) */
+    html += '<div class="panel" style="text-align:center">' +
+      '<button class="signup" style="background:var(--brand);color:#fff;' +
+      'border:none;border-radius:10px;padding:11px 30px;font-size:13.5px;' +
+      'font-weight:600" onclick="location.href=\'/wine-advisor.html' +
+      (memberId ? '?memberId=' + encodeURIComponent(memberId) : '') +
+      '\'">问问 AI 选酒顾问 🎋</button></div>';
+
     document.getElementById('app').innerHTML = html;
   }
 
   function fail(msg) {
     document.getElementById('app').innerHTML =
       '<div class="err">' + esc(msg) +
-      '<br><button onclick="location.reload()">重新加载</button></div>';
+      '<br><button onclick="location.href=\'/login.html\'">去登录</button>' +
+      '<button style="margin-left:10px" onclick="location.reload()">重新加载</button></div>';
   }
 
   if (!memberId) {
-    fail('缺少会员身份参数，请从竹香酒馆小程序进入');
+    fail('请先登录竹香酒馆后查看会员卡');
     return;
   }
-  fetch('/api/mtier/me', { headers: { 'X-Member-Id': memberId } })
+  var headers = { 'X-Member-Id': memberId };
+  if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+  fetch('/api/mtier/me', { headers: headers })
     .then(function (r) {
       if (r.status === 401) throw new Error('请先登录竹香酒馆');
       if (r.status === 404) throw new Error('会员信息不存在');

@@ -107,6 +107,12 @@ footer{flex:none;padding:10px 12px calc(10px + env(safe-area-inset-bottom));back
   var LS_FP = 'hook86.fp';
   var qs = new URLSearchParams(location.search);
   var channel = (qs.get('channel') || qs.get('utm_content') || '').slice(0, 40);
+  /* 登录会员身份(超级会员智能库联动): URL ?memberId= 或站内登录态 */
+  var memberId = '';
+  try {
+    var auth = JSON.parse(localStorage.getItem('zhuxiang.auth') || '{}');
+    memberId = String(qs.get('memberId') || auth.memberId || '');
+  } catch (e) { memberId = ''; }
 
   function fingerprint() {
     var fp = localStorage.getItem(LS_FP);
@@ -210,6 +216,31 @@ footer{flex:none;padding:10px 12px calc(10px + env(safe-area-inset-bottom));back
       }
       btn.disabled = false;
     });
+  }
+
+  /* tier 权益联动卡(登录会员: 超级会员智能库) */
+  function tierCard(t) {
+    var d = document.createElement('div');
+    d.className = 'actcard';
+    d.innerHTML =
+      '<div class="acthead"><span class="acttype" style="background:#1a1d1b">' +
+      esc(t.tierName) + '</span><span class="actname">您的专属权益</span></div>' +
+      '<div class="actdesc">' + (t.benefits || []).map(function (b) {
+        return '🎋 ' + esc(b);
+      }).join('<br>') + '</div>' +
+      '<div class="actmeta"><span>距' + esc(t.nextTierName) +
+      ' 还差一步</span></div>';
+    var meta = d.querySelector('.actmeta');
+    var link = document.createElement('button');
+    link.className = 'signup';
+    link.textContent = '查看会员卡';
+    link.addEventListener('click', function () {
+      location.href = '/my-card.html' +
+        (memberId ? '?memberId=' + encodeURIComponent(memberId) : '');
+    });
+    meta.appendChild(link);
+    chatEl.appendChild(d);
+    scrollBottom();
   }
 
   /* 活动卡片(智能活动 Agent: bridge 活动管理模块) */
@@ -347,7 +378,8 @@ footer{flex:none;padding:10px 12px calc(10px + env(safe-area-inset-bottom));back
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: text, fingerprint: fingerprint(), channelCode: channel
+          message: text, fingerprint: fingerprint(), channelCode: channel,
+          memberId: memberId
         })
       });
       var body = await res.json();
@@ -365,6 +397,7 @@ footer{flex:none;padding:10px 12px calc(10px + env(safe-area-inset-bottom));back
           && d.activities && d.activities.length) {
         activitiesCards(d.activities);
       }
+      if (!d.blocked && d.tier) tierCard(d.tier);
     } catch (e) {
       done('服务暂时不可用，请稍后再试 🙏');
     }
@@ -387,6 +420,23 @@ footer{flex:none;padding:10px 12px calc(10px + env(safe-area-inset-bottom));back
 
   /* 欢迎语(本地静态, 零请求) */
   addAi('您好，我是竹香酒馆的 AI 选酒顾问 🎋<div class="tag">可为您推荐选酒、解答品鉴、查询价格与活动</div>');
+  /* 会员卡快捷入口(登录态直达) */
+  if (memberId) {
+    var entry = document.createElement('div');
+    entry.className = 'actcard';
+    entry.style.margin = '0 0 10px 0';
+    entry.innerHTML =
+      '<div class="actmeta"><span>🎋 已识别会员身份 · 专属权益与会员卡</span></div>';
+    var btn = document.createElement('button');
+    btn.className = 'signup';
+    btn.textContent = '我的会员卡';
+    btn.addEventListener('click', function () {
+      location.href = '/my-card.html?memberId=' +
+        encodeURIComponent(memberId);
+    });
+    entry.querySelector('.actmeta').appendChild(btn);
+    chatEl.insertBefore(entry, chatEl.firstChild);
+  }
 })();
 </script>
 </body>

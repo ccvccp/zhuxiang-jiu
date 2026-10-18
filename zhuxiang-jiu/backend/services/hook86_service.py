@@ -149,10 +149,18 @@ class Hook86Service:
                    "freq": freq}
         if action == ACTION_ACTIVITIES:
             # 智能活动 Agent: activity 意图直接交付活动卡片
+            # + 登录会员的 tier 权益联动块(超级会员智能库)
             try:
                 payload["activities"] = await self.activity_cards(limit=3)
             except Exception:              # noqa: BLE001 活动源故障不阻断对话
                 payload["activities"] = []
+            try:
+                from services.mtier_service import MtierService
+                block = await MtierService().tier_block(subject)
+                if block:
+                    payload["tier"] = block
+            except Exception:              # noqa: BLE001 权益源故障不阻断对话
+                pass
         return payload
 
     # ---------- 留资登记(幂等+频控硬闸) ----------

@@ -47,6 +47,16 @@ TIER_LADDER = (
     (TIER_GOLD, 6000),
     (TIER_BLACK, 20000),
 )
+# 各档专属权益(静态规则, C 端/86号 联动共用; 运营侧权益核销
+# 走既有活动/券体系, 此处为权益说明清单不构成履约承诺)
+TIER_BENEFITS = {
+    TIER_BLACK: ["专属品鉴会席位优先", "大客户顾问 1v1",
+                 "新品优先购", "节日礼盒 88 折"],
+    TIER_GOLD: ["品鉴会优先报名", "节日礼盒 95 折", "生日礼遇"],
+    TIER_SILVER: ["会员首单券", "生日礼遇"],
+    TIER_NONE: ["累计实付满 ¥2,000 自动升银卡",
+                "消费即成长, 升档零门槛"],
+}
 
 # ---------- 生命周期常量 ----------
 
@@ -292,10 +302,34 @@ class MtierService:
             next_name = "已是最高档"
         tags = {k: v for k, v in (profile.get("tags") or {}).items()
                 if v.get("source") == "auto"}
+        tier = profile.get("tier") or TIER_NONE
         return {**profile, "tags": tags,
+                "tierBenefits": list(TIER_BENEFITS.get(tier, ())),
                 "nextTier": nxt, "nextTierName": next_name,
                 "nextThreshold": nxt_th,
                 "progress": round(max(0.0, min(1.0, progress)), 4)}
+
+    async def tier_block(self, subject: str) -> dict | None:
+        """86号 等公域模块的 viewer 权益联动块
+
+        仅登录会员主体(m: 前缀)返回; 匿名/无画像返回 None
+        (前端不渲染权益卡)。无画像时即时懒评估。
+        """
+        if not str(subject or "").startswith("m:"):
+            return None
+        try:
+            member_id = int(str(subject)[2:])
+        except ValueError:
+            return None
+        try:
+            me = await self.me(member_id)
+        except KeyError:
+            return None
+        return {"memberId": member_id,
+                "tier": me["tier"], "tierName": me["tierName"],
+                "progress": me["progress"],
+                "nextTierName": me["nextTierName"],
+                "benefits": me["tierBenefits"]}
 
 
 def _now() -> str:
