@@ -46,6 +46,15 @@ class LeadReq(BaseModel):
     fingerprint: str = ""
 
 
+class ActivitySignupReq(BaseModel):
+    activityId: int
+    phone: str
+    channelCode: str = ""
+    consent: bool = False
+    memberId: str = ""
+    fingerprint: str = ""
+
+
 @router.post("/chat")
 async def hook86_chat(req: ChatReq):
     """意图对话(输入/输出双向过小竹合规闸, 强制理性饮酒声明)"""
@@ -114,6 +123,33 @@ async def hook86_delete_lead(lead_id: int,
     if not ok:
         raise HTTPException(status_code=404, detail="lead 不存在")
     return {"code": 0, "data": {"deleted": True, "leadId": lead_id}}
+
+
+@router.get("/activities")
+async def hook86_activities():
+    """进行中活动卡片(公开, bridge 既有活动管理模块安全投影)"""
+    return {"code": 0, "data": await _svc.activity_cards(limit=6)}
+
+
+@router.post("/activity/signup")
+async def hook86_activity_signup(req: ActivitySignupReq):
+    """活动报名(匿名 C 端): 本质=带活动标签的留资, 继承幂等+频控+TTL 治理"""
+    subj = _subject(req.memberId, req.fingerprint, req.phone[-4:])
+    try:
+        out = await _svc.signup_activity(
+            req.activityId, req.phone, channel_code=req.channelCode,
+            consent=req.consent, subject=subj)
+    except HookIntentError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    return {"code": 0, "data": out}
+
+
+@router.get("/activity/invite")
+async def hook86_activity_invite(memberId: str = "",
+                                 fingerprint: str = ""):
+    """老带新邀请函(公开): 归因码+分享文案, 好友留资归因到邀请人"""
+    subj = _subject(memberId, fingerprint)
+    return {"code": 0, "data": await _svc.invite_card(subj)}
 
 
 @router.get("/status")

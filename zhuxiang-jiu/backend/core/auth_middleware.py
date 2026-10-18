@@ -76,6 +76,9 @@ PUBLIC_EXACT = {
     # 前置 security_gateway 威胁闸兜底(chat 为纯规则引擎, 零 LLM)
     "/api/hook86/chat",
     "/api/hook86/lead",
+    # 86号 B批(智能活动 Agent): 匿名活动报名=带活动标签的留资,
+    # 同样自带合规闸+频控+TTL 治理
+    "/api/hook86/activity/signup",
     # 后台管理登录
     "/api/admin/login",
     # AI智能网站入口管理模块(39号): 入口预判/统一登录/注册/
@@ -158,6 +161,10 @@ PUBLIC_GET_PREFIXES = (
     "/api/activity/list",           # 活动列表
     "/api/hook86/status",           # 86号: 模块诊断(无敏感数据;
                                     # /leads /channels 走登录+admin)
+    "/api/hook86/activities",       # 86号 B批: 活动卡片(bridge 既有
+                                    # 活动模块安全投影, 无 PII)
+    "/api/hook86/activity/invite",  # 86号 B批: 老带新邀请函(确定性
+                                    # 哈希归因码, 无状态无 PII)
     "/api/activity/stats/",         # 活动统计
     "/api/activity/leaderboard/",   # 擂台榜单
     "/api/promo-cover/",            # 36号笔记封面品牌卡片(确定性

@@ -36,6 +36,17 @@ header .sub{font-size:11px;opacity:.8;margin-top:2px}
 .leadmsg{font-size:12px;margin-top:8px;color:var(--sub)}
 .leadmsg.ok{color:var(--accent)}
 .leadmsg.err{color:var(--err)}
+/* 活动卡片(智能活动 Agent) */
+.actcard{margin:-2px 0 10px 0;background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 13px;box-shadow:0 1px 4px rgba(22,35,60,.06)}
+.actcard .acthead{display:flex;align-items:center;gap:7px;margin-bottom:3px}
+.actcard .acttype{font-size:10.5px;color:#fff;background:var(--accent);border-radius:6px;padding:2px 7px;flex:none}
+.actcard .actname{font-size:13.5px;color:var(--ink);font-weight:600}
+.actcard .actdesc{font-size:12px;color:var(--sub);margin:3px 0 7px}
+.actcard .actmeta{font-size:11px;color:var(--sub);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.actcard .actmeta .cnt{color:var(--accent)}
+.actcard button.signup{background:var(--accent);color:#fff;border:none;border-radius:9px;padding:7px 16px;font-size:12.5px;font-weight:600}
+.actcard button.signup:disabled{background:#a8c5b0}
+.actcard .full{font-size:12px;color:var(--sub)}
 /* 快捷提问 */
 .chips{display:flex;gap:8px;overflow-x:auto;padding:8px 12px;flex:none;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
@@ -70,7 +81,8 @@ footer{flex:none;padding:10px 12px calc(10px + env(safe-area-inset-bottom));back
   <button data-q="送长辈礼盒，推荐一款">🎁 送人选酒</button>
   <button data-q="自己喝，入门选哪款">🍵 自饮推荐</button>
   <button data-q="现在多少钱，有优惠吗">💰 价格优惠</button>
-  <button data-q="竹香酒的工艺和度数">🍶 品鉴知识</button>
+  <button data-q="最近有什么活动福利">🎉 本月活动</button>
+  <button data-inv="1">🤝 邀请好友</button>
 </div>
 
 <footer>
@@ -200,6 +212,129 @@ footer{flex:none;padding:10px 12px calc(10px + env(safe-area-inset-bottom));back
     });
   }
 
+  /* 活动卡片(智能活动 Agent: bridge 活动管理模块) */
+  function activitiesCards(list) {
+    list.slice(0, 4).forEach(function (a) {
+      var d = document.createElement('div');
+      d.className = 'actcard';
+      d.innerHTML =
+        '<div class="acthead"><span class="acttype">' + esc(a.typeName) +
+        '</span><span class="actname">' + esc(a.name) + '</span></div>' +
+        '<div class="actdesc">' + esc(a.description || '') + '</div>' +
+        '<div class="actmeta"><span>已报名 <b class="cnt">' +
+        (a.registrationCount || 0) + '</b> 人</span></div>';
+      var meta = d.querySelector('.actmeta');
+      if (a.signable) {
+        var btn = document.createElement('button');
+        btn.className = 'signup';
+        btn.textContent = '立即报名';
+        btn.addEventListener('click', function () { signupCard(a); });
+        meta.appendChild(btn);
+      } else {
+        var full = document.createElement('span');
+        full.className = 'full';
+        full.textContent = '进行中';
+        meta.appendChild(full);
+      }
+      chatEl.appendChild(d);
+    });
+    scrollBottom();
+  }
+
+  /* 活动报名卡(匿名报名=带活动标签的留资, 同意勾选+24h频控) */
+  function signupCard(a) {
+    var d = document.createElement('div');
+    d.className = 'leadcard';
+    d.innerHTML =
+      '<h3>报名 · ' + esc(a.name) + '</h3>' +
+      '<p>留下手机号即完成报名，活动专员将与您确认细节（每人每天限 2 次）</p>' +
+      '<div class="leadrow">' +
+      '<input type="tel" maxlength="11" placeholder="11 位手机号" inputmode="numeric">' +
+      '<button>报名</button></div>' +
+      '<label class="leadconsent"><input type="checkbox">' +
+      '我已阅读并同意 <b>《隐私授权说明》</b>：手机号仅用于本次活动报名与联系，保留期 90 天，可随时申请删除</label>' +
+      '<div class="leadmsg"></div>';
+    chatEl.appendChild(d);
+    scrollBottom();
+    var phoneEl = d.querySelector('input[type=tel]');
+    var btn = d.querySelector('button');
+    var msg = d.querySelector('.leadmsg');
+    var consent = d.querySelector('input[type=checkbox]');
+    btn.addEventListener('click', async function () {
+      if (!consent.checked) {
+        msg.className = 'leadmsg err';
+        msg.textContent = '请先勾选同意《隐私授权说明》';
+        return;
+      }
+      var phone = phoneEl.value.trim();
+      if (!/^1[3-9]\d{9}$/.test(phone)) {
+        msg.className = 'leadmsg err';
+        msg.textContent = '请输入正确的 11 位手机号';
+        return;
+      }
+      btn.disabled = true;
+      try {
+        var res = await fetch('/api/hook86/activity/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            activityId: a.activityId, phone: phone, consent: true,
+            channelCode: channel, fingerprint: fingerprint()
+          })
+        });
+        var body = await res.json();
+        var data = body && body.data;
+        if (!res.ok || !data || !data.ok) {
+          var reason = data && data.reason === 'freq_limited'
+            ? '今日报名次数已达上限，请明天再试' : '报名失败，请稍后再试';
+          msg.className = 'leadmsg err';
+          msg.textContent = reason;
+        } else {
+          msg.className = 'leadmsg ok';
+          msg.textContent = data.duplicate
+            ? '您已报名过，专员将尽快与您联系'
+            : '报名成功！活动专员将尽快与您确认';
+          phoneEl.disabled = true;
+        }
+      } catch (e) {
+        msg.className = 'leadmsg err';
+        msg.textContent = '网络异常，请稍后再试';
+      }
+      btn.disabled = false;
+    });
+  }
+
+  /* 老带新邀请函(确定性归因码, 好友留资双方得券) */
+  async function inviteCard() {
+    var d = addAi('<span class="typing"><i></i><i></i><i></i></span>');
+    try {
+      var res = await fetch('/api/hook86/activity/invite?fingerprint='
+        + encodeURIComponent(fingerprint()));
+      var body = await res.json();
+      var v = body && body.data;
+      if (!res.ok || !v) throw new Error('HTTP ' + res.status);
+      d.querySelector('.bubble').innerHTML =
+        '生成您的专属邀请函 🤝<div class="tag">邀请码 <b>' + esc(v.inviteCode) +
+        '</b> · 好友留资成功后双方各得 20 元券</div>' +
+        '<div class="actcard" style="margin-top:8px"><div class="actdesc">' +
+        esc(v.shareText) + '</div><div class="leadrow">' +
+        '<input readonly value="' + esc(v.link) + '">' +
+        '<button id="invCopy">复制</button></div></div>';
+      scrollBottom();
+      document.getElementById('invCopy').addEventListener('click',
+        function () {
+          var inp = d.querySelector('input');
+          inp.select();
+          try {
+            document.execCommand('copy');
+            this.textContent = '已复制';
+          } catch (e) { this.textContent = '长按复制'; }
+        });
+    } catch (e) {
+      d.querySelector('.bubble').textContent = '邀请函生成失败，请稍后再试';
+    }
+  }
+
   async function ask(text) {
     if (sending || !text.trim()) return;
     sending = true;
@@ -226,6 +361,10 @@ footer{flex:none;padding:10px 12px calc(10px + env(safe-area-inset-bottom));back
       }
       done(esc(d.reply) + tag);
       if (!d.blocked && d.action === 'lead_form') leadCard(d.intent);
+      if (!d.blocked && d.action === 'activities_card'
+          && d.activities && d.activities.length) {
+        activitiesCards(d.activities);
+      }
     } catch (e) {
       done('服务暂时不可用，请稍后再试 🙏');
     }
@@ -240,7 +379,10 @@ footer{flex:none;padding:10px 12px calc(10px + env(safe-area-inset-bottom));back
   });
   document.getElementById('chips').addEventListener('click', function (e) {
     var q = e.target.getAttribute && e.target.getAttribute('data-q');
-    if (q) ask(q);
+    if (q) { ask(q); return; }
+    if (e.target.getAttribute && e.target.getAttribute('data-inv')) {
+      inviteCard();
+    }
   });
 
   /* 欢迎语(本地静态, 零请求) */

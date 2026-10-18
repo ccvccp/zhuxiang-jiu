@@ -38,16 +38,18 @@ INTENTS = {
         "活动", "福利", "抽奖", "会员", "签到", "积分")),
 }
 
-# 意图 → 钩子动作(P0: 留资触发仅 select_wine/price 两类高意向)
+# 意图 → 钩子动作(P0: 留资触发仅 select_wine/price 两类高意向;
+# B批: activity 升级为活动卡片动作, bridge 既有活动管理模块)
 ACTION_NONE = "none"
 ACTION_LEAD = "lead_form"        # 引导留资(1v1 选酒顾问回访)
 ACTION_GUIDE = "guide_content"   # 引导浏览内容(低意向)
+ACTION_ACTIVITIES = "activities_card"   # 活动卡片(智能活动 Agent)
 
 _INTENT_ACTION = {
     "select_wine": ACTION_LEAD,
     "price": ACTION_LEAD,
     "taste": ACTION_GUIDE,
-    "activity": ACTION_GUIDE,
+    "activity": ACTION_ACTIVITIES,
     "other": ACTION_NONE,
 }
 
@@ -59,11 +61,20 @@ REPLIES = {
               "酒精度覆盖 28°-52°。可在「竹香故事」栏目查看酿造工艺详解。"),
     "price": ("当前在售款价格区间 68-398 元, 会员首单有礼。"
               "如需具体报价与优惠组合, 可预约顾问回访获取。"),
-    "activity": ("本月有会员签到积分与佳节礼盒活动, "
-                 "详见首页活动栏目。"),
+    "activity": ("为您找到近期进行中的活动, 点击卡片即可报名/参与; "
+                 "老友同行可生成专属邀请函, 双方都有礼。"),
     "other": ("我是竹香酒馆的选酒助手, 可以帮您选酒、了解品鉴知识、"
               "查询价格与活动。请问想了解哪方面?"),
 }
+
+# 活动类型中文名(bridge 既有活动管理模块的类型枚举)
+ACTIVITY_TYPE_NAMES = {
+    "promotion": "促销", "lottery": "抽奖", "competition": "竞赛",
+    "arena": "擂台", "interactive": "互动", "groupbuy": "拼团",
+    "seckill": "秒杀", "presale": "预售",
+}
+# 可报名活动状态(对齐 activity_repository.STATUS_REGISTERING)
+ACTIVITY_SIGNABLE = "registering"
 
 DISCLAIMER = "(理性饮酒: 未成年人禁止饮酒, 过量饮酒有害健康)"
 
@@ -133,9 +144,16 @@ class Hook86Service:
             "blocked": False, "confidence": result["confidence"],
             "text": mask_phone(str(message))[:120],
             "at": __import__("datetime").datetime.utcnow().isoformat()})
-        return {"blocked": False, **result, "action": action,
-                "reply": reply + DISCLAIMER, "channelCode": channel_code,
-                "freq": freq}
+        payload = {"blocked": False, **result, "action": action,
+                   "reply": reply + DISCLAIMER, "channelCode": channel_code,
+                   "freq": freq}
+        if action == ACTION_ACTIVITIES:
+            # 智能活动 Agent: activity 意图直接交付活动卡片
+            try:
+                payload["activities"] = await self.activity_cards(limit=3)
+            except Exception:              # noqa: BLE001 活动源故障不阻断对话
+                payload["activities"] = []
+        return payload
 
     # ---------- 留资登记(幂等+频控硬闸) ----------
 
@@ -166,6 +184,85 @@ class Hook86Service:
         await self.repo.save_lead(lead)
         return {"ok": True, "duplicate": False,
                 "leadId": lead_id, "status": LEAD_NEW}
+
+    # ---------- 智能活动 Agent(B批: bridge 既有活动管理模块) ----------
+
+    async def activity_cards(self, limit: int = 3) -> list[dict]:
+        """进行中活动卡片(公开安全字段投影, 复用 activity 模块数据源)
+
+        不建活动表不重建轮子——86号 只做 Agent 门面: 报名中优先,
+        其次进行中; 无活动时返回空列表(前端隐藏卡片区)。
+        """
+        from services.activity_service import ActivityService
+        rows = await ActivityService().list_activities(limit=20)
+        rows.sort(key=lambda a: (
+            0 if a.get("status") == ACTIVITY_SIGNABLE else 1,
+            -(a.get("registrationCount") or 0)))
+        cards = []
+        for a in rows[:max(1, limit)]:
+            cards.append({
+                "activityId": a.get("activityId") or a.get("id"),
+                "name": a.get("name", ""),
+                "type": a.get("type", ""),
+                "typeName": ACTIVITY_TYPE_NAMES.get(
+                    a.get("type", ""), a.get("type", "")),
+                "description": (a.get("description") or "")[:60],
+                "status": a.get("status", ""),
+                "signable": a.get("status") == ACTIVITY_SIGNABLE,
+                "startTime": a.get("startTime", ""),
+                "endTime": a.get("endTime", ""),
+                "registrationCount": a.get("registrationCount", 0)})
+        return cards
+
+    async def signup_activity(self, activity_id, phone: str, *,
+                              channel_code: str = "",
+                              consent: bool = False,
+                              subject: str = "") -> dict:
+        """活动报名(匿名 C 端): 本质=带活动标签的留资
+
+        复用留资全链路——幂等 + 24h≤2 频控 + 手机号校验 +
+        90 天匿名化/365 天压实/导出/删除权全部继承, 零新治理面。
+        已登录会员的正式报名走既有 /api/activity/register。
+        """
+        if not consent:
+            raise HookIntentError("须勾选同意《隐私政策》后报名")
+        phone = str(phone or "").strip()
+        from services.activity_service import ActivityService
+        try:
+            activity = await ActivityService().get_activity(activity_id)
+        except Exception:                  # noqa: BLE001 活动源故障视为不存在
+            activity = None
+        if not activity:
+            raise HookIntentError("活动不存在")
+        if activity.get("status") not in (
+                ACTIVITY_SIGNABLE, "ongoing"):
+            raise HookIntentError("该活动当前不可报名")
+        out = await self.submit_lead(
+            phone, channel_code=channel_code,
+            intent=f"activity:{activity_id}", subject=subject)
+        out["activityId"] = activity_id
+        out["activityName"] = activity.get("name", "")
+        return out
+
+    async def invite_card(self, subject: str) -> dict:
+        """老带新邀请函: 归因码派生 + 分享文案(输出过合规闸)
+
+        归因码=subject 确定性哈希(无 LLM 无随机, 同用户同码);
+        好友经链接进入自动带 channelCode, 留资归因到邀请人。
+        """
+        import hashlib
+        seed = f"zxj-inv:{subject or 'anon'}"
+        code = "inv" + hashlib.sha256(seed.encode()).hexdigest()[:8]
+        g = get_guardrail()
+        share = g.filter_output(
+            "竹香酒馆邀您品鉴——通关选酒小助手领新人礼, 老友同享优惠。",
+            context={"sessionId": subject})
+        return {
+            "inviteCode": code,
+            "link": f"https://zyjiu.com/wine-advisor.html?channel={code}",
+            "shareText": share + DISCLAIMER,
+            "reward": "好友留资成功后, 双方各得 20 元券",
+        }
 
     # ---------- 查询/归因(admin; PII 出口一律脱敏) ----------
 
