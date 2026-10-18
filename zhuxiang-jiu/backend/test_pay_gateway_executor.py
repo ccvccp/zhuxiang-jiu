@@ -254,11 +254,12 @@ async def run_executor_tests():
     async def t_alipay():
         with _EnvGuard(PAY60_CHANNEL_KEY="k",
                        PAY60_ALIPAY_APPID="2021000000000001",
-                       PAY60_ALIPAY_PRIVATE_KEY=pem):
+                       PAY60_ALIPAY_PRIVATE_KEY=pem,
+                       PAY60_ALIPAY_RETURN_URL="https://zyjiu.com/checkout.html"):
             base_order = {"payNo": "PAY2", "payChannel": "alipay",
                           "actualAmount": 100.0, "orderId": "WD-2-1",
                           "description": "充值"}
-            # 3a. wap 跳转链接
+            # 3a. wap 跳转链接(含 return_url 回跳, 支付宝接入批次)
             r = await AlipayGateway(StubTransport([])).execute(
                 dict(base_order, payMethod="wap"), "https://zxjiu.com/cb")
             url = r["payParams"].get("payUrl", "")
@@ -266,6 +267,9 @@ async def run_executor_tests():
                   url.startswith(ALIPAY_GATEWAY) and "sign=" in url
                   and "sign_type=RSA2" in url
                   and "alipay.trade.wap.pay" in url, url[:90])
+            check("支付宝: wap 附 return_url 回跳",
+                  "return_url=" in url
+                  and "checkout.html" in url, url[-120:])
             # 3b. page
             r = await AlipayGateway(StubTransport([])).execute(
                 dict(base_order, payMethod="page"), "https://zxjiu.com/cb")

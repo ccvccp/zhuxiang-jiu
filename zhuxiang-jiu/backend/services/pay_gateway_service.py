@@ -308,7 +308,7 @@ class AlipayGateway:
             params = self._signed_params("alipay.trade.wap.pay", {
                 "out_trade_no": out_trade_no, "total_amount": amount,
                 "subject": subject, "product_code": "QUICK_WAP_WAY",
-            }, notify_url)
+            }, notify_url, return_url=_env("PAY60_ALIPAY_RETURN_URL"))
             # B10: sign 为 base64(含 + / =), 必须经 urlencode 编码,
             # 裸拼 query 会被渠道按分隔符截断导致验签失败
             pay_url = self._gateway_url() + "?" + urlencode(
