@@ -2108,18 +2108,19 @@ textarea.form-control {
         padding: 0 2px;
     }
     .service-entry .icon {
-        width: 44px;
-        height: 44px;
+        width: auto;
+        height: auto;
         margin: 0 auto 6px;
-        border-radius: 50%;
-        background: rgba(74, 124, 89, 0.08);
-        display: block;          /* 手机端弃 flex 居中(XWeb+zoom 下 img 偏移) */
+        background: none;        /* 手机端去圆底: 图标图即视觉主体,
+                                    规避 XWeb+zoom 下球内偏移/溢出 */
+        border-radius: 0;
+        display: block;
     }
     .service-entry .icon img {
-        width: 36px;
-        height: 36px;
+        width: 40px;
+        height: 40px;
         display: block;
-        margin: 4px auto;        /* 手动双向居中, 不依赖内核 flex */
+        margin: 0 auto;
     }
     .service-entry h3 {
         font-size: 12px;
