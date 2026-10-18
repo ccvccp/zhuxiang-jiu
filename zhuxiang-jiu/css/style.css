@@ -2110,13 +2110,16 @@ textarea.form-control {
     .service-entry .icon {
         width: 44px;
         height: 44px;
-        margin-bottom: 6px;
+        margin: 0 auto 6px;
         border-radius: 50%;
         background: rgba(74, 124, 89, 0.08);
+        display: block;          /* 手机端弃 flex 居中(XWeb+zoom 下 img 偏移) */
     }
     .service-entry .icon img {
         width: 36px;
         height: 36px;
+        display: block;
+        margin: 4px auto;        /* 手动双向居中, 不依赖内核 flex */
     }
     .service-entry h3 {
         font-size: 12px;
