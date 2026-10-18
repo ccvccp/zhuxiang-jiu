@@ -226,3 +226,61 @@ def test_status_ttl_fields(client):
     assert d["ttl"]["auto"] is True
     assert d["ttl"]["retentionDays"] == 90
     assert "lastRun" in d["ttl"]
+
+
+def test_p3_purge_export_metrics(client):
+    """P3: 物理压实 / 导出权+审计留痕 / metrics recent7"""
+    import asyncio
+    asyncio.run(_p3_body(client))
+
+
+async def _p3_body(client):
+    from datetime import datetime, timedelta
+    from repositories.hook86_repository import Hook86Repository
+    repo = Hook86Repository()
+    # 1) 导出权: 造一条留资 → 导出完整明文 + 审计留痕
+    r = client.post("/api/hook86/lead",
+                    json={"phone": "13866667777", "channelCode": "p3",
+                          "intent": "select_wine",
+                          "fingerprint": "fp_p3"})
+    exp = client.get("/api/hook86/lead/export",
+                     params={"phone": "13866667777"},
+                     headers={"X-Role": "admin"}).json()["data"]
+    assert exp["count"] == 1
+    assert exp["leads"][0]["phone"] == "13866667777"  # 副本含明文
+    exports = repo._store()["hook86_exports"]
+    assert exports and "138****7777" in exports[0]["phoneMasked"]
+    # 非法手机号 422; 无闸 403
+    assert client.get("/api/hook86/lead/export",
+                      params={"phone": "123"},
+                      headers={"X-Role": "admin"}).status_code == 422
+    assert client.get("/api/hook86/lead/export",
+                      params={"phone": "13866667777"}
+                      ).status_code == 403
+    # 2) 物理压实: 匿名化 366 天前的记录被物理删除
+    lid = await repo.next_lead_id()
+    await repo.save_lead({"leadId": lid, "phone": "13500000000",
+                          "channelCode": "p3", "intent": "price",
+                          "status": "converted",
+                          "createdAt": (datetime.utcnow()
+                                        - timedelta(days=400)).isoformat(),
+                          "anonymizedAt": (datetime.utcnow()
+                                           - timedelta(
+                                               days=366)).isoformat(),
+                          "memberId": "", "source": "t"})
+    purged = await repo.purge_leads(max_anon_age_days=365)
+    assert purged["purged"] >= 1
+    ids = [x["leadId"] for x in await repo.list_leads(limit=200)]
+    assert lid not in ids
+    # 未匿名/未满期不受影响
+    assert "13866667777" in [x["phone"] for x in
+                             await repo.list_leads(limit=200)]
+    # 3) metrics 日落点 + recent7
+    day = datetime.utcnow().strftime("%Y-%m-%d")
+    from services.hook86_service import Hook86Service
+    m = await Hook86Service().metrics()
+    await repo.save_metric_snapshot(day, m)
+    await repo.push_metric_day(day)
+    trend = client.get("/api/hook86/metrics",
+                       headers={"X-Role": "admin"}).json()["data"]
+    assert any(x.get("day") == day for x in trend["recent7"])

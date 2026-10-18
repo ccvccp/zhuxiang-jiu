@@ -186,6 +186,87 @@ class Hook86Repository:
         return {"scanned": len(leads), "expired": expired,
                 "retentionDays": max_age_days}
 
+    # ---------- P3: 物理压实 / 导出权 / metrics 日快照 ----------
+
+    async def purge_leads(self, max_anon_age_days: int = 365) -> dict:
+        """P3 物理压实: 匿名化超期(默认365天)的记录彻底删除
+
+        匿名化后统计价值随时间衰减, 一年以上转化统计无业务意义;
+        物理删除进一步收敛数据足迹(PIPL 存储限制原则)。
+        """
+        from datetime import datetime, timedelta
+        cutoff = (datetime.utcnow() - timedelta(
+            days=max_anon_age_days)).isoformat()
+        leads = await self.list_leads(limit=100000)
+        purged = 0
+        for lead in leads:
+            anon = str(lead.get("anonymizedAt") or "")
+            if not anon or anon >= cutoff:
+                continue
+            await self.delete_lead(int(lead["leadId"]))
+            purged += 1
+        return {"scanned": len(leads), "purged": purged,
+                "purgeAfterDays": max_anon_age_days}
+
+    async def find_leads_by_phone(self, phone: str) -> list[dict]:
+        """导出权(PIPL §45): 按明文手机号检索存储层(不出 API 的中间层)"""
+        phone = str(phone or "").strip()
+        leads = await self.list_leads(limit=100000)
+        return [x for x in leads if x.get("phone") == phone]
+
+    async def log_export(self, rec: dict) -> None:
+        """导出审计留痕(admin 代执行敏感动作, 防滥用可溯源)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.lpush(_k("hook86", "exports"), _dump(rec))
+            await client.ltrim(_k("hook86", "exports"), 0, 999)
+        else:
+            store = self._store()
+            store["hook86_exports"].insert(0, rec)
+            del store["hook86_exports"][1000:]
+
+    async def save_metric_snapshot(self, day: str,
+                                   metrics: dict) -> None:
+        """metrics 按日落点(P3): 替代单点快照, 供 recent7 趋势"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.set(_k("hook86", "metric", day),
+                             _dump(metrics), ex=86400 * 30)
+        else:
+            self._store()["hook86_metrics"][day] = metrics
+
+    async def list_metric_snapshots(self, days: int = 7) -> list[dict]:
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.lrange(
+                _k("hook86", "metric_days"), 0, days - 1)
+            day_list = [x.decode() if isinstance(x, bytes)
+                        else str(x) for x in raw]
+        else:
+            day_list = sorted(
+                self._store()["hook86_metrics"].keys(),
+                reverse=True)[:days]
+        out = []
+        for day in day_list:
+            if is_redis_mode():
+                raw = await client.get(_k("hook86", "metric", day))
+                if raw:
+                    out.append({"day": day, **_load(raw)})
+            else:
+                m = self._store()["hook86_metrics"].get(day)
+                if m:
+                    out.append({"day": day, **m})
+        return out
+
+    async def push_metric_day(self, day: str) -> None:
+        """登记快照日(Redis 模式维护日清单; 内存模式由 dict keys 兜底)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.lrem(
+                _k("hook86", "metric_days"), 0, day)
+            await client.lpush(_k("hook86", "metric_days"), day)
+            await client.ltrim(_k("hook86", "metric_days"), 0, 89)
+
     # ---------- 用户级 24h 频控 ----------
 
     async def freq_hit(self, subject: str, key: str,
@@ -223,6 +304,8 @@ class Hook86Repository:
         store.setdefault("hook86_lead_dups", {})
         store.setdefault("hook86_freq", {})
         store.setdefault("hook86_chats", [])
+        store.setdefault("hook86_exports", [])
+        store.setdefault("hook86_metrics", {})
         store.setdefault("hook86_lead_seq", 0)
         return store
 

@@ -56,16 +56,41 @@ def last_run() -> dict:
 
 
 async def run_ttl() -> dict:
-    """单轮清理(调度/手动共用): 到期留资匿名化"""
+    """单轮清理(调度/手动共用): 到期匿名化 + 物理压实 + 指标日落点"""
     global _last_run
+    import datetime as _dt
     from repositories.hook86_repository import Hook86Repository
-    report = await Hook86Repository().expire_leads(
+    from services.hook86_service import Hook86Service
+    repo = Hook86Repository()
+    report = await repo.expire_leads(
         max_age_days=retention_days())
+    # P3 物理压实: 匿名化满 purge_days(默认365)彻底删除
+    purge_days = purge_after_days()
+    purge = await repo.purge_leads(max_anon_age_days=purge_days)
+    # P3 metrics 日落点(当日一份, 重复运行幂等覆盖)
+    day = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    metrics = await Hook86Service().metrics()
+    await repo.save_metric_snapshot(day, metrics)
+    await repo.push_metric_day(day)
+    report.update({"purged": purge["purged"],
+                   "purgeAfterDays": purge_days,
+                   "metricDay": day})
     _last_run = report
-    logger.info("hook86_ttl_scan scanned=%s expired=%s retention=%sd",
-                report["scanned"], report["expired"],
-                report["retentionDays"])
+    logger.info(
+        "hook86_ttl_scan scanned=%s expired=%s purged=%s "
+        "retention=%sd metric_day=%s",
+        report["scanned"], report["expired"], purge["purged"],
+        report["retentionDays"], day)
     return report
+
+
+def purge_after_days() -> int:
+    """匿名化记录物理压实阈值(默认 365 天)"""
+    try:
+        return max(retention_days(), int(os.environ.get(
+            "HOOK86_TTL_PURGE_DAYS", "365")))
+    except ValueError:
+        return 365
 
 
 async def _loop() -> None:

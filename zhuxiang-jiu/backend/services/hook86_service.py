@@ -190,6 +190,22 @@ class Hook86Service:
         """数据主体删除权(PIPL §47): 物理删除留资+幂等索引"""
         return await self.repo.delete_lead(lead_id)
 
+    async def export_lead(self, phone: str, *, operator: str = "") -> dict:
+        """数据主体导出权(PIPL §45, admin 代执行)
+
+        返回该手机号全部留资记录(完整明文——交付数据主体本人的
+        副本); 敏感动作强制审计留痕(operator+phone 掩码+时间)。
+        """
+        import datetime as _dt
+        phone = str(phone or "").strip()
+        rows = await self.repo.find_leads_by_phone(phone)
+        await self.repo.log_export({
+            "operator": operator or "admin",
+            "phoneMasked": mask_phone(phone),
+            "count": len(rows),
+            "at": _dt.datetime.utcnow().isoformat()})
+        return {"phone": phone, "count": len(rows), "leads": rows}
+
     async def metrics(self) -> dict:
         """互动质量指标(2026-10-18 外部方案·四层归因的最小实现)
 
@@ -221,6 +237,12 @@ class Hook86Service:
             "chatToLeadRate": (
                 round(len(leads) / n, 4) if n else 0),
             "intentDist": by_intent, "channelChats": by_channel}
+
+    async def metrics_with_trend(self) -> dict:
+        """metrics 单点快照 + recent7 日落点趋势(P3)"""
+        current = await self.metrics()
+        current["recent7"] = await self.repo.list_metric_snapshots(7)
+        return current
 
     def status(self) -> dict:
         from services.hook86_scheduler import (

@@ -88,9 +88,21 @@ async def hook86_channels(x_role: str | None = Header(default=None)):
 
 @router.get("/metrics")
 async def hook86_metrics(x_role: str | None = Header(default=None)):
-    """互动质量指标(admin): 有效对话率/拦截率/chat→lead 转化/意图分布"""
+    """互动质量指标(admin): 有效对话率/拦截率/chat→lead 转化/意图分布/recent7"""
     _require_admin(x_role)
-    return {"code": 0, "data": await _svc.metrics()}
+    return {"code": 0, "data": await _svc.metrics_with_trend()}
+
+
+@router.get("/lead/export")
+async def hook86_export_lead(phone: str,
+                             x_role: str | None = Header(default=None)):
+    """数据主体导出权(PIPL §45, admin 代执行): 完整副本+强制审计留痕"""
+    _require_admin(x_role)
+    if not __import__("re").match(r"^1[3-9][0-9]{9}$",
+                                  (phone or "").strip()):
+        raise HTTPException(status_code=422, detail="手机号格式不正确")
+    return {"code": 0, "data": await _svc.export_lead(
+        phone.strip(), operator="admin")}
 
 
 @router.delete("/lead/{lead_id}")
