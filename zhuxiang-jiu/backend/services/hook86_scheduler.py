@@ -67,6 +67,16 @@ async def run_ttl() -> dict:
     # P3 物理压实: 匿名化满 purge_days(默认365)彻底删除
     purge_days = purge_after_days()
     purge = await repo.purge_leads(max_anon_age_days=purge_days)
+    # PII 推广(2026-10-18): cooperation 未签约申请同轮匿名化
+    # (营销留资类冷数据; approved/signed 有合同关系不动)
+    coo = {"scanned": 0, "expired": 0}
+    try:
+        from repositories.cooperation_repository import (
+            CooperationRepository)
+        coo = await CooperationRepository().expire_applications(
+            max_age_days=retention_days())
+    except Exception:                     # noqa: BLE001 fail-soft 隔离
+        logger.exception("hook86_ttl_cooperation_scan_failed")
     # P3 metrics 日落点(当日一份, 重复运行幂等覆盖)
     day = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     metrics = await Hook86Service().metrics()
@@ -74,13 +84,14 @@ async def run_ttl() -> dict:
     await repo.push_metric_day(day)
     report.update({"purged": purge["purged"],
                    "purgeAfterDays": purge_days,
+                   "cooperationExpired": coo["expired"],
                    "metricDay": day})
     _last_run = report
     logger.info(
-        "hook86_ttl_scan scanned=%s expired=%s purged=%s "
+        "hook86_ttl_scan scanned=%s expired=%s purged=%s coo_expired=%s "
         "retention=%sd metric_day=%s",
         report["scanned"], report["expired"], purge["purged"],
-        report["retentionDays"], day)
+        coo["expired"], report["retentionDays"], day)
     return report
 
 

@@ -187,6 +187,7 @@ class CooperationRepository:
             self.store["cooperation_contracts_by_partner"] = {}  # partnerId → [contractId]
             self.store["cooperation_apps_by_partner"] = {}    # partnerId → [applicationId]
             self.store["_cooperation_partner_seq"] = 0
+            self.store.setdefault("cooperation_exports", [])  # PII 导出审计
             self.store["_cooperation_application_seq"] = 0
             self.store["_cooperation_contract_seq"] = 0
 
@@ -235,6 +236,58 @@ class CooperationRepository:
             apps = [a for a in apps if a.get("memberId") == member_id]
         apps.sort(key=lambda a: a.get("createdAt", ""), reverse=True)
         return apps[:limit]
+
+    # --- PII 数据治理(2026-10-18 推广, 对齐 86号三件套范式) ---
+
+    async def delete_application(self, application_id: int) -> bool:
+        """数据主体删除权(PIPL §47): 物理删除申请"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return bool(await client.delete(_k(
+                "cooperation", "application", application_id)))
+        self._ensure_store()
+        return self.store["cooperation_applications"].pop(
+            application_id, None) is not None
+
+    async def log_export(self, rec: dict) -> None:
+        """导出审计留痕(环形 1000 条)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.lpush(_k("cooperation", "exports"),
+                               json.dumps(rec, ensure_ascii=False))
+            await client.ltrim(_k("cooperation", "exports"), 0, 999)
+        else:
+            self._ensure_store()
+            self.store["cooperation_exports"].insert(0, rec)
+            del self.store["cooperation_exports"][1000:]
+
+    async def expire_applications(self, max_age_days: int = 90) -> dict:
+        """TTL 匿名化: 超期未签约申请的联系人 PII 清空
+
+        仅处理冷数据(pending/reviewing/rejected/expired)——
+        approved/signed 有合同关系不动(法定保留边界)。
+        partner 表为签约主体, 亦不在 TTL 范围。
+        """
+        from datetime import datetime, timedelta
+        cutoff = (datetime.utcnow() - timedelta(
+            days=max_age_days)).isoformat()
+        apps = await self.list_applications(limit=100000)
+        expired = 0
+        for app in apps:
+            if app.get("piiAntonymizedAt") or app.get("anonymizedAt"):
+                continue
+            if str(app.get("createdAt") or "") >= cutoff:
+                continue
+            if app.get("status") in (APP_STATUS_APPROVED,
+                                     APP_STATUS_SIGNED):
+                continue                  # 合同关系数据保留
+            app["contactPhone"] = ""
+            app["contactEmail"] = ""
+            app["anonymizedAt"] = datetime.utcnow().isoformat()
+            await self.save_application(app)
+            expired += 1
+        return {"scanned": len(apps), "expired": expired,
+                "retentionDays": max_age_days}
 
     # --- 合作协议 ---
 

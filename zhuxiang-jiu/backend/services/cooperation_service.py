@@ -21,6 +21,7 @@ from datetime import datetime
 
 from core.locks import get_lock
 from core.helpers import ts
+from core.pii import mask_contact
 from repositories.cooperation_repository import (
     CooperationRepository,
     # 合作方类型
@@ -163,7 +164,7 @@ class CooperationService:
         return application
 
     async def get_application(self, application_id: int) -> dict:
-        """查询申请详情
+        """查询申请详情(出口脱敏; 完整副本走 export_application)
 
         Raises:
             KeyError: 申请不存在
@@ -171,18 +172,41 @@ class CooperationService:
         app = await self.repo.get_application(application_id)
         if app is None:
             raise KeyError(f"合作申请不存在(id={application_id})")
+        return mask_contact(dict(app))
+
+    async def export_application(self, application_id: int,
+                                 *, operator: str = "admin") -> dict:
+        """数据主体导出权(PIPL §45, admin 代执行): 完整副本+审计留痕"""
+        from core.pii import mask_phone
+        app = await self.repo.get_application(application_id)
+        if app is None:
+            raise KeyError(f"合作申请不存在(id={application_id})")
+        await self.repo.log_export({
+            "operator": operator,
+            "phoneMasked": mask_phone(
+                str(app.get("contactPhone") or "")),
+            "applicationId": application_id,
+            "at": ts()})
         return app
+
+    async def delete_application(self, application_id: int) -> bool:
+        """数据主体删除权(PIPL §47): 物理删除申请记录"""
+        return await self.repo.delete_application(application_id)
 
     async def list_applications(self, status: str = None,
                                  partner_id: int = None,
                                  limit: int = 100) -> list[dict]:
-        """查询申请列表"""
-        return await self.repo.list_applications(status, partner_id,
+        """查询申请列表(管理端; 出口脱敏 2026-10-18 PII 推广)"""
+        rows = await self.repo.list_applications(status, partner_id,
                                                  None, limit)
+        return [mask_contact(dict(x)) for x in rows]
 
     async def list_my_applications(self, member_id: int,
                                     limit: int = 50) -> list[dict]:
-        """查询会员本人的合作申请(按提交时间倒序)"""
+        """查询会员本人的合作申请(按提交时间倒序)
+
+        本人提交数据明文返回(账号主体自身数据, 合理场景)。
+        """
         return await self.repo.list_applications(None, None, member_id, limit)
 
     # ============================================================
@@ -547,8 +571,10 @@ class CooperationService:
 
     async def list_partners(self, status: str = None, level: str = None,
                              limit: int = 100) -> list[dict]:
-        """查询合作方列表"""
-        return await self.repo.list_partners(status, level, limit)
+        """查询合作方列表(公开端点; 联系人电话/邮箱出口脱敏
+        2026-10-18 PII 推广——公司名称/联系人姓名保留, B端名录场景)"""
+        rows = await self.repo.list_partners(status, level, limit)
+        return [mask_contact(dict(x)) for x in rows]
 
     async def update_partner(self, partner_id: int, updates: dict) -> dict:
         """更新合作方(分级/状态/联系信息)

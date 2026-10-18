@@ -70,14 +70,9 @@ DISCLAIMER = "(理性饮酒: 未成年人禁止饮酒, 过量饮酒有害健康)
 # 频控红线: 同一用户 24h 内留资触发 ≤2 次(外部方案对齐)
 LEAD_FREQ_LIMIT = 2
 _PHONE_RE = re.compile(r"^1[3-9][0-9]{9}$")
-# PII 治理(2026-10-18 P1): 出口脱敏 138****1234; 明文仅存储层
-_MASK_PHONE_RE = re.compile(r"1[3-9][0-9]{9}")
-
-
-def mask_phone(phone: str) -> str:
-    """手机号出口脱敏(前3后4), 满足 PIPL 展示最小化"""
-    return _MASK_PHONE_RE.sub(
-        lambda m: m.group(0)[:3] + "****" + m.group(0)[7:], str(phone))
+# PII 治理: 出口脱敏 138****1234; 明文仅存储层
+# (mask_phone 已提取至 core.pii 公共件推广全站, 此处保持兼容再导出)
+from core.pii import mask_phone  # noqa: E402
 
 
 class HookIntentError(ValueError):

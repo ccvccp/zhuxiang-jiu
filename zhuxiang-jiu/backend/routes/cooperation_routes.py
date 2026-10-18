@@ -175,13 +175,46 @@ async def list_applications(
 @router.get("/api/cooperation/applications/{application_id}", tags=["合作接口管理模块"])
 async def get_application(
     application_id: int,
+    x_role: str = Header(None, alias="X-Role"),
 ):
-    """查询申请详情"""
+    """查询申请详情(管理端; 出口脱敏——2026-10-18 PII 推广:
+    原无鉴权公开返回明文联系人, 属出口漏洞, 本次修复)"""
+    _require_admin(x_role)
     try:
         result = await _service.get_application(application_id)
         return {"success": True, "data": result}
     except Exception as e:
         _handle(e)
+
+
+@router.get("/api/cooperation/applications/{application_id}/export",
+            tags=["合作接口管理模块"])
+async def export_application(
+    application_id: int,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """数据主体导出权(PIPL §45, admin 代执行): 完整副本+审计留痕"""
+    _require_admin(x_role)
+    try:
+        result = await _service.export_application(
+            application_id, operator="admin")
+        return {"success": True, "data": result}
+    except Exception as e:
+        _handle(e)
+
+
+@router.delete("/api/cooperation/applications/{application_id}",
+               tags=["合作接口管理模块"])
+async def delete_application(
+    application_id: int,
+    x_role: str = Header(None, alias="X-Role"),
+):
+    """数据主体删除权(PIPL §47, admin 代执行)"""
+    _require_admin(x_role)
+    ok = await _service.delete_application(application_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="申请不存在")
+    return {"success": True, "data": {"deleted": True}}
 
 
 @router.post("/api/cooperation/applications/{application_id}/review", tags=["合作接口管理模块"])
