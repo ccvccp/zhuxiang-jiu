@@ -183,7 +183,7 @@ function renderFooter() {
                 <div class="footer-col">
                     <h4>联系方式</h4>
                     <ul class="footer-contact">
-                        <li>📞 400-888-XXXX</li>
+                        <li>📞 4009025669</li>
                         <li>✉️ service@zhuxiang.com</li>
                         <li>📍 山东省泰安市泰山脚</li>
                         <li>🕐 周一至周日 8:00-22:00</li>
@@ -191,7 +191,7 @@ function renderFooter() {
                 </div>
             </div>
             <div class="footer-bottom">
-                <p>© 2026 山东瑞麒酒业有限公司 版权所有 | <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer" style="color:inherit">鲁ICP备2026059492号-1</a></p>
+                <p>© 2026 山东瑞麒酒业有限公司 版权所有 | <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer" style="color:inherit">鲁ICP备2026059492号-1</a> | 食品经营许可证：SC11537090100608 | 执行标准：Q/SRQ001S-2023</p>
                 <p>过量饮酒有害健康 · 未成年禁止饮酒 · 饮酒后请勿驾车 · 孕妇请勿饮酒</p>
             </div>
         </div>
