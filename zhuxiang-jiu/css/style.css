@@ -2092,10 +2092,45 @@ textarea.form-control {
     .hero-content h1 {
         font-size: 36px;
     }
+    /* 金刚区手机紧凑态: 8 项合并单容器 4 列×2 行(2026-10-18 用户反馈
+       单列长条浪费且 XWeb 首字裁切——去卡片化, 图标+单行标题) */
+    .service-entries {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px 4px;
+        background: #fff;
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-sm);
+        padding: 14px 6px 10px;
+    }
+    .service-entry {
+        background: transparent;
+        box-shadow: none;
+        padding: 0 2px;
+    }
+    .service-entry .icon {
+        width: 44px;
+        height: 44px;
+        margin-bottom: 6px;
+        border-radius: 50%;
+        background: rgba(74, 124, 89, 0.08);
+    }
+    .service-entry .icon img {
+        width: 36px;
+        height: 36px;
+    }
+    .service-entry h3 {
+        font-size: 12px;
+        margin-bottom: 0;
+        white-space: nowrap;     /* 单行防折行/裁切 */
+        min-width: 0;
+        overflow: visible;
+    }
+    .service-entry p {
+        display: none;           /* 手机端隐藏副标题 */
+    }
     .product-grid,
     .products-main .product-grid,
     .news-grid,
-    .service-entries,
     .brand-features {
         grid-template-columns: repeat(2, 1fr);
     }
@@ -2146,10 +2181,10 @@ textarea.form-control {
     .product-grid,
     .products-main .product-grid,
     .news-grid,
-    .service-entries,
     .brand-features {
         grid-template-columns: 1fr;
     }
+    /* .service-entries 保持 768 断点 4 列紧凑态(300px 视口 4×~60px 列宽可行) */
     .section-title h2 {
         font-size: 20px;
     }
