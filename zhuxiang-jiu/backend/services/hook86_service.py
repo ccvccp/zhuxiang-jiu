@@ -223,10 +223,15 @@ class Hook86Service:
             "intentDist": by_intent, "channelChats": by_channel}
 
     def status(self) -> dict:
+        from services.hook86_scheduler import (
+            last_run, retention_days, scheduler_enabled)
         return {"module": "hook86", "storage": "redis"
                 if __import__(
                     "repositories.backend", fromlist=["x"]).is_redis_mode()
                 else "memory",
                 "leadFreqLimit24h": LEAD_FREQ_LIMIT,
                 "intents": [v[0] for v in INTENTS.values()],
-                "disclaimer": DISCLAIMER}
+                "disclaimer": DISCLAIMER,
+                "ttl": {"auto": scheduler_enabled(),
+                        "retentionDays": retention_days(),
+                        "lastRun": last_run()}}

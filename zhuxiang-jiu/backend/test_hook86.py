@@ -170,3 +170,59 @@ def test_pii_mask_and_delete_and_metrics(client):
     import asyncio
     chats = asyncio.run(Hook86Repository().list_chats(limit=50))
     assert all("13611112222" not in (c.get("text") or "") for c in chats)
+
+
+def test_ttl_expire_anonymize():
+    """P2: 90天到期匿名化(统计保留+幂等释放+不重复处理)"""
+    import asyncio
+    asyncio.run(_ttl_body())
+
+
+async def _ttl_body():
+    from datetime import datetime, timedelta
+    from repositories.hook86_repository import Hook86Repository
+    repo = Hook86Repository()
+    # 造一条 91 天前的旧留资 + 一条新留资
+    old_id = await repo.next_lead_id()
+    old = {"leadId": old_id, "phone": "13599998888",
+           "channelCode": "ttl_test", "intent": "price",
+           "status": "converted",
+           "createdAt": (datetime.utcnow()
+                         - timedelta(days=91)).isoformat(),
+           "memberId": "", "source": "douyin_miniapp_h5"}
+    await repo.save_lead(old)
+    new_id = await repo.next_lead_id()
+    new = {"leadId": new_id, "phone": "13577776666",
+           "channelCode": "ttl_test", "intent": "select_wine",
+           "status": "new",
+           "createdAt": datetime.utcnow().isoformat(),
+           "memberId": "", "source": "douyin_miniapp_h5"}
+    await repo.save_lead(new)
+
+    report = await repo.expire_leads(max_age_days=90)
+    assert report["expired"] >= 1
+    rows = {x["leadId"]: x for x in await repo.list_leads(limit=100)}
+    # 旧→匿名化: phone 清空 + anonymizedAt 戳 + 统计字段保留
+    assert rows[old_id]["phone"] == ""
+    assert rows[old_id]["anonymizedAt"]
+    assert rows[old_id]["status"] == "converted"
+    assert rows[old_id]["channelCode"] == "ttl_test"
+    # 新→不动
+    assert rows[new_id]["phone"] == "13577776666"
+    assert "anonymizedAt" not in rows[new_id]
+    # 幂等释放: 同旧手机号可重新留资
+    assert not await repo.find_dup("13599998888", "ttl_test")
+    # 幂等: 再跑一轮不重复计数
+    again = await repo.expire_leads(max_age_days=90)
+    assert again["expired"] == 0
+    # 渠道归因统计完整性(匿名化后 total 不变)
+    summary = {r["channel"]: r for r in await repo.channel_summary()}
+    assert summary["ttl_test"]["total"] == 2
+
+
+def test_status_ttl_fields(client):
+    """/status 透出 TTL 调度信息(默认 on/90天)"""
+    d = client.get("/api/hook86/status").json()["data"]
+    assert d["ttl"]["auto"] is True
+    assert d["ttl"]["retentionDays"] == 90
+    assert "lastRun" in d["ttl"]

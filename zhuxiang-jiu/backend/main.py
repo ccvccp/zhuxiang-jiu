@@ -715,6 +715,12 @@ async def _on_startup():
     from services.nexus74_scheduler import (
         start_scheduler as start_nexus74_scan)
     start_nexus74_scan()
+    # 86号·留资保留期 TTL: 90天到期匿名化(HOOK86_TTL_AUTO 默认 on
+    # ——隐私合规义务优先, 与观测类默认 off 惯例不同; P2 落地
+    # 隐私文案"保留期90天"的自动化兑现)
+    from services.hook86_scheduler import (
+        start_scheduler as start_hook86_ttl)
+    start_hook86_ttl()
     # 小竹合规引擎: 词库 seed(幂等)+热更新监听(Pub/Sub 即时
     # +60s 轮询兜底——补 reload 无调用点的洞, 2026-10-04)
     from repositories.guardrail_repository import (

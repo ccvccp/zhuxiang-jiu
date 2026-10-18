@@ -150,6 +150,42 @@ class Hook86Repository:
             (lead["phone"], lead.get("channelCode", "")), None)
         return True
 
+    # ---------- 保留期 TTL(P2: 90 天到期匿名化, PIPL 最小化) ----------
+
+    async def expire_leads(self, max_age_days: int = 90) -> dict:
+        """到期留资匿名化: phone/memberId 清空 + anonymizedAt 戳
+
+        保留 intent/channel/status 供渠道归因统计完整性;
+        同步删除幂等索引(释放该手机号重新留资资格)。
+        """
+        from datetime import datetime, timedelta
+        cutoff = (datetime.utcnow() - timedelta(
+            days=max_age_days)).isoformat()
+        leads = await self.list_leads(limit=100000)
+        expired = 0
+        for lead in leads:
+            if lead.get("anonymizedAt"):
+                continue                      # 已匿名跳过
+            if str(lead.get("createdAt") or "") >= cutoff:
+                continue                      # 未到期
+            old_phone = str(lead.get("phone") or "")
+            lead["phone"] = ""
+            lead["memberId"] = ""
+            lead["anonymizedAt"] = datetime.utcnow().isoformat()
+            await self.save_lead(lead)
+            if old_phone:
+                if is_redis_mode():
+                    client = await get_redis_client()
+                    await client.delete(_k(
+                        "hook86", "lead_dup", old_phone,
+                        lead.get("channelCode", "")))
+                else:
+                    self._store()["hook86_lead_dups"].pop(
+                        (old_phone, lead.get("channelCode", "")), None)
+            expired += 1
+        return {"scanned": len(leads), "expired": expired,
+                "retentionDays": max_age_days}
+
     # ---------- 用户级 24h 频控 ----------
 
     async def freq_hit(self, subject: str, key: str,
