@@ -154,9 +154,37 @@ async def agent_applications(
         description="状态筛选 pending/approved/rejected"),
     x_role: Annotated[str | None, Header(alias="X-Role")] = None,
 ):
-    """申请列表(admin, 支持状态筛选)"""
+    """申请列表(admin, 支持状态筛选; 出口脱敏)"""
     _require_admin(x_role)
     return await _service.list_applications(status)
+
+
+@router.get("/api/agent/applications/{apply_id}/export",
+            tags=["代理商服务"])
+async def agent_apply_export(
+    apply_id: int,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """数据主体导出权(PIPL §45, admin 代执行): 完整副本+审计留痕"""
+    _require_admin(x_role)
+    try:
+        data = await _service.export_apply(apply_id, operator="admin")
+        return {"success": True, "data": data}
+    except KeyError as e:
+        raise _map_key_error(e) from e
+
+
+@router.delete("/api/agent/applications/{apply_id}", tags=["代理商服务"])
+async def agent_apply_delete(
+    apply_id: int,
+    x_role: Annotated[str | None, Header(alias="X-Role")] = None,
+):
+    """数据主体删除权(PIPL §47, admin 代执行)"""
+    _require_admin(x_role)
+    ok = await _service.delete_apply(apply_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="申请不存在")
+    return {"success": True, "deleted": True, "applyId": apply_id}
 
 
 # ============================================================

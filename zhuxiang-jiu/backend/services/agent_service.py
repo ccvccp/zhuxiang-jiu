@@ -14,6 +14,7 @@ from datetime import datetime
 
 from core.helpers import ts
 from core.locks import get_lock
+from core.pii import mask_contact, mask_phone
 from repositories.agent_repository import AgentRepository
 from repositories.inventory_repository import InventoryRepository
 from repositories.product_repository import ProductRepository
@@ -328,8 +329,12 @@ class AgentService:
             }
 
     async def list_applications(self, status: str = None) -> dict:
-        """申请列表(可按状态筛选: pending/approved/rejected)"""
+        """申请列表(可按状态筛选: pending/approved/rejected)
+
+        出口脱敏(2026-10-18 PII 推广); 完整副本走 export_apply。
+        """
         apps = await self.agent_repo.list_applies(status)
+        apps = [mask_contact(dict(a)) for a in apps]
         return {
             "success": True,
             "count": len(apps),
@@ -337,13 +342,36 @@ class AgentService:
             "logs": [],
         }
 
+    async def export_apply(self, apply_id, *, operator: str = "admin") -> dict:
+        """数据主体导出权(PIPL §45, admin 代执行): 完整副本+审计留痕
+
+        Raises:
+            KeyError: 申请不存在
+        """
+        app = await self.agent_repo.get_apply(apply_id)
+        if app is None:
+            raise KeyError(f"申请 {apply_id} 不存在")
+        await self.agent_repo.log_export({
+            "operator": operator,
+            "phoneMasked": mask_phone(str(app.get("contact_phone") or "")),
+            "applyId": apply_id,
+            "at": ts()})
+        return app
+
+    async def delete_apply(self, apply_id) -> bool:
+        """数据主体删除权(PIPL §47): 物理删除申请记录"""
+        return await self.agent_repo.delete_apply(apply_id)
+
     # ============================================================
     #  档案管理
     # ============================================================
 
     async def list_agents(self, level: str = None, status: str = None,
                           page: int = 1, page_size: int = 20) -> dict:
-        """代理商列表(支持等级/状态筛选 + 分页)"""
+        """代理商列表(支持等级/状态筛选 + 分页)
+
+        公开端点: 联系人电话出口脱敏(2026-10-18 PII 推广)。
+        """
         agents = await self.agent_repo.list_all()
         if level:
             agents = [a for a in agents if a.get("level") == level]
@@ -364,6 +392,7 @@ class AgentService:
             a["levelName"] = LEVEL_NAMES.get(a.get("level", "D"), "实习代理商")
             a["statusName"] = STATUS_NAMES.get(
                 a.get("status", STATUS_ACTIVE), "正常")
+            mask_contact(a)
             decorated.append(a)
         return {
             "success": True,
@@ -375,7 +404,7 @@ class AgentService:
         }
 
     async def get_detail(self, agent_id) -> dict:
-        """代理商详情
+        """代理商详情(公开端点: 联系人电话出口脱敏)
 
         Raises:
             KeyError: 代理商不存在
@@ -388,6 +417,7 @@ class AgentService:
         agent["statusName"] = STATUS_NAMES.get(
             agent.get("status", STATUS_ACTIVE), "正常")
         agent["discountRate"] = LEVEL_DISCOUNTS.get(agent.get("level", "D"), 0.8)
+        mask_contact(agent)
         return {"success": True, "agent": agent, "logs": []}
 
     async def update_profile(self, agent_id, contact_name: str = None,

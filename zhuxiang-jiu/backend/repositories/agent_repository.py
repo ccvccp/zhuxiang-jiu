@@ -261,6 +261,60 @@ class AgentRepository:
             return await self._redis_next_apply_id()
         return self._mem_next_apply_id()
 
+    # ---------- PII 数据治理(2026-10-18 第二批推广, 对齐 86号三件套) ----------
+
+    async def delete_apply(self, apply_id) -> bool:
+        """数据主体删除权(PIPL §47): 物理删除申请"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            return bool(await client.delete(_k("agent_apply", apply_id)))
+        self._ensure_agent_store()
+        return self.store["agent_applications"].pop(
+            apply_id, None) is not None
+
+    async def log_export(self, rec: dict) -> None:
+        """导出审计留痕(环形 1000 条)
+
+        键名用 agent_export 前缀, 避免落入 agent:* / agent_apply:*
+        的 keys 扫描(hgetall 遇 List 键会 WRONGTYPE)。
+        """
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.lpush(_k("agent_export", "log"),
+                               json.dumps(rec, ensure_ascii=False))
+            await client.ltrim(_k("agent_export", "log"), 0, 999)
+        else:
+            self._ensure_agent_store()
+            self.store["agent_exports"].insert(0, rec)
+            del self.store["agent_exports"][1000:]
+
+    async def expire_applies(self, max_age_days: int = 90) -> dict:
+        """TTL 匿名化: 超期未签约申请的联系人 PII 清空
+
+        仅处理冷数据(pending/rejected)——approved 已转代理商
+        档案(合同关系)不动; 代理商档案表本身为签约主体, 亦不在
+        TTL 范围(与 cooperation partner 表同边界)。
+        """
+        from datetime import datetime, timedelta
+        cutoff = (datetime.utcnow() - timedelta(
+            days=max_age_days)).isoformat()
+        apps = await self.list_applies()
+        expired = 0
+        for app in apps:
+            if app.get("anonymizedAt"):
+                continue
+            if str(app.get("created_at") or "") >= cutoff:
+                continue
+            if app.get("status") == "approved":
+                continue                  # 合同关系数据保留
+            app["contact_name"] = ""
+            app["contact_phone"] = ""
+            app["anonymizedAt"] = datetime.utcnow().isoformat()
+            await self.save_apply(app)
+            expired += 1
+        return {"scanned": len(apps), "expired": expired,
+                "retentionDays": max_age_days}
+
     # ---------- 进货记录 ----------
 
     async def save_purchase(self, purchase_data: dict) -> dict:
@@ -373,6 +427,7 @@ class AgentRepository:
             self.store["_agent_seq"] = max(existing.keys(), default=0)
         if "_agent_apply_seq" not in self.store:
             self.store["_agent_apply_seq"] = 0
+        self.store.setdefault("agent_exports", [])   # PII 导出审计
 
     def _mem_update_fields(self, agent_id, fields: dict) -> dict:
         agent = self.store["agents"].get(agent_id)
