@@ -263,6 +263,9 @@ register_order_routes(app)
 register_product_routes(app)
 register_finance_routes(app)
 register_agent_routes(app)
+# 超级会员智能库(营销卡制叠加层: 银卡/金卡/黑金+标签+生命周期)
+from routes.mtier_routes import register_mtier_routes
+register_mtier_routes(app)
 register_wallet_routes(app)
 register_payment_routes(app)
 register_logistics_routes(app)
@@ -844,6 +847,11 @@ async def _on_startup():
     from services.member_level_scheduler import (
         start_scheduler as start_member_level_expire)
     start_member_level_expire()
+    # 超级会员智能库: 日度评估调度(tier/lifecycle/auto标签;
+    #  幂等刷新, 仅读 member 口径不回写; MTIER_AUTO=off 关闭)
+    from services.mtier_scheduler import (
+        start_scheduler as start_mtier_evaluate)
+    start_mtier_evaluate()
     # 72号·AI智能自动引流: 健康度日度调度(三指标快照,
     # 越界自动冻结; 观测面动作, 红队/升档评估保持手动SOP;
     # ATTRACT72_HEALTH_AUTO=on 开启, 默认 off)
@@ -950,6 +958,10 @@ async def _on_shutdown():
     from services.member_level_scheduler import (
         stop_scheduler as stop_member_level_expire)
     stop_member_level_expire()
+    # 超级会员智能库: 日度评估调度器
+    from services.mtier_scheduler import (
+        stop_scheduler as stop_mtier_evaluate)
+    stop_mtier_evaluate()
     # 72号·AI智能自动引流: 健康度日度调度器
     from services.attract72_scheduler import (
         stop_scheduler as stop_attract72_health)
