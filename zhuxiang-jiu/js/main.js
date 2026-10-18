@@ -2,6 +2,27 @@
    竹香酒官网 - 公共脚本
    ============================================ */
 
+// ---------- XWeb 字体缩放补偿(微信字体大小大档时强制 text zoom 1.4x,
+// 致字溢出色块/徽章撑大/视口压缩 300px——检测后整页反向缩放抵消) ----------
+(function () {
+    function compensate() {
+        try {
+            var probe = document.createElement('span');
+            probe.style.cssText = 'position:absolute;visibility:hidden;font-size:14px;line-height:1';
+            probe.textContent = 'X';
+            document.body.appendChild(probe);
+            var actual = parseFloat(getComputedStyle(probe).fontSize) || 14;
+            probe.parentNode.removeChild(probe);
+            var zoom = 14 / actual;                    // 1.4x 放大时 ≈0.714
+            if (zoom > 0.92 && zoom < 1.08) return;    // 正常档无需补偿
+            document.documentElement.style.zoom = zoom;
+        } catch (e) { /* fail-soft: 补偿失败不影响页面 */ }
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', compensate);
+    } else { compensate(); }
+})();
+
 // ---------- 购物车管理（基于 localStorage）----------
 const Cart = {
     get() {
