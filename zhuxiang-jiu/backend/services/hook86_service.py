@@ -70,6 +70,14 @@ DISCLAIMER = "(理性饮酒: 未成年人禁止饮酒, 过量饮酒有害健康)
 # 频控红线: 同一用户 24h 内留资触发 ≤2 次(外部方案对齐)
 LEAD_FREQ_LIMIT = 2
 _PHONE_RE = re.compile(r"^1[3-9][0-9]{9}$")
+# PII 治理(2026-10-18 P1): 出口脱敏 138****1234; 明文仅存储层
+_MASK_PHONE_RE = re.compile(r"1[3-9][0-9]{9}")
+
+
+def mask_phone(phone: str) -> str:
+    """手机号出口脱敏(前3后4), 满足 PIPL 展示最小化"""
+    return _MASK_PHONE_RE.sub(
+        lambda m: m.group(0)[:3] + "****" + m.group(0)[7:], str(phone))
 
 
 class HookIntentError(ValueError):
@@ -103,6 +111,12 @@ class Hook86Service:
         verdict = g.check_input(message, context={
             "sessionId": subject, "traceId": "hook86"})
         if verdict["blocked"]:
+            await self.repo.save_chat({
+                "subject": subject, "channelCode": channel_code,
+                "intent": "", "action": ACTION_NONE,
+                "blocked": True, "confidence": 0,
+                "text": mask_phone(str(message))[:120],
+                "at": __import__("datetime").datetime.utcnow().isoformat()})
             return {"blocked": True,
                     "category": verdict["category"],
                     "reply": verdict["response"] + DISCLAIMER,
@@ -117,6 +131,13 @@ class Hook86Service:
                 subject, "lead_precheck", limit=99)
         reply = g.filter_output(REPLIES[intent],
                                 context={"sessionId": subject})
+        # P1 对话留痕(脱敏快照): 互动质量指标数据源
+        await self.repo.save_chat({
+            "subject": subject, "channelCode": channel_code,
+            "intent": intent, "action": action,
+            "blocked": False, "confidence": result["confidence"],
+            "text": mask_phone(str(message))[:120],
+            "at": __import__("datetime").datetime.utcnow().isoformat()})
         return {"blocked": False, **result, "action": action,
                 "reply": reply + DISCLAIMER, "channelCode": channel_code,
                 "freq": freq}
@@ -151,15 +172,55 @@ class Hook86Service:
         return {"ok": True, "duplicate": False,
                 "leadId": lead_id, "status": LEAD_NEW}
 
-    # ---------- 查询/归因(admin) ----------
+    # ---------- 查询/归因(admin; PII 出口一律脱敏) ----------
 
     async def leads(self, *, status: str = "", channel: str = "",
                     limit: int = 100) -> list[dict]:
-        return await self.repo.list_leads(
+        rows = await self.repo.list_leads(
             status=status, channel=channel, limit=limit)
+        for x in rows:                      # PIPL 展示最小化
+            if x.get("phone"):
+                x["phone"] = mask_phone(x["phone"])
+        return rows
 
     async def channels(self) -> list[dict]:
         return await self.repo.channel_summary()
+
+    async def delete_lead(self, lead_id: int) -> bool:
+        """数据主体删除权(PIPL §47): 物理删除留资+幂等索引"""
+        return await self.repo.delete_lead(lead_id)
+
+    async def metrics(self) -> dict:
+        """互动质量指标(2026-10-18 外部方案·四层归因的最小实现)
+
+        chats=对话总量; intentHits=意图命中(非other)占比即
+        有效对话率; leadForms=高意向动作数; chat→lead 转化率;
+        blockedRate=合规闸拦截率(负向互动占比)。
+        """
+        chats = await self.repo.list_chats(limit=5000)
+        leads = await self.repo.list_leads(limit=10000)
+        n = len(chats)
+        intent_hits = sum(1 for c in chats
+                          if c.get("intent") and c["intent"] != "other")
+        blocked = sum(1 for c in chats if c.get("blocked"))
+        lead_forms = sum(1 for c in chats
+                         if c.get("action") == ACTION_LEAD)
+        by_intent: dict[str, int] = {}
+        by_channel: dict[str, int] = {}
+        for c in chats:
+            by_intent[c.get("intent") or "other"] = (
+                by_intent.get(c.get("intent") or "other", 0) + 1)
+            ch = c.get("channelCode") or "(direct)"
+            by_channel[ch] = by_channel.get(ch, 0) + 1
+        return {
+            "chats": n,
+            "validChatRate": round(intent_hits / n, 4) if n else 0,
+            "blockedRate": round(blocked / n, 4) if n else 0,
+            "leadFormTriggers": lead_forms,
+            "leads": len(leads),
+            "chatToLeadRate": (
+                round(len(leads) / n, 4) if n else 0),
+            "intentDist": by_intent, "channelChats": by_channel}
 
     def status(self) -> dict:
         return {"module": "hook86", "storage": "redis"

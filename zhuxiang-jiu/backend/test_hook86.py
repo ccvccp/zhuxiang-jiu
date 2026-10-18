@@ -135,3 +135,38 @@ def test_route_lead_flow(client):
     assert client.post("/api/hook86/lead",
                        json={"phone": "123",
                              "fingerprint": "fp_route_2"}).status_code == 422
+
+
+def test_pii_mask_and_delete_and_metrics(client):
+    """P1: leads 出口脱敏 / 删除权 / 互动指标 / 对话留痕"""
+    # 对话留痕
+    client.post("/api/hook86/chat",
+                json={"message": "推荐送客户的礼盒",
+                      "fingerprint": "fp_pii_1", "channelCode": "dy_h5_d"})
+    # 留资
+    r = client.post("/api/hook86/lead",
+                    json={"phone": "13611112222",
+                          "channelCode": "dy_h5_d",
+                          "intent": "select_wine",
+                          "fingerprint": "fp_pii_1"})
+    lead_id = r.json()["data"]["leadId"]
+    # 出口脱敏: 明文不出 API
+    rows = client.get("/api/hook86/leads",
+                      headers={"X-Role": "admin"}).json()["data"]
+    target = [x for x in rows if x["leadId"] == lead_id]
+    assert target and target[0]["phone"] == "136****2222"
+    # 指标
+    m = client.get("/api/hook86/metrics",
+                   headers={"X-Role": "admin"}).json()["data"]
+    assert m["chats"] >= 1 and "select_wine" in m["intentDist"]
+    assert 0 < m["chatToLeadRate"] <= 1
+    # 删除权(PIPL): 删后查询 404
+    assert client.delete(f"/api/hook86/lead/{lead_id}",
+                         headers={"X-Role": "admin"}).status_code == 200
+    assert client.delete(f"/api/hook86/lead/{lead_id}",
+                         headers={"X-Role": "admin"}).status_code == 404
+    # 留痕文本脱敏: 快照中不含明文手机号
+    from repositories.hook86_repository import Hook86Repository
+    import asyncio
+    chats = asyncio.run(Hook86Repository().list_chats(limit=50))
+    assert all("13611112222" not in (c.get("text") or "") for c in chats)

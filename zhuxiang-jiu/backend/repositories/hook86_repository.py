@@ -75,9 +75,10 @@ class Hook86Repository:
             keys = await client.keys(_k("hook86", "lead", "*"))
             leads = []
             for key in keys:
-                if b"lead_dup" in key or b"lead:seq" in key:
+                k = key.decode() if isinstance(key, bytes) else str(key)
+                if "lead_dup" in k or "lead:seq" in k:
                     continue
-                raw = await client.get(key)
+                raw = await client.get(k)
                 if raw:
                     leads.append(_load(raw))
         else:
@@ -106,6 +107,48 @@ class Hook86Repository:
         out = list(agg.values())
         out.sort(key=lambda r: r["total"], reverse=True)
         return out
+
+    # ---------- 对话留痕(P1: 互动质量指标数据源) ----------
+
+    async def save_chat(self, rec: dict) -> None:
+        """对话留痕(消息快照为脱敏后文本; 留痕即指标数据源)"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            await client.lpush(_k("hook86", "chats"),
+                               _dump(rec))
+            await client.ltrim(_k("hook86", "chats"), 0, 9999)
+        else:
+            store = self._store()
+            store["hook86_chats"].insert(0, rec)
+            del store["hook86_chats"][10000:]
+
+    async def list_chats(self, limit: int = 5000) -> list[dict]:
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.lrange(_k("hook86", "chats"), 0, limit - 1)
+            return [_load(x) for x in raw]
+        return self._store()["hook86_chats"][:limit]
+
+    async def delete_lead(self, lead_id: int) -> bool:
+        """数据主体删除权(PIPL): 删除留资记录与幂等索引"""
+        if is_redis_mode():
+            client = await get_redis_client()
+            raw = await client.get(_k("hook86", "lead", lead_id))
+            if not raw:
+                return False
+            lead = _load(raw)
+            await client.delete(_k("hook86", "lead", lead_id))
+            await client.delete(_k("hook86", "lead_dup",
+                                   lead["phone"],
+                                   lead.get("channelCode", "")))
+            return True
+        store = self._store()
+        lead = store["hook86_leads"].pop(lead_id, None)
+        if lead is None:
+            return False
+        store["hook86_lead_dups"].pop(
+            (lead["phone"], lead.get("channelCode", "")), None)
+        return True
 
     # ---------- 用户级 24h 频控 ----------
 
@@ -143,6 +186,7 @@ class Hook86Repository:
         store.setdefault("hook86_leads", {})
         store.setdefault("hook86_lead_dups", {})
         store.setdefault("hook86_freq", {})
+        store.setdefault("hook86_chats", [])
         store.setdefault("hook86_lead_seq", 0)
         return store
 

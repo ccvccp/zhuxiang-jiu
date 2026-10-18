@@ -86,6 +86,24 @@ async def hook86_channels(x_role: str | None = Header(default=None)):
     return {"code": 0, "data": await _svc.channels()}
 
 
+@router.get("/metrics")
+async def hook86_metrics(x_role: str | None = Header(default=None)):
+    """互动质量指标(admin): 有效对话率/拦截率/chat→lead 转化/意图分布"""
+    _require_admin(x_role)
+    return {"code": 0, "data": await _svc.metrics()}
+
+
+@router.delete("/lead/{lead_id}")
+async def hook86_delete_lead(lead_id: int,
+                             x_role: str | None = Header(default=None)):
+    """数据主体删除权(admin 代执行, PIPL §47): 删除留资与幂等索引"""
+    _require_admin(x_role)
+    ok = await _svc.delete_lead(lead_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="lead 不存在")
+    return {"code": 0, "data": {"deleted": True, "leadId": lead_id}}
+
+
 @router.get("/status")
 async def hook86_status():
     """模块诊断(存储模式/频控策略/意图清单)"""

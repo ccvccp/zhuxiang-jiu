@@ -87,8 +87,17 @@ def main() -> int:
     remote("cd /opt/zhuxiang/zhuxiang-jiu && "
            "docker compose build backend 2>&1 | tail -1 && "
            "docker compose up -d backend 2>&1 | tail -1")
-    print("⏳ 等待服务就绪...")
-    time.sleep(8)
+    print("⏳ 等待服务就绪(轮询 /api/hook86/status)...")
+    for _ in range(30):
+        try:
+            with urllib.request.urlopen(
+                    "https://zyjiu.com/api/hook86/status", timeout=5) as r:
+                if r.status == 200:
+                    break
+        except Exception:
+            time.sleep(2)
+    else:
+        sys.exit("❌ 服务 60s 未就绪")
 
     step("⑤ 公网冒烟 + 日志扫描")
     # 登录(凭证从 HKCU\Environment 读; 高频登录可触发 409 风控——

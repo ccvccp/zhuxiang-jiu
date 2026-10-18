@@ -31,6 +31,8 @@ header .sub{font-size:11px;opacity:.8;margin-top:2px}
 .leadrow input:focus{border-color:var(--accent)}
 .leadrow button{flex:none;background:var(--accent);color:#fff;border:none;border-radius:10px;padding:0 18px;font-size:14px;font-weight:600}
 .leadrow button:disabled{background:#a8c5b0}
+.leadconsent{display:flex;align-items:flex-start;gap:6px;margin-top:9px;font-size:11.5px;color:var(--sub);line-height:1.5}
+.leadconsent input{margin-top:2px;flex:none;accent-color:var(--accent)}
 .leadmsg{font-size:12px;margin-top:8px;color:var(--sub)}
 .leadmsg.ok{color:var(--accent)}
 .leadmsg.err{color:var(--err)}
@@ -145,13 +147,21 @@ footer{flex:none;padding:10px 12px calc(10px + env(safe-area-inset-bottom));back
       '<div class="leadrow">' +
       '<input type="tel" maxlength="11" placeholder="11 位手机号" inputmode="numeric">' +
       '<button>提交</button></div>' +
+      '<label class="leadconsent"><input type="checkbox">' +
+      '我已阅读并同意 <b>《隐私授权说明》</b>：手机号仅用于选酒顾问回访，保留期 90 天，可随时申请删除</label>' +
       '<div class="leadmsg"></div>';
     chatEl.appendChild(d);
     scrollBottom();
-    var phoneEl = d.querySelector('input');
+    var phoneEl = d.querySelector('input[type=tel]');
     var btn = d.querySelector('button');
     var msg = d.querySelector('.leadmsg');
+    var consent = d.querySelector('input[type=checkbox]');
     btn.addEventListener('click', async function () {
+      if (!consent.checked) {
+        msg.className = 'leadmsg err';
+        msg.textContent = '请先勾选同意《隐私授权说明》';
+        return;
+      }
       var phone = phoneEl.value.trim();
       if (!/^1[3-9]\d{9}$/.test(phone)) {
         msg.className = 'leadmsg err';
