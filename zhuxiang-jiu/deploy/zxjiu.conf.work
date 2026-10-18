@@ -153,7 +153,7 @@ location ^~ /api/ {
     }
 
     listen 443 ssl; # managed by Certbot
-    http2 on; # 78号P2 CDN快验: HTTP/2 多路复用(20%丢包跨境链路省冷连接握手)
+    #http2 on; # 2026-10-18 关闭: 高丢包链路下微信X5/http2 拉CSS易截断致手机布局散乱(78号P2曾启用,实测手机端得不偿失)
     ssl_certificate /etc/letsencrypt/live/zxjiu.com/fullchain.pem; # managed by Certbot
     ssl_certificate_key /etc/letsencrypt/live/zxjiu.com/privkey.pem; # managed by Certbot
     include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
