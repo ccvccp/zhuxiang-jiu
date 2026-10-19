@@ -226,6 +226,16 @@
             .mall-hero h2 { font-size: 21px; }
             .mall-top h1 { font-size: 15px; letter-spacing: 1px; }
         }
+        /* 直达商品高亮(2026-10-19): #shop=ID&pid=PID 定位闪烁 */
+        .prod-card.focus-flash {
+            outline: 3px solid #c9a961;
+            outline-offset: 2px;
+            animation: alFlash 1.2s ease 3;
+        }
+        @keyframes alFlash {
+            0%, 100% { box-shadow: 0 4px 18px rgba(74,124,89,.12); }
+            50% { box-shadow: 0 4px 26px rgba(201,169,97,.55); }
+        }
     </style>
 </head>
 <body>
@@ -371,7 +381,7 @@
     }
 
     /* ---------- 店内视图 ---------- */
-    function renderShop(mid) {
+    function renderShop(mid, focusPid) {
         var shop = shopsCache.filter(function (s) {
             return s.merchantId === Number(mid); })[0];
         var c = shop ? catOf(shop.category) : ['🎁', '臻选'];
@@ -406,6 +416,17 @@
                         + ',this)">立即购买</button>'
                         + '</div></div></div>';
                 }).join('') || '<div class="cart-empty">本店暂无在售商品</div>';
+                /* 直达商品(2026-10-19): #shop=ID&pid=PID 滚动定位+高亮 */
+                if (focusPid) {
+                    setTimeout(function () {
+                        var inp = $('prodGrid').querySelector('input[data-pid="' + focusPid + '"]');
+                        var card = inp && inp.closest('.prod-card');
+                        if (card) {
+                            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            card.classList.add('focus-flash');
+                        }
+                    }, 150);
+                }
             })
             .catch(function () {
                 $('prodGrid').innerHTML = '<div class="cart-empty">加载失败, 请刷新重试</div>';
@@ -612,8 +633,8 @@
 
     /* ---------- 路由与启动 ---------- */
     function route() {
-        var m = location.hash.match(/^#shop=(\d+)$/);
-        if (m) { renderShop(m[1]); return; }
+        var m = location.hash.match(/^#shop=(\d+)(?:&pid=(\d+))?$/);
+        if (m) { renderShop(m[1], m[2]); return; }
         $('viewShop').style.display = 'none';
         $('viewDirectory').style.display = '';
         $('mallHero').style.display = '';
@@ -636,5 +657,20 @@
     cartRender();
     route();
     </script>
-</body>
+<script>
+/* 全局返回按钮(2026-10-19, 自包含版): 本页未加载 main.js, 自带注入 */
+(function(){var p=(location.pathname.split('/').pop()||'').toLowerCase();
+if(!p||p==='index.html'||p==='official.html'||p==='app.html')return;
+function m(){if(document.getElementById('globalBackBtn'))return;
+var b=document.createElement('button');b.type='button';b.id='globalBackBtn';
+b.innerHTML='&#8592;';b.setAttribute('aria-label','返回上一页');
+b.style.cssText='position:fixed;left:14px;bottom:110px;z-index:2147483000;'
++'width:44px;height:44px;border-radius:50%;border:none;cursor:pointer;'
++'background:rgba(53,92,68,.92);color:#fff;font-size:22px;line-height:44px;'
++'padding:0;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.28);'
++'font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;';
+b.onclick=function(){if(history.length>1){history.back();}else{location.href='index.html';}};
+document.body.appendChild(b);}
+if(document.body){m();}else{document.addEventListener('DOMContentLoaded',m);}})();
+</script></body>
 </html>

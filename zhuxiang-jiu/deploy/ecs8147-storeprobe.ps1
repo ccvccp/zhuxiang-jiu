@@ -1,4 +1,4 @@
-﻿# 探针: 生产存储模式确认(.env 关键行/Redis DBSIZE/近期 chat 键)
+﻿﻿﻿﻿# 探针: 生产存储模式确认(.env 关键行/Redis DBSIZE/近期 chat 键)
 $ErrorActionPreference = 'Continue'
 function Info($m) { Write-Host "    $m" }
 Write-Host '==> .env 存储相关行'

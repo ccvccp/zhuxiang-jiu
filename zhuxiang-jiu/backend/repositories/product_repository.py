@@ -159,7 +159,10 @@ def _img(prompt: str, size: str = "1024x1024") -> str:
 
 # 便携小瓶真实产品图(2026-09-26 目录更新: 上传至 dist/images/products/,
 # 由 nginx 静态直出, 与占位图 URL 机制并存)
-_PROD_IMG_BASE = "https://zyjiu.com/images/products"
+# 相对路径(2026-10-19): 绝对域名曾在 zxjiu/zyjiu 双域架构下互相卡图
+# (zxjiu.com 国内 HTTPS 证书无效, 手机端跨域加载直接被拦); 相对路径
+# 跟随当前访问域名, 双域通用。线上 Redis 旧数据已同步清洗为相对路径
+_PROD_IMG_BASE = "/images/products"
 
 
 def _build_product(pid, name, subtitle, series, alcohol, volume, price,
@@ -233,6 +236,7 @@ _INITIAL_PRODUCTS = [
         created_at="2026-08-01T00:00:00+00:00",
         sales_monthly=1280, sales_total=15360, rating_avg=4.8, rating_count=320,
         featured=True, hot_rank=1,
+        images={"main": f"{_PROD_IMG_BASE}/zz-classic42.jpg", "gallery": []},
     ),
     _build_product(
         "ZX45-2026L05", "竹奕·竹香经典 45° 500ml", "经典进阶·醇厚饱满",
@@ -243,6 +247,7 @@ _INITIAL_PRODUCTS = [
         created_at="2026-08-03T00:00:00+00:00",
         sales_monthly=960, sales_total=11520, rating_avg=4.7, rating_count=210,
         featured=False, hot_rank=2,
+        images={"main": f"{_PROD_IMG_BASE}/zz-classic45.jpg", "gallery": []},
     ),
     _build_product(
         "ZX53-2026Z01", "竹奕·竹香珍藏 53° 500ml", "珍藏佳酿·品鉴典藏",
@@ -253,6 +258,7 @@ _INITIAL_PRODUCTS = [
         created_at="2026-08-05T00:00:00+00:00",
         sales_monthly=320, sales_total=3840, rating_avg=4.9, rating_count=128,
         featured=True, hot_rank=5,
+        images={"main": f"{_PROD_IMG_BASE}/zz-reserve53.jpg", "gallery": []},
     ),
     _build_product(
         "ZX53-2026N10", "竹奕·竹香年份10年 53° 500ml", "十年陈酿·岁月沉淀",
@@ -263,6 +269,7 @@ _INITIAL_PRODUCTS = [
         created_at="2026-07-28T00:00:00+00:00",
         sales_monthly=180, sales_total=2160, rating_avg=4.9, rating_count=86,
         featured=False, hot_rank=6,
+        images={"main": f"{_PROD_IMG_BASE}/zz-age10.jpg", "gallery": []},
     ),
     _build_product(
         "ZX53-2026N20", "竹奕·竹香二十年限量 53° 500ml", "二十年限量·收藏臻品",
@@ -273,6 +280,7 @@ _INITIAL_PRODUCTS = [
         created_at="2026-07-20T00:00:00+00:00",
         sales_monthly=60, sales_total=720, rating_avg=5.0, rating_count=32,
         featured=True, hot_rank=8,
+        images={"main": f"{_PROD_IMG_BASE}/zz-age20.jpg", "gallery": []},
     ),
     _build_product(
         "ZX52-2026L02", "竹奕·竹香礼盒 52° 500ml×2", "礼盒装·礼赠首选",
@@ -283,6 +291,7 @@ _INITIAL_PRODUCTS = [
         created_at="2026-07-25T00:00:00+00:00",
         sales_monthly=240, sales_total=2880, rating_avg=4.8, rating_count=96,
         featured=True, hot_rank=4,
+        images={"main": f"{_PROD_IMG_BASE}/zz-giftbox.jpg", "gallery": []},
     ),
     _build_product(
         "ZX42-2026B01", "竹奕·竹香便携 42° 100ml", "便携小瓶·随行畅饮",
@@ -325,6 +334,7 @@ _INITIAL_PRODUCTS = [
         created_at="2026-07-15T00:00:00+00:00",
         sales_monthly=120, sales_total=1440, rating_avg=4.9, rating_count=64,
         featured=False, hot_rank=7,
+        images={"main": f"{_PROD_IMG_BASE}/zz-collection50.jpg", "gallery": []},
     ),
     _build_product(
         "ZX52-2026X01", "竹奕·竹香尊享 52° 500ml", "竹香旗舰·旗舰之选",
@@ -335,6 +345,7 @@ _INITIAL_PRODUCTS = [
         created_at="2026-08-08T00:00:00+00:00",
         sales_monthly=560, sales_total=6720, rating_avg=4.7, rating_count=152,
         featured=False, hot_rank=5,
+        images={"main": f"{_PROD_IMG_BASE}/zz-premium52.jpg", "gallery": []},
     ),
     _build_product(
         "ZX52-2026X02", "竹奕·竹香尊享 52° 750ml", "尊享大瓶·礼宴之选",
@@ -345,6 +356,7 @@ _INITIAL_PRODUCTS = [
         created_at="2026-08-06T00:00:00+00:00",
         sales_monthly=280, sales_total=3360, rating_avg=4.8, rating_count=104,
         featured=False, hot_rank=6,
+        images={"main": f"{_PROD_IMG_BASE}/zz-premium52-750.jpg", "gallery": []},
     ),
     _build_product(
         "ZX52-2026X03", "竹奕·竹香尊享 52° 礼盒装", "尊享礼盒·限量臻选",
@@ -355,6 +367,7 @@ _INITIAL_PRODUCTS = [
         created_at="2026-07-18T00:00:00+00:00",
         sales_monthly=80, sales_total=960, rating_avg=4.9, rating_count=42,
         featured=True, hot_rank=9,
+        images={"main": f"{_PROD_IMG_BASE}/zz-premium-gift.jpg", "gallery": []},
     ),
 ]
 

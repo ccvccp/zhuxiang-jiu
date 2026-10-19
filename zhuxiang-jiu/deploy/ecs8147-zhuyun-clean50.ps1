@@ -1,4 +1,4 @@
-﻿# 清理知识库乱码条目(扫描乱码分布 -> 退役 #50 -> 核验)
+﻿﻿﻿﻿# 清理知识库乱码条目(扫描乱码分布 -> 退役 #50 -> 核验)
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Continue'
 function Info($m) { Write-Host "    $m" }

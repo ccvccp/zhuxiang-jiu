@@ -1,4 +1,4 @@
-﻿# 84 号命名句式 prompt 升级部署(1 文件 -> C:\backend, restart+sc 兜底, E2E)
+﻿﻿﻿﻿# 84 号命名句式 prompt 升级部署(1 文件 -> C:\backend, restart+sc 兜底, E2E)
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Continue'
 function Step($m) { Write-Host "==> $m" }

@@ -1,4 +1,4 @@
-﻿# 生产 seed 管理员替换(云助手执行体: 经 aliyun-ecs-rpc.ps1 Send 投递到国内 ECS,
+﻿﻿﻿﻿# 生产 seed 管理员替换(云助手执行体: 经 aliyun-ecs-rpc.ps1 Send 投递到国内 ECS,
 # 环回 127.0.0.1:8000 调后端——公网被 ICP 备案阻断, 环回不受拦截)
 # 背景: seed 管理员 admin/admin123 弱口令(P0-4), 且默认密码会话带
 # mustChangePassword 陷阱(除改密端点全 403)——故流程必须先改密再操作。

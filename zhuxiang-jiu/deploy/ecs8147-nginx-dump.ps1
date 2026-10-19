@@ -1,0 +1,5 @@
+# nginx.conf base64 导出(防编码乱码)
+$b = [Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\nginx\conf\nginx.conf'))
+Write-Host ('B64-NGINX-CONF: ' + $b)
+$b2 = [Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\nginx\conf\site-proxy.conf'))
+Write-Host ('B64-SITE-PROXY: ' + $b2)

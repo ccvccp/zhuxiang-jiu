@@ -358,7 +358,7 @@ const IndexPage: React.FC = () => {
           {/* 官网直达(2026-10-04 入口上移: 左下浮标撤除, 品牌名右侧内联) */}
           <View
             className={styles.officialEntry}
-            onClick={() => { window.location.href = '/official.html'; }}
+            onClick={() => { window.location.href = '/'; }}
           >
             🏛 官网
           </View>

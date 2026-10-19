@@ -1,4 +1,4 @@
-﻿# kb57 list_entries 截断修复部署(1 文件, restart+sc 兜底, 全量计数验证)
+﻿﻿﻿﻿# kb57 list_entries 截断修复部署(1 文件, restart+sc 兜底, 全量计数验证)
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Continue'
 function Step($m) { Write-Host "==> $m" }

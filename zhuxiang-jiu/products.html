@@ -152,6 +152,43 @@
 
         // T1.1: 异步拉取 live 数据, 成功后重渲染(失败静默保持上方 mock 渲染)
         if (window.ProductsLive) ProductsLive.load(renderList);
+
+        // 图片同步(2026-10-19): 与手机商城全部商品同源同图——按名称关键词
+        // 匹配商城 API 商品图注入卡片; 未匹配保留原 CSS 酒瓶兜底
+        (function () {
+            let mallImgMap = null;
+            const toks = n => (n || '').replace(/竹奕|竹香|·/g, ' ')
+                .split(/[\s°()0-9a-zA-Z×批次年]+/).filter(t => t.length >= 2);
+            function apply() {
+                if (!mallImgMap) return;
+                document.querySelectorAll('#productList .product-card').forEach(card => {
+                    if (card.dataset.imgApplied) return;
+                    const nm = (card.querySelector('.product-name') || {}).textContent || '';
+                    let hit = null;
+                    toks(nm).forEach(t => { if (!hit && mallImgMap[t]) hit = mallImgMap[t]; });
+                    if (!hit) return;
+                    const box = card.querySelector('.product-img');
+                    if (box && !box.querySelector('img')) {
+                        card.dataset.imgApplied = '1';
+                        const im = document.createElement('img');
+                        im.src = hit; im.alt = nm; im.loading = 'lazy';
+                        im.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
+                        box.appendChild(im);
+                    }
+                });
+            }
+            fetch('/api/product/list?page=1&pageSize=50').then(r => r.json()).then(d => {
+                mallImgMap = {};
+                (d.products || []).forEach(p => {
+                    const img = p.image || '';
+                    if (!img) return;
+                    toks(p.name).forEach(t => { if (!mallImgMap[t]) mallImgMap[t] = img; });
+                });
+                apply();
+            }).catch(() => { });
+            // 筛选/排序/live 池重渲染后自动补图
+            new MutationObserver(apply).observe(document.getElementById('productList'), { childList: true });
+        })();
     </script>
 </body>
 </html>

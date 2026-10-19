@@ -11,7 +11,22 @@
     <meta name="format-detection" content="telephone=no">
     <title>竹奕酒 · 全竹发酵 竹酒首创 - 山东瑞麒酒业官方网站</title>
     <meta name="description" content="竹香酒官方商城，竹奕酒全系竹香型，翠竹酿造工艺，独创竹香风格，正品保证，全国配送。">
-    <link rel="stylesheet" href="css/style.css?v=20261022">
+    <link rel="stylesheet" href="css/style.css?v=20261027">
+    <style>
+    /* 金刚区球内字 v7 重生(2026-10-19): 样式自带、不依赖 style.css;
+       球=纯 CSS 盒(尺寸/背景不随字体档缩放), 字=绝对定位 translate
+       钉死球心(XWeb/zoom 全免疫); 与旧 .icon 体系彻底切割 */
+    .kk-ball{position:relative;width:56px;height:56px;margin:0 auto 12px;border-radius:50%;background:rgba(74,124,89,.12);overflow:hidden}
+    .kk-ball b{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:30px;font-weight:600;line-height:1;color:#4a7c59}
+    .service-entry:hover .kk-ball{background:rgba(255,255,255,.25)}
+    .service-entry:hover .kk-ball b{color:#fff}
+    @media (max-width:768px){
+        .kk-ball{width:48px;height:48px;margin:0 auto 6px}
+        .kk-ball b{font-size:26px}
+    }
+    .kk-ball-sm{width:44px;height:44px;margin:0 auto 6px}
+    .kk-ball-sm b{font-size:22px}
+    </style>
 </head>
 <body>
     <div id="header"></div>
@@ -70,6 +85,23 @@
     <section class="section">
         <div class="container">
             <div class="service-entries" id="serviceEntries"></div>
+        </div>
+    </section>
+
+    <!-- 全部功能直达(2026-10-19: 恢复商城 SPA 大宫格入口 + 高频功能页,
+         SPA 首页含 24 项: 秒杀/团购/老酒回收/代驾/积分/信值/智单/智客等) -->
+    <section class="section" style="padding:0 0 24px;">
+        <div class="container">
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px 4px;background:#fff;border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:16px 8px 12px;">
+                <div style="text-align:center;padding:6px 2px;cursor:pointer;" onclick="location.href='app.html'"><div class="kk-ball kk-ball-sm"><b>商</b></div><div style="font-size:12px;white-space:nowrap;">商城全部</div></div>
+                <div style="text-align:center;padding:6px 2px;cursor:pointer;" onclick="location.href='xiaozhu-voice.html'"><div class="kk-ball kk-ball-sm"><b>语</b></div><div style="font-size:12px;white-space:nowrap;">小竹语音</div></div>
+                <div style="text-align:center;padding:6px 2px;cursor:pointer;" onclick="location.href='alliance-mall.html'"><div class="kk-ball kk-ball-sm"><b>盟</b></div><div style="font-size:12px;white-space:nowrap;">同盟商城</div></div>
+                <div style="text-align:center;padding:6px 2px;cursor:pointer;" onclick="location.href='app.html#/pages/recycle/index'"><div class="kk-ball kk-ball-sm"><b>收</b></div><div style="font-size:12px;white-space:nowrap;">老酒回收</div></div>
+                <div style="text-align:center;padding:6px 2px;cursor:pointer;" onclick="location.href='my-card.html'"><div class="kk-ball kk-ball-sm"><b>会</b></div><div style="font-size:12px;white-space:nowrap;">会员中心</div></div>
+                <div style="text-align:center;padding:6px 2px;cursor:pointer;" onclick="location.href='wine-advisor.html'"><div class="kk-ball kk-ball-sm"><b>估</b></div><div style="font-size:12px;white-space:nowrap;">资产估值</div></div>
+                <div style="text-align:center;padding:6px 2px;cursor:pointer;" onclick="location.href='service.html'"><div class="kk-ball kk-ball-sm"><b>客</b></div><div style="font-size:12px;white-space:nowrap;">在线客服</div></div>
+                <div style="text-align:center;padding:6px 2px;cursor:pointer;" onclick="location.href='video.html'"><div class="kk-ball kk-ball-sm"><b>视</b></div><div style="font-size:12px;white-space:nowrap;">品牌视频</div></div>
+            </div>
         </div>
     </section>
 
@@ -190,20 +222,30 @@
             }, 4000);
         })();
 
-        // 金刚区 8 宫格（逛/购/玩/服务 四类动线，各自直达；图片图标统一竹绿扁平风）
+        // 金刚区 8 宫格（逛/购/玩/服务 四类动线，各自直达）
+        // 图标 v5: 圆球 + 汉字(取标题首字 全/同/活/溯/会/购/客/品)——
+        // 用户设计本意即球内字; 历史上 XWeb+zoom 下 flex 居中致字偏出
+        // 球心, v5 改 line-height=球高 定高居中(行高随字号同比缩放,
+        // zoom 下不偏移不溢出), 手机端 overflow:hidden 兜底
+        // (v6 试验: 字符 span 绝对定位钉球心——线上 PC 反馈异常已回滚,
+        //  恢复 v5+26/30px(20261026) 用户确认态; 手机端问题另行验证后再动)
+        const KK_ICON = {
+            products: '全', alliance: '同', activity: '活', trace: '溯',
+            member: '会', cart: '购', service: '客', news: '品'
+        };
         const KINGKONG = [
-            { img: 'kk-products.jpg', title: '全部产品', desc: '竹奕全系', url: 'products.html' },
-            { img: 'kk-alliance.jpg', title: '同盟臻选', desc: '源头好物', url: 'alliance-mall.html' },
-            { img: 'kk-activity.jpg', title: '活动中心', desc: '福利进行中', url: 'activity.html' },
-            { img: 'kk-trace.jpg', title: '溯源查询', desc: '批次验真', url: 'zjian.html' },
-            { img: 'kk-member.jpg', title: '会员中心', desc: '我的会员卡·专属权益', url: 'my-card.html' },
-            { img: 'kk-cart.jpg', title: '购物车', desc: '已选好物', url: 'cart.html' },
-            { img: 'kk-service.jpg', title: '客户服务', desc: '在线支持', url: 'service.html' },
-            { img: 'kk-news.jpg', title: '品牌资讯', desc: '新闻动态', url: 'news.html' },
+            { ico: 'products', title: '全部产品', desc: '竹奕全系', url: 'products.html' },
+            { ico: 'alliance', title: '同盟臻选', desc: '源头好物', url: 'alliance-mall.html' },
+            { ico: 'activity', title: '活动中心', desc: '福利进行中', url: 'activity.html' },
+            { ico: 'trace', title: '溯源查询', desc: '批次验真', url: 'zjian.html' },
+            { ico: 'member', title: '会员中心', desc: '我的会员卡·专属权益', url: 'my-card.html' },
+            { ico: 'cart', title: '购物车', desc: '已选好物', url: 'cart.html' },
+            { ico: 'service', title: '客户服务', desc: '在线支持', url: 'service.html' },
+            { ico: 'news', title: '品牌资讯', desc: '新闻动态', url: 'news.html' },
         ];
         document.getElementById('serviceEntries').innerHTML = KINGKONG.map(k => `
             <div class="service-entry" onclick="location.href='${k.url}'">
-                <div class="icon"><img src="images/icons/${k.img}" alt="${k.title}" width="46" height="46" loading="lazy"></div>
+                <div class="kk-ball"><b>${KK_ICON[k.ico]}</b></div>
                 <h3>${k.title}</h3>
                 <p>${k.desc}</p>
             </div>`).join('');
@@ -220,19 +262,66 @@
             } catch (e) { /* 未登录态保持默认文案 */ }
         })();
 
-        // 主打产品推荐（竹香型优先，取前4个；热销 TOP1-3 角标）
-        const featured = PRODUCTS.filter(p => p.tag === '主打').concat(PRODUCTS.filter(p => p.tag !== '主打'));
-        document.getElementById('hotProducts').innerHTML = featured.slice(0, 4).map(renderProductCard).join('');
-        ['TOP1', 'TOP2', 'TOP3'].forEach((r, idx) => {
-            const card = document.querySelectorAll('#hotProducts .product-card')[idx];
-            if (card) {
-                card.style.position = 'relative';
-                const b = document.createElement('span');
-                b.className = 'hot-badge' + (idx === 0 ? ' hot-badge-1' : '');
-                b.textContent = '热销 ' + r;
-                card.appendChild(b);
+        // 竹奕佳酿: 先静态兜底(CSS 酒瓶), 再拉商城 API 换真实商品图
+        // (2026-10-19 与手机商城同源同图; API 失败自动保留兜底)
+        (function () {
+            const box = document.getElementById('hotProducts');
+            const featured = PRODUCTS.filter(p => p.tag === '主打').concat(PRODUCTS.filter(p => p.tag !== '主打'));
+            box.innerHTML = featured.slice(0, 4).map(renderProductCard).join('');
+            function badge() {
+                ['TOP1', 'TOP2', 'TOP3'].forEach((r, idx) => {
+                    const card = box.querySelectorAll('.product-card')[idx];
+                    if (card) {
+                        card.style.position = 'relative';
+                        const b = document.createElement('span');
+                        b.className = 'hot-badge' + (idx === 0 ? ' hot-badge-1' : '');
+                        b.textContent = '热销 ' + r;
+                        card.appendChild(b);
+                    }
+                });
             }
-        });
+            badge();
+            fetch('/api/product/list?page=1&pageSize=8').then(r => r.json()).then(d => {
+                const list = (d.products || []).slice(0, 4);
+                if (!list.length) return;
+                box.innerHTML = list.map(p => `
+                    <div class="product-card" data-hpid="${p.product_id}" data-hname="${p.name}" data-hprice="${p.price}" data-himg="${p.image || ''}" title="进入商城查看">
+                        <div class="product-img">
+                            ${p.image ? `<img src="${p.image}" alt="${p.name}" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;">` : ''}
+                        </div>
+                        <div class="product-info">
+                            <div class="product-category">${p.series || '竹香型'} · ${p.alcohol || ''}</div>
+                            <div class="product-name">${p.name}</div>
+                            <div class="product-desc">${p.subtitle || ''}</div>
+                            <div class="product-bottom">
+                                <div class="product-price">¥${p.price}<small> / ${p.volume || ''}</small></div>
+                                <button class="btn-add-cart" data-hadd="1">入车</button>
+                            </div>
+                        </div>
+                    </div>`).join('');
+                badge();
+                // 入车直达商城(2026-10-19): 与同盟臻选同交互——
+                // 按钮=写主站购物车(zhuxiang_cart)后直达商城该商品详情;
+                // 卡片=直达商城该商品详情(不再只落商城首页)
+                box.addEventListener('click', function (ev) {
+                    const card = ev.target.closest('.product-card');
+                    if (!card || !card.dataset.hpid) return;
+                    if (ev.target.closest('[data-hadd]')) {
+                        try {
+                            const items = window.Cart ? Cart.get() : JSON.parse(localStorage.getItem('zhuxiang_cart') || '[]');
+                            const one = items.filter(function (i) { return String(i.id) === String(card.dataset.hpid); })[0];
+                            if (one) { one.qty += 1; } else {
+                                items.push({ id: card.dataset.hpid, name: card.dataset.hname, price: Number(card.dataset.hprice) || 0, qty: 1, img: card.dataset.himg });
+                            }
+                            if (window.Cart) { Cart.save(items); } else {
+                                localStorage.setItem('zhuxiang_cart', JSON.stringify(items));
+                            }
+                        } catch (e) { /* 购物车写入失败不影响跳转 */ }
+                    }
+                    location.href = 'app.html#/pages/product-detail/index?id=' + encodeURIComponent(card.dataset.hpid);
+                });
+            }).catch(() => { /* API 失败保留静态兜底 */ });
+        })();
 
         // 品牌特色
         document.getElementById('brandFeatures').innerHTML = BRAND_FEATURES.map(f => `
@@ -270,16 +359,58 @@
                 const b = await r.json();
                 const items = (b.data || []).slice(0, 8);
                 if (!items.length) return;
+                // 图片同步(2026-10-19): 酒类商品与商城全部商品同源同图——
+                // 名称关键词匹配商城 API 图(如"珍藏"→竹香珍藏); 无匹配的
+                // 酒按商城占位图机制构造同款生成图, 视觉与商城完全一致
+                let mallImgMap = {};
+                try {
+                    const mr = await fetch('/api/product/list?page=1&pageSize=50');
+                    const md = await mr.json();
+                    const mtoks = n => (n || '').replace(/竹奕|竹香|·/g, ' ')
+                        .split(/[\s°()0-9a-zA-Z×批次年]+/).filter(t => t.length >= 2);
+                    (md.products || []).forEach(mp => {
+                        const img = mp.image || '';
+                        if (!img) return;
+                        mtoks(mp.name).forEach(t => { if (!mallImgMap[t]) mallImgMap[t] = img; });
+                    });
+                } catch (e) { /* 商城图拉取失败回退 emoji 占位 */ }
+                const matchMallImg = name => {
+                    const ts = (name || '').replace(/竹香|·/g, ' ')
+                        .split(/[\s°()0-9a-zA-Z×批次年]+/).filter(t => t.length >= 2);
+                    for (const t of ts) if (mallImgMap[t]) return mallImgMap[t];
+                    return null;
+                };
+                const genImg = name => 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt='
+                    + encodeURIComponent(name + ' 主图') + '&image_size=1024x1024';
+                // 直加入同盟购物车(2026-10-19: 与商城页共用 localStorage 车,
+                // 首页臻选卡一键入车; 宴会厅/品鉴杯等全品类同样支持)
+                const alCartAdd = (btn, pid, name, price, shop, emoji) => {
+                    let list = [];
+                    try { list = JSON.parse(localStorage.getItem('allianceMall.cart')) || []; } catch (e) { }
+                    let hit = null;
+                    list.forEach(x => { if (x.productId === pid) hit = x; });
+                    if (hit) hit.qty = Math.min(99, hit.qty + 1);
+                    else list.push({ productId: pid, qty: 1, name: name, price: price, shopName: shop, emoji: emoji });
+                    localStorage.setItem('allianceMall.cart', JSON.stringify(list));
+                    btn.textContent = '已入车 ✓';
+                    setTimeout(() => { btn.textContent = '入车'; }, 1200);
+                };
+                window.__alCartAdd = alCartAdd;
                 document.getElementById('allianceProducts').innerHTML = items.map(p => {
                     const cat = CAT[p.category] || ['🎁', '臻选'];
                     const traced = p.trace && p.trace.traceVerified;
                     const merchant = p.merchantName || ('商户 #' + p.merchantId);
                     const desc = (p.description || '').slice(0, 40);
+                    let aimg = matchMallImg(p.name);
+                    if (!aimg && (p.category === 'wine' || /酒/.test(p.name || ''))) aimg = genImg(p.name);
+                    const imgHtml = aimg
+                        ? `<img src="${aimg}" alt="${p.name}" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;">`
+                        : `<span class="alliance-cat-icon">${cat[0]}</span>`;
                     return `
-                    <div class="product-card alliance-card" onclick="location.href='alliance-mall.html#shop=' + p.merchantId">
+                    <div class="product-card alliance-card" onclick="location.href='alliance-mall.html#shop=${p.merchantId}&pid=${p.productId}'">
                         <div class="product-img alliance-img">
                             ${traced ? '<span class="product-tag featured">✓ 已溯源</span>' : ''}
-                            <span class="alliance-cat-icon">${cat[0]}</span>
+                            ${imgHtml}
                         </div>
                         <div class="product-info">
                             <div class="product-category">${merchant} · ${cat[1]}</div>
@@ -288,10 +419,22 @@
                             <div class="product-bottom">
                                 <div class="product-price">¥${p.price}<small> · 余 ${p.stock} 件</small></div>
                                 <span class="alliance-sku">${p.sku}</span>
+                                <button class="btn-add-cart" data-alpid="${p.productId}" data-alname="${p.name}" data-alprice="${p.price}" data-alshop="${merchant}" data-alemoji="${cat[0]}">入车</button>
                             </div>
                         </div>
                     </div>`;
                 }).join('');
+                // 入车按钮委托(阻止卡片跳转, 仅入车)
+                const apBox = document.getElementById('allianceProducts');
+                if (apBox && !apBox.dataset.alCartBound) {
+                    apBox.dataset.alCartBound = '1';
+                    apBox.addEventListener('click', e => {
+                        const b = e.target.closest('button[data-alpid]');
+                        if (!b) return;
+                        e.stopPropagation();
+                        alCartAdd(b, Number(b.dataset.alpid), b.dataset.alname, parseFloat(b.dataset.alprice), b.dataset.alshop, b.dataset.alemoji);
+                    });
+                }
                 document.getElementById('allianceSection').style.display = '';
                 // 今日甄选倒计时(京东秒杀模式: 每日 24:00 更新的节奏感)
                 const cnt = document.getElementById('allianceCount');

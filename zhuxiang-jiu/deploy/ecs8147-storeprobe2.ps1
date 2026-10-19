@@ -1,4 +1,4 @@
-﻿# 探针2: chat 键名结构 + shadowLlm 定位
+﻿﻿﻿﻿# 探针2: chat 键名结构 + shadowLlm 定位
 $ErrorActionPreference = 'Continue'
 function Info($m) { Write-Host "    $m" }
 $k = & C:\redis\redis-cli.exe KEYS '*chat*' 2>$null

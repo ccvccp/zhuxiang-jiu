@@ -1,4 +1,4 @@
-﻿# care 闸线上终验 v2: 会话/消息统一用注册会员真实 id
+﻿﻿﻿﻿# care 闸线上终验 v2: 会话/消息统一用注册会员真实 id
 $ErrorActionPreference = 'Continue'
 function Info($m) { Write-Host "    $m" }
 $T = 'C:\tmp8147\zhuyun'

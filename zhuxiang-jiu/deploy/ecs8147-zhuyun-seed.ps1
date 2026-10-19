@@ -1,4 +1,4 @@
-﻿# 竹韵话术知识库生产入库(下载 seed py -> redis 持久态执行 -> 冒烟)
+﻿﻿﻿﻿# 竹韵话术知识库生产入库(下载 seed py -> redis 持久态执行 -> 冒烟)
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Continue'
 function Info($m) { Write-Host "    $m" }

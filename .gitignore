@@ -203,3 +203,21 @@ zhuxiang-jiu/deploy/dist_index.work.html
 /drama-eps.txt
 /drama-eps-full.json
 /mp_avatar.png
+.secrets/
+
+# ============================================================
+# 2026-10-19 工作区整理: 一次性验收报告/探针/部署包不入库
+# (文件保留在磁盘, 仅不进 git; 日期后缀=当日一次性产物)
+# ============================================================
+/.trae-html-share-packages/
+/arch-*
+/arch_*.py
+/arch_*.json
+/*.tgz
+/*20261017*
+/*20261018*
+/*截图*
+zhuxiang-jiu/*.tgz
+zhuxiang-jiu/deploy/_pkg/
+zhuxiang-jiu/deploy/*.tgz
+

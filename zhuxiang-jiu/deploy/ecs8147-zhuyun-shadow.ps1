@@ -1,4 +1,4 @@
-﻿# 竹韵 V0.5 shadow 生产部署(国内 ECS, 云助手执行体)
+﻿﻿﻿﻿# 竹韵 V0.5 shadow 生产部署(国内 ECS, 云助手执行体)
 # 范围: 后端 3 文件(persona/chat/knowledge) + CHAT_LLM_MODE=shadow + 前端挂件三件
 # 红线: rule 轨零变化(shadow=留痕不呈现); 失败任一步即停
 $ProgressPreference = 'SilentlyContinue'

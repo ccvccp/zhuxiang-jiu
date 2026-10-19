@@ -1847,3 +1847,31 @@ if (typeof window !== 'undefined') {
     window.runHighConcurrencyStressTest = runHighConcurrencyStressTest;
     window.__runHighConcurrencyStressTestPromise = runHighConcurrencyStressTest;
 }
+
+// ---------- 全局返回按钮(2026-10-19) ----------
+// 背景: 微信内二级页无系统返回, 用户只能关闭重进; 所有加载 main.js 的
+// 二级页自动注入左下角悬浮返回钮(首页/官网/商城SPA 不注入)
+(function () {
+    var page = (location.pathname.split('/').pop() || '').toLowerCase();
+    if (!page || page === 'index.html' || page === 'official.html' || page === 'app.html') return;
+    function mount() {
+        if (document.getElementById('globalBackBtn')) return;
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.id = 'globalBackBtn';
+        b.innerHTML = '&#8592;';
+        b.setAttribute('aria-label', '返回上一页');
+        b.style.cssText = 'position:fixed;left:14px;bottom:110px;z-index:2147483000;'
+            + 'width:44px;height:44px;border-radius:50%;border:none;cursor:pointer;'
+            + 'background:rgba(53,92,68,.92);color:#fff;font-size:22px;line-height:44px;'
+            + 'padding:0;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.28);'
+            + 'font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;';
+        b.onclick = function () {
+            if (history.length > 1) { history.back(); }
+            else { location.href = 'index.html'; }
+        };
+        document.body.appendChild(b);
+    }
+    if (document.body) { mount(); }
+    else { document.addEventListener('DOMContentLoaded', mount); }
+})();

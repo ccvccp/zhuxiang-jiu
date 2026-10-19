@@ -1,4 +1,4 @@
-﻿# 急救4: 修 nssm Parameters\AppEnvironmentExtra(nssm 参数真实存储位)
+﻿﻿﻿﻿# 急救4: 修 nssm Parameters\AppEnvironmentExtra(nssm 参数真实存储位)
 $ErrorActionPreference = 'Continue'
 $paramKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\backend8147\Parameters'
 Write-Host '==> [1/4] Parameters 现状'

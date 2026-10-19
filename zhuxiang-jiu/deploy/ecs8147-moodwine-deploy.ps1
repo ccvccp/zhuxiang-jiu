@@ -1,4 +1,4 @@
-﻿# 心境·酒签模块部署(index.html + style.css -> C:\www\dist, 含 chat E2E 验证)
+﻿﻿﻿﻿# 心境·酒签模块部署(index.html + style.css -> C:\www\dist, 含 chat E2E 验证)
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Continue'
 function Step($m) { Write-Host "==> $m" }

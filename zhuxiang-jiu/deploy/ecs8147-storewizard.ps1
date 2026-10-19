@@ -1,4 +1,4 @@
-﻿# 一句话开店向导部署(后端 4 文件+nssm 重启, 前端 alliance-mall.html, 双 E2E)
+﻿﻿﻿﻿# 一句话开店向导部署(后端 4 文件+nssm 重启, 前端 alliance-mall.html, 双 E2E)
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Continue'
 function Step($m) { Write-Host "==> $m" }

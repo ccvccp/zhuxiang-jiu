@@ -27,20 +27,20 @@
 
         /* 顶栏 */
         .mall-top { position: sticky; top: 0; z-index: 100;
-            background: rgba(53,92,68,.96); color: #fff;
+            background: rgba(53,92,68,.96); color: var(--color-white);
             display: flex; align-items: center; gap: 12px;
             padding: 12px 16px; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
-        .mall-top .back { color: #fff; text-decoration: none; font-size: 13px;
+        .mall-top .back { color: var(--color-white); text-decoration: none; font-size: 13px;
             opacity: .9; white-space: nowrap; }
         .mall-top .back::before { content: '← '; }
         .mall-top h1 { flex: 1; margin: 0; font-size: 17px; letter-spacing: 2px;
             font-weight: 600; }
         .cart-btn { position: relative; background: rgba(255,255,255,.14);
-            color: #fff; border: 1px solid rgba(255,255,255,.4);
+            color: var(--color-white); border: 1px solid rgba(255,255,255,.4);
             border-radius: 999px; padding: 7px 16px; font-size: 13px;
             cursor: pointer; text-decoration: none; white-space: nowrap; }
         .cart-btn .cnt { position: absolute; top: -7px; right: -5px;
-            background: #c0392b; color: #fff; border-radius: 999px;
+            background: var(--color-danger); color: var(--color-white); border-radius: 999px;
             min-width: 18px; height: 18px; line-height: 18px;
             font-size: 11px; text-align: center; padding: 0 4px;
             display: none; }
@@ -57,7 +57,7 @@
             letter-spacing: 3px; }
         .mall-hero p { margin: 0; color: #7d8a80; font-size: 13px;
             letter-spacing: 1px; }
-        .mall-stats { margin-top: 10px; font-size: 12px; color: #4a7c59; }
+        .mall-stats { margin-top: 10px; font-size: 12px; color: var(--color-primary); }
 
         /* 区块标题 */
         .sec-title { display: flex; align-items: baseline; gap: 10px;
@@ -65,10 +65,52 @@
         .sec-title b { font-size: 17px; color: #2d3a32; letter-spacing: 1px; }
         .sec-title span { font-size: 12px; color: #97a49a; }
 
+        /* ===== 一句话开店向导 ===== */
+        .wiz-box { background: var(--color-white); border: 1px solid #e5eae2;
+            border-radius: 16px; padding: 20px 18px; margin: 18px 0 6px;
+            box-shadow: 0 4px 18px rgba(53,92,68,.06); }
+        .wiz-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+        .wiz-head b { font-size: 17px; color: #2d3a32; }
+        .wiz-head span { font-size: 12px; color: #97a49a; }
+        .wiz-input-row { display: flex; gap: 10px; }
+        .wiz-input-row input { flex: 1; min-width: 0; padding: 10px 14px;
+            border: 1px solid #dfe5dc; border-radius: 10px; font-size: 14px; outline: none; }
+        .wiz-input-row input:focus { border-color: var(--color-primary); }
+        .wiz-btn { background: linear-gradient(135deg, #4a7c59, #355c44);
+            color: var(--color-white); border: 0; border-radius: 10px;
+            padding: 10px 18px; font-size: 14px; cursor: pointer; white-space: nowrap; }
+        .wiz-btn:disabled { opacity: .6; cursor: wait; }
+        .wiz-plan { margin-top: 16px; border-top: 1px dashed #e0e6dd; padding-top: 14px; }
+        .wiz-plan-cat { display: inline-block; padding: 4px 14px; border-radius: 999px;
+            background: rgba(74,124,89,.12); color: var(--color-primary-dark);
+            font-size: 13px; margin-bottom: 12px; }
+        .wiz-sec { margin: 12px 0; }
+        .wiz-sec label { display: block; font-size: 12px; color: #97a49a;
+            letter-spacing: 1px; margin-bottom: 6px; }
+        .wiz-sec p { margin: 0; font-size: 14px; color: #3c4a3f; line-height: 1.7; }
+        .wiz-sec ul, .wiz-sec ol { margin: 0; padding-left: 20px;
+            font-size: 14px; color: #3c4a3f; line-height: 1.9; }
+        .wiz-names { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+        .wiz-name { padding: 6px 14px; border-radius: 999px; border: 1px solid #cfd9d0;
+            background: #f7faf5; font-size: 13px; cursor: pointer; }
+        .wiz-name.on { background: var(--color-primary); color: var(--color-white);
+            border-color: var(--color-primary-dark); }
+        #wizName { width: 100%; box-sizing: border-box; padding: 9px 12px;
+            border: 1px solid #dfe5dc; border-radius: 10px; font-size: 14px; }
+        .wiz-actions { margin-top: 14px; display: flex; align-items: center; gap: 12px;
+            flex-wrap: wrap; }
+        .wiz-tip { font-size: 12px; color: #97a49a; }
+        .wiz-result { margin-top: 12px; padding: 12px 14px; border-radius: 10px;
+            font-size: 14px; line-height: 1.8; background: #f2f7f0; color: #3c4a3f; }
+        .wiz-result.fail { background: #fdf2f0; color: #8a4a3f; }
+        @media (max-width: 640px) {
+            .wiz-input-row { flex-direction: column; }
+        }
+
         /* 商户卡片 */
         .shop-grid { display: grid; gap: 16px;
             grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
-        .shop-card { background: #fff; border-radius: 16px; padding: 22px 16px;
+        .shop-card { background: var(--color-white); border-radius: 16px; padding: 22px 16px;
             text-align: center; cursor: pointer; transition: .2s;
             border: 1px solid #e9ece7; }
         .shop-card:hover { transform: translateY(-4px);
@@ -79,16 +121,16 @@
             background: linear-gradient(135deg, #eef3ea, #dce8d8); }
         .shop-card .name { font-size: 16px; font-weight: 600; color: #2d3a32; }
         .shop-card .cat { display: inline-block; margin: 7px 0;
-            font-size: 11px; color: #4a7c59; background: #eef3ea;
+            font-size: 11px; color: var(--color-primary); background: #eef3ea;
             border-radius: 999px; padding: 2px 10px; }
         .shop-card .meta { font-size: 12px; color: #97a49a; line-height: 1.7; }
         .shop-card .go { display: inline-block; margin-top: 8px;
-            font-size: 12px; color: #4a7c59; font-weight: 600; }
+            font-size: 12px; color: var(--color-primary); font-weight: 600; }
 
         /* 店内商品卡 */
         .prod-grid { display: grid; gap: 16px;
             grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
-        .prod-card { background: #fff; border-radius: 16px; overflow: hidden;
+        .prod-card { background: var(--color-white); border-radius: 16px; overflow: hidden;
             border: 1px solid #e9ece7; display: flex; flex-direction: column;
             transition: .2s; }
         .prod-card:hover { transform: translateY(-4px);
@@ -98,14 +140,14 @@
             display: flex; align-items: center; justify-content: center; }
         .prod-visual .ico { font-size: 62px; filter: drop-shadow(0 8px 14px rgba(58,92,74,.25)); }
         .prod-visual .trace { position: absolute; top: 10px; left: 10px;
-            font-size: 11px; color: #fff; border-radius: 999px; padding: 3px 10px;
+            font-size: 11px; color: var(--color-white); border-radius: 999px; padding: 3px 10px;
             background: linear-gradient(135deg, #4a7c59, #355c44); }
         .prod-body { padding: 13px 14px 14px; display: flex;
             flex-direction: column; gap: 6px; flex: 1; }
         .prod-body .pname { font-size: 15px; font-weight: 600; color: #2d3a32; }
         .prod-body .pdesc { font-size: 12px; color: #97a49a;
             min-height: 32px; }
-        .prod-body .pprice { color: #c0392b; font-size: 19px; font-weight: 700; }
+        .prod-body .pprice { color: var(--color-danger); font-size: 19px; font-weight: 700; }
         .prod-body .pprice small { font-size: 11px; color: #97a49a;
             font-weight: 400; }
         .prod-ops { display: flex; gap: 8px; margin-top: auto;
@@ -113,12 +155,12 @@
         .qty { display: inline-flex; align-items: center;
             border: 1px solid #d8ded7; border-radius: 8px; overflow: hidden; }
         .qty button { width: 26px; height: 26px; border: 0;
-            background: #f2f5f0; cursor: pointer; font-size: 14px; color: #4a7c59; }
+            background: #f2f5f0; cursor: pointer; font-size: 14px; color: var(--color-primary); }
         .qty input { width: 38px; height: 26px; border: 0; text-align: center;
             font-size: 13px; }
         .btn-cart, .btn-buy { flex: 1; border: 0; border-radius: 999px;
             padding: 8px 0; font-size: 12.5px; cursor: pointer; }
-        .btn-cart { background: #eef3ea; color: #355c44; }
+        .btn-cart { background: #eef3ea; color: var(--color-primary-dark); }
         .btn-buy { background: linear-gradient(135deg, #4a7c59, #355c44);
             color: #fff; }
 
@@ -127,15 +169,15 @@
             display: none; z-index: 200; }
         .cart-mask.show { display: block; }
         .cart-panel { position: fixed; top: 0; right: -360px; width: 340px;
-            max-width: 92vw; height: 100%; background: #fff; z-index: 201;
+            max-width: 92vw; height: 100%; background: var(--color-white); z-index: 201;
             display: flex; flex-direction: column; transition: right .25s;
             box-shadow: -6px 0 24px rgba(0,0,0,.15); }
         .cart-panel.show { right: 0; }
-        .cart-head { padding: 14px 16px; background: #355c44; color: #fff;
+        .cart-head { padding: 14px 16px; background: var(--color-primary-dark); color: var(--color-white);
             display: flex; justify-content: space-between; align-items: center; }
         .cart-head b { font-size: 14px; letter-spacing: 1px; }
         .cart-head .x { cursor: pointer; background: none; border: 0;
-            color: #fff; font-size: 18px; }
+            color: var(--color-white); font-size: 18px; }
         .cart-list { flex: 1; overflow-y: auto; padding: 10px 14px; }
         .cart-item { display: flex; gap: 10px; padding: 10px 0;
             border-bottom: 1px dashed #eceee9; font-size: 13px; }
@@ -143,7 +185,7 @@
         .cart-item .ci { flex: 1; }
         .cart-item .cn { color: #2d3a32; font-weight: 600; }
         .cart-item .cs { color: #97a49a; font-size: 11px; margin: 2px 0 6px; }
-        .cart-item .cp { color: #c0392b; font-weight: 700; }
+        .cart-item .cp { color: var(--color-danger); font-weight: 700; }
         .cart-item .rm { border: 0; background: none; color: #b6beb6;
             cursor: pointer; font-size: 12px; }
         .cart-empty { text-align: center; color: #aab5ab; padding: 50px 0;
@@ -151,10 +193,10 @@
         .cart-foot { padding: 12px 16px 18px; border-top: 1px solid #eef0eb; }
         .cart-total { display: flex; justify-content: space-between;
             margin-bottom: 10px; font-size: 14px; color: #2d3a32; }
-        .cart-total b { color: #c0392b; font-size: 18px; }
+        .cart-total b { color: var(--color-danger); font-size: 18px; }
         .btn-checkout { width: 100%; border: 0; border-radius: 999px;
             padding: 12px 0; font-size: 14px; letter-spacing: 2px;
-            color: #fff; cursor: pointer;
+            color: var(--color-white); cursor: pointer;
             background: linear-gradient(135deg, #4a7c59, #355c44); }
 
         /* 结算结果 */
@@ -162,17 +204,17 @@
             display: none; align-items: center; justify-content: center;
             z-index: 300; padding: 20px; }
         .rsl-mask.show { display: flex; }
-        .rsl-box { background: #fff; border-radius: 18px; max-width: 380px;
+        .rsl-box { background: var(--color-white); border-radius: 18px; max-width: 380px;
             width: 100%; padding: 24px 22px; }
         .rsl-box h3 { margin: 0 0 12px; font-size: 16px; color: #2d3a32; }
         .rsl-line { font-size: 13px; color: #576058; line-height: 1.9; }
-        .rsl-line .ok { color: #4a7c59; }
-        .rsl-line .fail { color: #c0392b; }
+        .rsl-line .ok { color: var(--color-primary); }
+        .rsl-line .fail { color: var(--color-danger); }
         .rsl-box .btn-checkout { margin-top: 14px; }
 
         /* 提示气泡 */
         .toast { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%);
-            background: rgba(45,58,50,.92); color: #fff; font-size: 13px;
+            background: rgba(45,58,50,.92); color: var(--color-white); font-size: 13px;
             border-radius: 999px; padding: 9px 20px; z-index: 400;
             opacity: 0; transition: opacity .25s; pointer-events: none; }
         .toast.show { opacity: 1; }
@@ -183,6 +225,16 @@
         @media (max-width: 560px) {
             .mall-hero h2 { font-size: 21px; }
             .mall-top h1 { font-size: 15px; letter-spacing: 1px; }
+        }
+        /* 直达商品高亮(2026-10-19): #shop=ID&pid=PID 定位闪烁 */
+        .prod-card.focus-flash {
+            outline: 3px solid #c9a961;
+            outline-offset: 2px;
+            animation: alFlash 1.2s ease 3;
+        }
+        @keyframes alFlash {
+            0%, 100% { box-shadow: 0 4px 18px rgba(74,124,89,.12); }
+            50% { box-shadow: 0 4px 26px rgba(201,169,97,.55); }
         }
     </style>
 </head>
@@ -206,8 +258,37 @@
             <div class="mall-stats" id="mallStats">加载中…</div>
         </div>
 
-        <!-- 商户目录 -->
+        <!-- 一句话开店向导(同盟商城 Agent 方案: 想法→方案→入盟申请) -->
         <div id="viewDirectory">
+        <div class="wiz-box" id="wizBox">
+            <div class="wiz-head">
+                <b>✨ 一句话开店</b>
+                <span>说出想法，AI 为您生成开店方案</span>
+            </div>
+            <div class="wiz-input-row">
+                <input id="wizIdea" maxlength="120" placeholder="如：我想开一家卖武夷山岩茶的店，走礼盒路线">
+                <button class="wiz-btn" id="wizGo">生成方案</button>
+            </div>
+            <div class="wiz-plan" id="wizPlan" style="display:none">
+                <div class="wiz-plan-cat" id="wizCat"></div>
+                <div class="wiz-sec"><label>店名候选（点选可改）</label>
+                    <div class="wiz-names" id="wizNames"></div>
+                    <input id="wizName" maxlength="20" placeholder="或直接输入您想要的店名">
+                </div>
+                <div class="wiz-sec"><label>一句话定位</label><p id="wizPos"></p></div>
+                <div class="wiz-sec"><label>选品建议</label><ul id="wizPicks"></ul></div>
+                <div class="wiz-sec"><label>视觉风格</label><p id="wizStyle"></p></div>
+                <div class="wiz-sec"><label>营销首推</label><ul id="wizMkt"></ul></div>
+                <div class="wiz-sec"><label>开店七日清单</label><ol id="wizChk"></ol></div>
+                <div class="wiz-actions">
+                    <button class="wiz-btn" id="wizSubmit">提交入盟申请</button>
+                    <span class="wiz-tip">须超级会员 · AI 预审 80 分快车道</span>
+                </div>
+                <div class="wiz-result" id="wizResult" style="display:none"></div>
+            </div>
+        </div>
+
+        <!-- 商户目录 -->
             <div class="sec-title"><b>同盟商户</b><span>点击进店 · 选购该店系列产品与服务</span></div>
             <div class="shop-grid" id="shopGrid"></div>
         </div>
@@ -216,7 +297,7 @@
         <div id="viewShop" style="display:none">
             <div class="sec-title">
                 <b id="shopTitle">店铺</b><span id="shopSub"></span>
-                <a href="alliance-mall.html" style="margin-left:auto;font-size:12px;color:#4a7c59;text-decoration:none">← 返回商户目录</a>
+                <a href="alliance-mall.html" style="margin-left:auto;font-size:12px;color:var(--color-primary);text-decoration:none">← 返回商户目录</a>
             </div>
             <div class="prod-grid" id="prodGrid"></div>
         </div>
@@ -300,7 +381,7 @@
     }
 
     /* ---------- 店内视图 ---------- */
-    function renderShop(mid) {
+    function renderShop(mid, focusPid) {
         var shop = shopsCache.filter(function (s) {
             return s.merchantId === Number(mid); })[0];
         var c = shop ? catOf(shop.category) : ['🎁', '臻选'];
@@ -335,6 +416,17 @@
                         + ',this)">立即购买</button>'
                         + '</div></div></div>';
                 }).join('') || '<div class="cart-empty">本店暂无在售商品</div>';
+                /* 直达商品(2026-10-19): #shop=ID&pid=PID 滚动定位+高亮 */
+                if (focusPid) {
+                    setTimeout(function () {
+                        var inp = $('prodGrid').querySelector('input[data-pid="' + focusPid + '"]');
+                        var card = inp && inp.closest('.prod-card');
+                        if (card) {
+                            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            card.classList.add('focus-flash');
+                        }
+                    }, 150);
+                }
             })
             .catch(function () {
                 $('prodGrid').innerHTML = '<div class="cart-empty">加载失败, 请刷新重试</div>';
@@ -456,10 +548,93 @@
         $('rslMask').classList.add('show');
     }
 
+    /* ---------- 一句话开店向导 ---------- */
+    var wizPlanData = null;
+    function wizGenerate() {
+        var idea = $('wizIdea').value.trim();
+        if (!idea) { $('wizIdea').focus(); toast('先说说您的开店想法'); return; }
+        var btn = $('wizGo'); btn.disabled = true; btn.textContent = '生成中…';
+        fetch('/api/store/wizard', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idea: idea.slice(0, 120) }),
+        }).then(function (r) { return r.json().then(function (b) {
+            return { ok: r.ok && b.success === true, b: b }; }); })
+        .catch(function (e) { return { ok: false, b: { error: String(e) } }; })
+        .then(function (res) {
+            btn.disabled = false; btn.textContent = '生成方案';
+            if (!res.ok) { toast((res.b && (res.b.detail || res.b.error)) || '生成失败'); return; }
+            var d = res.b.data; wizPlanData = d;
+            $('wizPlan').style.display = '';
+            $('wizResult').style.display = 'none';
+            $('wizCat').textContent = d.categoryLabel + ' · ' + d.category;
+            $('wizNames').innerHTML = d.shopNames.map(function (n) {
+                return '<span class="wiz-name" data-n="' + esc(n) + '">' + esc(n) + '</span>';
+            }).join('');
+            $('wizName').value = d.shopNames[0] || '';
+            $('wizPos').textContent = d.positioning;
+            $('wizPicks').innerHTML = d.picks.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('');
+            $('wizStyle').textContent = d.style;
+            $('wizMkt').innerHTML = d.marketing.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('');
+            $('wizChk').innerHTML = d.checklist.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('');
+            $('wizPlan').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+    }
+    function wizSubmit() {
+        if (!wizPlanData) return;
+        var name = ($('wizName').value || '').trim();
+        if (!name) { $('wizName').focus(); toast('先选定一个店名'); return; }
+        if (!window.Auth || !Auth.isLoggedIn()) {
+            toast('入盟申请须先登录');
+            setTimeout(function () { location.href = 'login.html'; }, 900);
+            return;
+        }
+        var info = Auth.getInfo();
+        var headers = Auth.apiHeaders();
+        headers['Content-Type'] = 'application/json';
+        headers['X-Member-Id'] = String(info.memberId);
+        var btn = $('wizSubmit'); btn.disabled = true; btn.textContent = '提交中…';
+        fetch('/api/alliance/apply', {
+            method: 'POST', headers: headers,
+            body: JSON.stringify({
+                memberId: info.memberId, category: wizPlanData.category,
+                shopName: name,
+                credentials: ['开店想法: ' + wizPlanData.idea],
+            }),
+        }).then(function (r) { return r.json().then(function (b) {
+            return { ok: r.ok && b.success === true, b: b }; }); })
+        .catch(function (e) { return { ok: false, b: { error: String(e) } }; })
+        .then(function (res) {
+            btn.disabled = false; btn.textContent = '提交入盟申请';
+            var box = $('wizResult'); box.style.display = '';
+            if (res.ok) {
+                var d = res.b.data || {};
+                box.className = 'wiz-result';
+                box.textContent = '✅ 入盟申请已提交' +
+                    (d.precheckScore != null ? '（AI 预审 ' + d.precheckScore + ' 分）' : '') +
+                    '，审核结果将以站内消息通知。';
+            } else {
+                box.className = 'wiz-result fail';
+                box.textContent = '❌ ' + ((res.b && (res.b.error || res.b.detail)) || '提交失败') +
+                    '（若提示须超级会员，可先升级会员后再试）';
+            }
+        });
+    }
+    document.addEventListener('click', function (e) {
+        var n = e.target.closest && e.target.closest('.wiz-name');
+        if (n) {
+            document.querySelectorAll('.wiz-name').forEach(function (x) { x.classList.remove('on'); });
+            n.classList.add('on');
+            $('wizName').value = n.dataset.n || n.textContent;
+        }
+    });
+    $('wizGo').addEventListener('click', wizGenerate);
+    $('wizIdea').addEventListener('keydown', function (e) { if (e.key === 'Enter') wizGenerate(); });
+    $('wizSubmit').addEventListener('click', wizSubmit);
+
     /* ---------- 路由与启动 ---------- */
     function route() {
-        var m = location.hash.match(/^#shop=(\d+)$/);
-        if (m) { renderShop(m[1]); return; }
+        var m = location.hash.match(/^#shop=(\d+)(?:&pid=(\d+))?$/);
+        if (m) { renderShop(m[1], m[2]); return; }
         $('viewShop').style.display = 'none';
         $('viewDirectory').style.display = '';
         $('mallHero').style.display = '';
@@ -482,5 +657,20 @@
     cartRender();
     route();
     </script>
-</body>
+<script>
+/* 全局返回按钮(2026-10-19, 自包含版): 本页未加载 main.js, 自带注入 */
+(function(){var p=(location.pathname.split('/').pop()||'').toLowerCase();
+if(!p||p==='index.html'||p==='official.html'||p==='app.html')return;
+function m(){if(document.getElementById('globalBackBtn'))return;
+var b=document.createElement('button');b.type='button';b.id='globalBackBtn';
+b.innerHTML='&#8592;';b.setAttribute('aria-label','返回上一页');
+b.style.cssText='position:fixed;left:14px;bottom:110px;z-index:2147483000;'
++'width:44px;height:44px;border-radius:50%;border:none;cursor:pointer;'
++'background:rgba(53,92,68,.92);color:#fff;font-size:22px;line-height:44px;'
++'padding:0;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.28);'
++'font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;';
+b.onclick=function(){if(history.length>1){history.back();}else{location.href='index.html';}};
+document.body.appendChild(b);}
+if(document.body){m();}else{document.addEventListener('DOMContentLoaded',m);}})();
+</script></body>
 </html>

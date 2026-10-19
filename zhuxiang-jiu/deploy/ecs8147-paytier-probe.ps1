@@ -1,4 +1,4 @@
-﻿# 生产接线验证 v2: 退出码判定 + 结果落文件回读
+﻿﻿# 生产接线验证 v2: 退出码判定 + 结果落文件回读
 $ErrorActionPreference = 'Continue'
 $exe = 'C:\Python312\python.exe'
 $code = @'

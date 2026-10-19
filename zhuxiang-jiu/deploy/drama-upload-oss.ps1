@@ -1,4 +1,4 @@
-﻿# 剧集成片 OSS 上传脚本(固化手工 oss-put 流程, 2026-10-17)
+﻿﻿# 剧集成片 OSS 上传脚本(固化手工 oss-put 流程, 2026-10-17)
 # 用途: 84号集成片(d84_{sid}_ep{n}.mp4)/73号成片(sv73_{sid}_mix.mp4)
 #       → OSS zxjiu-videos bucket 根 → CDN v.zyjiu.com 可达
 # 上传后输出组剧用 video_url 清单(POST /api/v1/dramas 的 episodes[].video_url)

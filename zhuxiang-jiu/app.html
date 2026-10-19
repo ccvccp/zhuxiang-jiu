@@ -1,0 +1,20 @@
+<!doctype html><html lang="zh-CN"><head><meta content="text/html; charset=utf-8" http-equiv="Content-Type"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover"/><meta name="theme-color" content="#355c44"/><meta name="apple-mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/><meta name="apple-mobile-web-app-title" content="竹香酒"/><meta name="apple-touch-fullscreen" content="yes"/><meta name="mobile-web-app-capable" content="yes"/><meta name="format-detection" content="telephone=no,address=no,email=no"/><meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/><title>竹香酒</title><script>// 固定 html fontSize，防止 flexible 脚本动态修改
+      (function() {
+        var html = document.documentElement;
+        html.style.fontSize = '18px';
+        Object.defineProperty(html.style, 'fontSize', {
+          get: function() { return '18px'; },
+          set: function() { /* 忽略所有修改 */ }
+        });
+      })();
+      !function(n){function f(){var e=n.document.documentElement,r=e.getBoundingClientRect(),width=r.width,height=r.height,arr=[width,height].filter(function(value){return Boolean(value)}),w=Math.min.apply(Math,arr),x=37.5*w/375;e.style.fontSize=x>=40?"40px":x<=20?"20px":x+"px"}; n.addEventListener("resize",(function(){f()})),f()}(window);</script><script defer="defer" src="/js/taro.6f3e5fe0.js"></script><script defer="defer" src="/js/app.b984e24b.js"></script><link href="/css/app.b241c438098a04dbd156.css" rel="stylesheet"></head><body><div id="app"></div><script defer="defer" src="/js/scene-widget.js"></script><script defer="defer" src="/js/voice-wake-widget.js?v=100"></script><script defer="defer" src="/js/v72-variant.js?v=1"></script>
+<script>
+/* 官网入口修正 v2(2026-10-19): 固定回商城首页 /index.html(功能全)。
+   v1 跳根路径在 PC 上被 UA 分流到品牌官网页(内容少), 与用户预期不符 */
+(function () {
+  document.addEventListener('click', function (e) {
+    var t = e.target && e.target.closest ? e.target.closest('[class*="officialEntry"]') : null;
+    if (t) { e.preventDefault(); e.stopPropagation(); window.location.href = '/index.html'; }
+  }, true);
+})();
+</script></body></html>

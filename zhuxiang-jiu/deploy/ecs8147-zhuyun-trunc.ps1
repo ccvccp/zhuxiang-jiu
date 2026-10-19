@@ -1,4 +1,4 @@
-﻿# 超长条目截断重建(#188/#135 -> 句界截断 ~320 字 -> 退役旧条+重建发布)
+﻿﻿﻿﻿# 超长条目截断重建(#188/#135 -> 句界截断 ~320 字 -> 退役旧条+重建发布)
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Continue'
 function Info($m) { Write-Host "    $m" }

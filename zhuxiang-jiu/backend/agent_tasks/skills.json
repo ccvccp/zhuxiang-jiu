@@ -7,214 +7,15 @@
   "kind": "prompt_tool",
   "slot": "classify",
   "intent": null,
+  "roles": null,
   "spec": {
    "model_id": "glm-flash",
    "prompt_template": "你是任务意图分类器。将用户输入分为以下之一, 只输出一个词:\nchat(闲聊/咨询) summary(要求总结/归纳) draft(要求写作/起草) unknown(无法判断)"
   },
   "metrics": {
-   "invocations": 344,
-   "successes": 344,
+   "invocations": 384,
+   "successes": 384,
    "recent": [
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791789394
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791789394
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791801966
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791801966
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791801966
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791801967
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791801967
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791801967
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791801967
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791801967
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791804351
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791804351
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791804352
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791804352
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791804352
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791804352
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791804352
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791804352
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791810147
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791810147
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791810147
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791810147
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791810147
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791810148
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791810148
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791810148
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791816351
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791816351
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791816351
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791816351
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791816352
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791816352
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791816352
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791816352
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791835617
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791835617
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791835617
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791835617
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791835617
-    },
-    {
-     "ok": true,
-     "latency_ms": 3,
-     "at": 1791835617
-    },
     {
      "ok": true,
      "latency_ms": 3,
@@ -264,6 +65,206 @@
      "ok": true,
      "latency_ms": 3,
      "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124114
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124114
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124114
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124114
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124120
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124120
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124121
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124121
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124176
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124176
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124177
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124177
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124186
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124186
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124186
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124186
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124289
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124289
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124289
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124289
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124296
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124297
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124297
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792124297
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792217792
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792217792
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792217792
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792217792
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792217802
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792217802
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792217802
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792217802
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792219037
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792219038
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792219038
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792219038
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792219038
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792219038
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792219038
+    },
+    {
+     "ok": true,
+     "latency_ms": 3,
+     "at": 1792219038
     }
    ],
    "avg_latency_ms": 3
@@ -280,13 +281,14 @@
   "kind": "prompt_tool",
   "slot": "generate",
   "intent": "chat",
+  "roles": null,
   "spec": {
    "model_id": "glm-reason",
    "prompt_template": "你是竹香酒品牌网站 zxjiu.com 的站内助手, 用中文简洁友好地回答用户, 涉及产品时自然提及竹香型白酒特点, 不夸大功效、不劝酒。"
   },
   "metrics": {
-   "invocations": 43,
-   "successes": 43,
+   "invocations": 48,
+   "successes": 48,
    "recent": [
     {
      "ok": true,
@@ -502,6 +504,31 @@
      "ok": true,
      "latency_ms": 5,
      "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124114
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124176
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124289
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792217792
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792219038
     }
    ],
    "avg_latency_ms": 5
@@ -518,189 +545,15 @@
   "kind": "prompt_tool",
   "slot": "generate",
   "intent": "summary",
+  "roles": null,
   "spec": {
    "model_id": "glm-reason",
    "prompt_template": "你是站内摘要助手, 将用户给出的内容压缩为要点清晰的中文简报, 保留关键数字与结论。"
   },
   "metrics": {
-   "invocations": 301,
-   "successes": 301,
+   "invocations": 336,
+   "successes": 336,
    "recent": [
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791788309
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791789394
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791789394
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791789394
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791789394
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791789394
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791789394
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791789394
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791801966
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791801966
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791801967
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791801967
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791801967
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791801967
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791801967
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791804351
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791804352
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791804352
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791804352
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791804352
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791804352
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791804352
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791810147
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791810147
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791810147
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791810148
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791810148
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791810148
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791810148
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791816351
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791816351
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791816351
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791816352
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791816352
-    },
-    {
-     "ok": true,
-     "latency_ms": 5,
-     "at": 1791816352
-    },
     {
      "ok": true,
      "latency_ms": 5,
@@ -775,6 +628,181 @@
      "ok": true,
      "latency_ms": 5,
      "at": 1791836803
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124114
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124114
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124114
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124120
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124120
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124121
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124121
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124176
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124177
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124177
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124186
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124186
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124186
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124186
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124289
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124289
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124289
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124297
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124297
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124297
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792124297
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792217792
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792217792
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792217792
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792217802
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792217802
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792217802
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792217802
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792219038
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792219038
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792219038
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792219038
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792219038
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792219038
+    },
+    {
+     "ok": true,
+     "latency_ms": 5,
+     "at": 1792219038
     }
    ],
    "avg_latency_ms": 5
@@ -791,6 +819,7 @@
   "kind": "prompt_tool",
   "slot": "generate",
   "intent": "draft",
+  "roles": null,
   "spec": {
    "model_id": "glm-reason",
    "prompt_template": "你是站内文案助手, 按用户要求起草中文文案, 语气贴合竹香酒品牌调性(沉稳、有故事感), 不作功效宣称。"
@@ -813,6 +842,7 @@
   "kind": "builtin_fn",
   "slot": "review",
   "intent": null,
+  "roles": null,
   "spec": {
    "fn": "critic"
   },
@@ -834,6 +864,7 @@
   "kind": "builtin_fn",
   "slot": "generate",
   "intent": null,
+  "roles": null,
   "spec": {
    "fn": "checkpoint_order",
    "group_order": {
@@ -864,30 +895,10 @@
    "successes": 0,
    "recent": [],
    "avg_latency_ms": 0,
-   "shadow_runs": 327,
+   "shadow_runs": 445,
    "shadow_recent": [
     {
      "ok": true,
-     "latency_ms": 1
-    },
-    {
-     "ok": true,
-     "latency_ms": 1
-    },
-    {
-     "ok": true,
-     "latency_ms": 5
-    },
-    {
-     "ok": true,
-     "latency_ms": 5
-    },
-    {
-     "ok": false,
-     "latency_ms": 5
-    },
-    {
-     "ok": true,
      "latency_ms": 5
     },
     {
@@ -940,35 +951,35 @@
     },
     {
      "ok": true,
-     "latency_ms": 5
+     "latency_ms": 1
     },
     {
      "ok": true,
-     "latency_ms": 5
-    },
-    {
-     "ok": false,
-     "latency_ms": 5
+     "latency_ms": 1
     },
     {
      "ok": true,
-     "latency_ms": 5
+     "latency_ms": 1
     },
     {
      "ok": true,
-     "latency_ms": 5
-    },
-    {
-     "ok": false,
-     "latency_ms": 5
+     "latency_ms": 1
     },
     {
      "ok": true,
-     "latency_ms": 5
+     "latency_ms": 1
     },
     {
-     "ok": false,
-     "latency_ms": 5
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
     },
     {
      "ok": true,
@@ -1004,35 +1015,55 @@
     },
     {
      "ok": true,
-     "latency_ms": 5
+     "latency_ms": 1
     },
     {
      "ok": true,
-     "latency_ms": 5
-    },
-    {
-     "ok": false,
-     "latency_ms": 5
+     "latency_ms": 1
     },
     {
      "ok": true,
-     "latency_ms": 5
+     "latency_ms": 1
     },
     {
      "ok": true,
-     "latency_ms": 5
-    },
-    {
-     "ok": false,
-     "latency_ms": 5
+     "latency_ms": 1
     },
     {
      "ok": true,
-     "latency_ms": 5
+     "latency_ms": 1
     },
     {
-     "ok": false,
-     "latency_ms": 5
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
+    },
+    {
+     "ok": true,
+     "latency_ms": 1
     },
     {
      "ok": true,

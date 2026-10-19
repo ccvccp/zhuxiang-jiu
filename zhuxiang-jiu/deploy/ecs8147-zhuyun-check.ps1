@@ -1,4 +1,4 @@
-﻿# 竹韵话术冲突检查(下载检查器 -> redis 持久态执行 -> base64 报告)
+﻿﻿﻿﻿# 竹韵话术冲突检查(下载检查器 -> redis 持久态执行 -> base64 报告)
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Continue'
 function Info($m) { Write-Host "    $m" }

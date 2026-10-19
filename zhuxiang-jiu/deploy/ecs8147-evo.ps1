@@ -1,4 +1,4 @@
-﻿# 进化观测面部署(9 文件 -> C:\backend, nssm 重启, 自检事件+三 API E2E)
+﻿﻿﻿﻿# 进化观测面部署(9 文件 -> C:\backend, nssm 重启, 自检事件+三 API E2E)
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Continue'
 function Step($m) { Write-Host "==> $m" }

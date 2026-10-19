@@ -1,4 +1,4 @@
-﻿# 生产正式超管初始化(替代原 seed 替换: 生产 admin 域零账号, AUTH_MODE=strict)
+﻿﻿﻿﻿# 生产正式超管初始化(替代原 seed 替换: 生产 admin 域零账号, AUTH_MODE=strict)
 # 路径: 代码层直调 AdminService(不走 HTTP 建号面) -> 环回 login 验证 -> 凭证仅输出一次
 $ErrorActionPreference = 'Continue'
 $T = 'C:\tmp8147\arch'; New-Item -ItemType Directory -Force $T | Out-Null

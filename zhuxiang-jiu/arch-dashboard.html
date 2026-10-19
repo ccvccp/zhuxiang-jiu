@@ -38,5 +38,20 @@
 <footer style="color:var(--color-text-faint,#aaa);font-size:12px;margin:20px 0">
   竹智 MVP 只读汇聚 23 个模块灰度态 · 数据源 /api/arch/observe · admin 详情 /api/arch/status</footer>
 <script src="js/arch-dashboard.js"></script>
-</body>
+<script>
+/* 全局返回按钮(2026-10-19, 自包含版): 本页未加载 main.js, 自带注入 */
+(function(){var p=(location.pathname.split('/').pop()||'').toLowerCase();
+if(!p||p==='index.html'||p==='official.html'||p==='app.html')return;
+function m(){if(document.getElementById('globalBackBtn'))return;
+var b=document.createElement('button');b.type='button';b.id='globalBackBtn';
+b.innerHTML='&#8592;';b.setAttribute('aria-label','返回上一页');
+b.style.cssText='position:fixed;left:14px;bottom:110px;z-index:2147483000;'
++'width:44px;height:44px;border-radius:50%;border:none;cursor:pointer;'
++'background:rgba(53,92,68,.92);color:#fff;font-size:22px;line-height:44px;'
++'padding:0;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.28);'
++'font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;';
+b.onclick=function(){if(history.length>1){history.back();}else{location.href='index.html';}};
+document.body.appendChild(b);}
+if(document.body){m();}else{document.addEventListener('DOMContentLoaded',m);}})();
+</script></body>
 </html>

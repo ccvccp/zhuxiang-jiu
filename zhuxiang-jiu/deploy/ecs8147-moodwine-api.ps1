@@ -1,4 +1,4 @@
-﻿# 心境·酒签后端部署(4 文件 -> C:\backend, nssm 重启 backend8147, E2E 验证)
+﻿﻿﻿﻿# 心境·酒签后端部署(4 文件 -> C:\backend, nssm 重启 backend8147, E2E 验证)
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Continue'
 function Step($m) { Write-Host "==> $m" }

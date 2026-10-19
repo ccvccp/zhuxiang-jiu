@@ -1205,13 +1205,12 @@ input, textarea, select {
     transition: var(--transition);
 }
 
-/* 金刚区图片图标(2026-10-02 竹绿扁平图标): 圆底改为承托图片, 微圆角 */
-.service-entry .icon img {
-    width: 46px;
-    height: 46px;
-    border-radius: 12px;
-    display: block;
-    object-fit: cover;
+/* 金刚区图标 v5(2026-10-19): 圆球+汉字——桌面端由上方 .icon 圆 +
+   flex 居中承托, 单字 30px 加粗(约球径 54%, 视觉充盈) */
+.service-entry .icon {
+    font-size: 30px;
+    font-weight: 600;
+    line-height: 1;
 }
 
 .service-entry h3 {
@@ -2108,19 +2107,18 @@ textarea.form-control {
         padding: 0 2px;
     }
     .service-entry .icon {
-        width: auto;
-        height: auto;
+        width: 48px;                     /* 圆球回归: 球内字设计 */
+        height: 48px;
         margin: 0 auto 6px;
-        background: none;        /* 手机端去圆底: 图标图即视觉主体,
-                                    规避 XWeb+zoom 下球内偏移/溢出 */
-        border-radius: 0;
+        background: rgba(74, 124, 89, 0.12);
+        border-radius: 50%;
         display: block;
-    }
-    .service-entry .icon img {
-        width: 40px;
-        height: 40px;
-        display: block;
-        margin: 0 auto;
+        text-align: center;              /* 水平居中(行内, 不用 flex) */
+        font-size: 26px;                 /* 字约球径 54%; 1.4x 字体档下
+                                            36px 仍 < 48px 球, 不溢出 */
+        line-height: 48px;               /* 行高=球高: 垂直居中且随字号
+                                            同比缩放, XWeb+zoom 下不偏移 */
+        overflow: hidden;                /* 兜底: 极端字体档也不外溢 */
     }
     .service-entry h3 {
         font-size: 12px;
@@ -2219,6 +2217,10 @@ textarea.form-control {
     .notice-bar {
         font-size: 12px;
         padding: 6px 12px;
+        white-space: nowrap;        /* 横式单行: 原手机端折成三行不雅观,
+                                       尾部品牌语省略号截断(警示语在前完整可见) */
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
     .section {
         padding: 30px 0;
