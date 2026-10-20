@@ -152,6 +152,8 @@ def run(args=None):
     registry = _load_registry(DEFAULT_REPO)
     syms, refs = referencing_files(files, registry=registry)
     assessment = redline_assess(files, registry)
+    from zhudun import rules
+    checklist = rules.checklist_map(files, repo=DEFAULT_REPO)
     counts = {"红": 0, "高": 0, "中": 0, "低": 0}
     for a in assessment.values():
         counts[a["risk"]] += 1
@@ -163,6 +165,12 @@ def run(args=None):
         print(f"  {mark} {f}")
         for h in a["hits"][:4]:
             print(f"       ↳ {h}")
+    if checklist:
+        print(f"[zhudun impact] 检查清单映射（{sum(len(v) for v in checklist.values())} 项提醒）:")
+        for f, items in sorted(checklist.items()):
+            print(f"  {f}:")
+            for it in items:
+                print(f"    - {it}")
     print(f"[zhudun impact] 反向引用: 符号 {len(syms)} 个, 引用方 {len(refs)} 文件")
     for rel, lines in sorted(refs.items())[:10]:
         print(f"  {rel}: 行 {lines}")

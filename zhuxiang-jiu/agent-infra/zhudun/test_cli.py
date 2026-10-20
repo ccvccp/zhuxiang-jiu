@@ -136,3 +136,31 @@ def test_redline_assess_three_cases():
     assert b["zhuxiang-jiu/backend/services/xiaozhu_mode_service.py"]["risk"] == "高"
     assert any("开关:XIAOZHU_MODE" in h for h in b["zhuxiang-jiu/backend/services/xiaozhu_mode_service.py"]["hits"])
     assert b["zhuxiang-jiu/backend/routes/other_routes.py"]["risk"] == "中"
+
+
+def test_checklist_map_rules(tmp_path):
+    """T1.6 验收: 每条规则一个用例——B1 v=升位/C3 Redis备份/C4 绝对URL/E 部署面/F1 语法检查"""
+    import sys
+    sys.path.insert(0, os.path.dirname(HERE))
+    from zhudun import rules
+    (tmp_path / "main.js").write_text("console.log(1)\n", encoding="utf-8")
+    bsub = tmp_path / "backend"
+    bsub.mkdir()
+    (bsub / "repo.py").write_text(
+        "import redis\nredis.hset('k', 'f', 1)\n", encoding="utf-8")
+    (tmp_path / "page.html").write_text(
+        '<img src="http://img.example.com/a.jpg">\n', encoding="utf-8")
+    deploysub = tmp_path / "deploy"
+    deploysub.mkdir()
+    (deploysub / "deploy-x.ps1").write_text("echo hi\n", encoding="utf-8")
+    (tmp_path / "notes.md").write_text("文字\n", encoding="utf-8")
+    cm = rules.checklist_map(
+        ["main.js", "backend/repo.py", "page.html", "deploy/deploy-x.ps1", "notes.md"],
+        repo=str(tmp_path))
+    assert any("B1" in it for it in cm["main.js"])
+    assert any("F1" in it for it in cm["main.js"])           # js 也提醒语法检查
+    assert any("C3" in it for it in cm["backend/repo.py"])   # Redis hset 写操作
+    assert any("F1" not in it[0:1] for it in [cm["backend/repo.py"]])  # py 提醒语法检查
+    assert any("C4" in it for it in cm["page.html"])         # 绝对 URL
+    assert any("E " in it or it.startswith("E") for it in cm["deploy/deploy-x.ps1"])
+    assert "notes.md" not in cm                              # md 无提醒
