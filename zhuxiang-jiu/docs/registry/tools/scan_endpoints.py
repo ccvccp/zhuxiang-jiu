@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """竹盾 T0.2 端点清单生成器（临时工具——P1 起由 zhudun index 替代并移除）
 
 扫描 backend/main.py + backend/routes/*.py 的路由装饰器,
@@ -25,7 +24,10 @@ ROUTES_DIR = os.path.join(BACKEND, "routes")
 OUT = os.path.join(REPO, "docs", "registry", "L0-端点清单.md")
 
 sys.path.insert(0, BACKEND)
-from core.auth_middleware import PUBLIC_EXACT, PUBLIC_GET_PREFIXES, PUBLIC_GET_PATTERNS  # noqa: E402
+from core.auth_middleware import (  # ruff 作用域外, sys.path 注入后显式导入
+    PUBLIC_EXACT, PUBLIC_GET_PREFIXES, PUBLIC_GET_PATTERNS,
+    PUBLIC_POST_PATTERNS,
+)
 
 DECO_RE = re.compile(r'@(\w+)\.(get|post|put|delete|patch|websocket)\((.*)')
 PATH_RE = re.compile(r'''["']([^"']+)["']''')
@@ -101,6 +103,11 @@ def classify(path, method):
         for pat in PUBLIC_GET_PATTERNS:
             if pat.match(path):
                 return "公开·GET正则"
+    # 39号扫码带 qr_id 段 POST 公开(2026-10-21 竹盾 R2 修复对齐)
+    if method == "POST":
+        for pat in PUBLIC_POST_PATTERNS:
+            if pat.match(path):
+                return "公开·POST正则"
     return "登录·JWT"
 
 
@@ -194,7 +201,8 @@ def main():
     total = 0
     by_method = {}
     auth_stat = OrderedDict([("公开·EXACT", 0), ("公开·EXACT·模板", 0),
-                             ("公开·GET前缀", 0), ("公开·GET正则", 0), ("登录·JWT", 0)])
+                             ("公开·GET前缀", 0), ("公开·GET正则", 0),
+                             ("公开·POST正则", 0), ("登录·JWT", 0)])
     gated_cnt = 0
     all_paths = set()
     all_templates = set()
@@ -241,6 +249,8 @@ def main():
             label = "公开·GET前缀（游客浏览面）"
         elif k == "公开·GET正则":
             label = "公开·GET正则（动态路径）"
+        elif k == "公开·POST正则":
+            label = "公开·POST正则（39号扫码带 qr_id 段，2026-10-21 R2 修复）"
         buf.append("| %s | %d |" % (label, v))
     buf.append("| @_decision 门控端点 | %d |" % gated_cnt)
     buf.append("")
@@ -271,9 +281,10 @@ def main():
         buf.append("")
 
     io.open(OUT, "w", encoding="utf-8").write("\n".join(buf))
-    print("OK total=%d modules=%d exact=%d exact_tpl=%d getpre=%d getre=%d jwt=%d gated=%d dead_exact=%d dead_prefix=%d" % (
+    print("OK total=%d modules=%d exact=%d exact_tpl=%d getpre=%d getre=%d postre=%d jwt=%d gated=%d dead_exact=%d dead_prefix=%d" % (
         total, len(modules), auth_stat["公开·EXACT"], auth_stat["公开·EXACT·模板"],
-        auth_stat["公开·GET前缀"], auth_stat["公开·GET正则"], auth_stat["登录·JWT"],
+        auth_stat["公开·GET前缀"], auth_stat["公开·GET正则"], auth_stat["公开·POST正则"],
+        auth_stat["登录·JWT"],
         gated_cnt, len(dead_exact), len(dead_prefix)))
 
 

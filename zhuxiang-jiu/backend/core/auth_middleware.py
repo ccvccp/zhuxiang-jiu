@@ -88,9 +88,11 @@ PUBLIC_EXACT = {
     "/api/entry/register",
     "/api/entry/step-up/verify",
     "/api/entry/qr/create",
-    "/api/entry/qr/scan",
-    "/api/entry/qr/exchange",
-    "/api/entry/qr/cancel",
+    # 39号扫码 scan/exchange/cancel 原为无参 EXACT 死条目——实际路由
+    # 为 /{qr_id}/ 形态永不匹配(竹盾 2026-10-21 发现的阻断性漂移:
+    # exchange 是 PC 未登录态用一次性 loginTicket 换 JWT 的最后一步,
+    # 被拦=扫码登录链路断裂), 已迁至下方 PUBLIC_POST_PATTERNS;
+    # confirm 仍登录态(设计内: X-Member-Id 由 JWT 注入)
     "/api/entry/registration-merge",
     # 39号 P1: 生物凭证挑战/验证(登录前, 凭一次性 challenge)
     "/api/entry/bio/challenge",
@@ -228,6 +230,16 @@ PUBLIC_GET_PATTERNS = (
     re.compile(r"^/api/community/(feed|posts)$"),
 )
 
+# 公开 POST 正则(动态路径)——39号扫码协议带 qr_id 段(2026-10-21
+# 竹盾 R2 修复: 原 EXACT 无参死条目永不匹配 {qr_id} 路由致链路断裂):
+#   scan=手机扫码动作(无身份依赖, 真实身份在 confirm 步核验)
+#   exchange=PC 未登录态用一次性 loginTicket(60s 防重放)换 JWT
+#   cancel=取消会话(幂等, 发起方可为未登录端)
+# confirm 不在其中——设计内登录态(X-Member-Id 由 JWT 注入)
+PUBLIC_POST_PATTERNS = (
+    re.compile(r"^/api/entry/qr/[^/]+/(scan|exchange|cancel)$"),
+)
+
 
 def is_public_path(path: str, method: str) -> bool:
     """判断路径是否公开(无需登录)"""
@@ -237,6 +249,8 @@ def is_public_path(path: str, method: str) -> bool:
         if any(path.startswith(prefix) for prefix in PUBLIC_GET_PREFIXES):
             return True
         return any(p.match(path) for p in PUBLIC_GET_PATTERNS)
+    if method == "POST":
+        return any(p.match(path) for p in PUBLIC_POST_PATTERNS)
     return False
 
 
@@ -390,7 +404,7 @@ class JWTAuthMiddleware:
                 member = await self._service.get_current_member(token)
                 inject_identity(scope, member)
                 return
-            except Exception as exc:   # noqa: BLE001 公开面宽容: 坏 token=游客
+            except Exception as exc:   # 公开面宽容: 坏 token=游客
                 logger.info("public_path_token_invalid guest_fallback "
                             "path=%s token_len=%d err=%s",
                             scope.get("path"), len(token), exc)
