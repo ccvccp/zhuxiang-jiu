@@ -8,6 +8,7 @@
 用法: python agent-infra/zhudun/cli.py <子命令> [参数]
 """
 import argparse
+import os
 import sys
 
 __version__ = "0.1.0"
@@ -41,6 +42,14 @@ def main(argv=None):
     if not args.command:
         parser.print_help()
         return 0
+    if args.command == "index":
+        import sys
+        pkg_dir = os.path.dirname(os.path.abspath(__file__))
+        pkg_parent = os.path.dirname(pkg_dir)
+        if pkg_parent not in sys.path:
+            sys.path.insert(0, pkg_parent)
+        from zhudun import index
+        return index.run(args)
     print(f"[zhudun {args.command}] 骨架占位——{STUBS[args.command]}")
     return 0
 

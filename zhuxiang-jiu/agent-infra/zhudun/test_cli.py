@@ -30,3 +30,14 @@ def test_no_args_prints_help():
     r = _run()
     assert r.returncode == 0
     assert "zhudun" in r.stdout
+
+
+def test_index_rebuild_reproduces_p0():
+    """T1.2 验收: index 全链重建与 P0 锁定版一致(统计行全量命中)"""
+    r = _run("index")
+    assert r.returncode == 0
+    assert "total=2612" in r.stdout          # scan_endpoints
+    assert "runtime=480" in r.stdout         # scan_modules
+    assert "root_html=59" in r.stdout         # scan_pages
+    assert "OK endpoints=2612" in r.stdout    # build_registry_json 自检
+    assert "重建完成" in r.stdout

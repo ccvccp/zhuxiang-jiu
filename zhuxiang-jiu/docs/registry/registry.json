@@ -1,6 +1,6 @@
 {
  "_meta": {
-  "generated": "2026-10-20T20:25:27",
+  "generated": "2026-10-20T20:44:40",
   "policy": "MD为源,脚本生成,禁手工编辑(README 规则1); 刷新=重跑 tools/build_registry_json.py",
   "sources": [
    "L0-端点清单.md",
