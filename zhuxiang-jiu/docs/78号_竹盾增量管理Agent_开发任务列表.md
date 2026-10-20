@@ -27,13 +27,13 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | T0.1 | ✅ | 建 registry 骨架 | `docs/registry/`（含 `reports/` 子目录）+ README（目录用途/维护规则） | 入 git，README 说明"MD 为源、JSON 由脚本生成" | - | 📗 |
 | T0.2 | ✅ | L0-端点清单 | `docs/registry/L0-端点清单.md`：backend 全部路由（路径/方法/所属模块），标注 PUBLIC_EXACT、PUBLIC_GET_PREFIXES 白名单归属与 @_decision 门控端点 | 随机抽查 10 端点与代码一致 | T0.1 | 📗 |
-| T0.3 | ⬜ | L0-模块清单 | `docs/registry/L0-模块清单.md`：backend services/schedulers/models + **全部 MODE 环境开关**（XIAOZHU/ZYH/SYNAPSE/ZJIAN/VOICEPAY/ATTRACT72/...）逐个附一行回滚命令 | 开关名与 .env 逐一对齐，无遗漏 | T0.1 | 📗 |
-| T0.4 | ⬜ | L0-前端页面清单 | `docs/registry/L0-页面清单.md`：仓库根 18+ 页面 html + js/ 模块族（dashboard 族/toolkit/各 *-test.js）+ taro-app/public 手工资产 + nginx UA 分流规则 | 与 inject_beian PAGES 清单及 dist 实际文件对照 | T0.1 | 📗 |
-| T0.5 | ⬜ | 红线标记录入 | `docs/registry/红线标记.md`：六大红线（支付回调白名单/鉴权 401 自愈/18 模型门控/Redis 键空间混型/语音链路/部署铁律）+ 行为资产五条（运费/评价同步/注册面/区县店/时空情景） | 与方案 2.1/2.2 节逐项对齐，每条附代码位置 | T0.2-T0.4 | 🧑‍🏫 |
-| T0.6 | ⬜ | registry.json | `docs/registry/registry.json`：三张表 + 红线字段（机器可读） | JSON 可解析；同步策略=脚本从 MD 生成 | T0.5 | 🧑‍🏫 |
-| T0.7 | ⬜ | 进化检查清单 A 节修订 | `进化检查清单.md` A1-A5 项加注"2026-11-11 海外退役后作废"+ 单端预案行 | 只标注不删除；预案行含 ECS 单端探活命令 | - | 📗 |
+| T0.3 | ✅ | L0-模块清单 | `docs/registry/L0-模块清单.md`：backend services/schedulers/models + **全部 MODE 环境开关**（XIAOZHU/ZYH/SYNAPSE/ZJIAN/VOICEPAY/ATTRACT72/...）逐个附一行回滚命令 | 开关名与 .env 逐一对齐，无遗漏 | T0.1 | 📗 |
+| T0.4 | ✅ | L0-前端页面清单 | `docs/registry/L0-页面清单.md`：仓库根 18+ 页面 html + js/ 模块族（dashboard 族/toolkit/各 *-test.js）+ taro-app/public 手工资产 + nginx UA 分流规则 | 与 inject_beian PAGES 清单及 dist 实际文件对照 | T0.1 | 📗 |
+| T0.5 | ✅ | 红线标记录入 | `docs/registry/红线标记.md`：六大红线（支付回调白名单/鉴权 401 自愈/18 模型门控/Redis 键空间混型/语音链路/部署铁律）+ 行为资产五条（运费/评价同步/注册面/区县店/时空情景） | 与方案 2.1/2.2 节逐项对齐，每条附代码位置 | T0.2-T0.4 | 🧑‍🏫 |
+| T0.6 | ✅ | registry.json | `docs/registry/registry.json`：三张表 + 红线字段（机器可读） | JSON 可解析；同步策略=脚本从 MD 生成 | T0.5 | 🧑‍🏫 |
+| T0.7 | ✅ | 进化检查清单 A 节修订 | `进化检查清单.md` A1-A5 项加注"2026-11-11 海外退役后作废"+ 单端预案行 | 只标注不删除；预案行含 ECS 单端探活命令 | - | 📗 |
 
-**M0 里程碑**：lead 随机抽检 20 项清单条目对照代码，100% 一致 → 进入 P1。
+**M0 里程碑**：P0 七任务全部完成（2026-10-20）。自验记录：T0.2 抽查 10/10、T0.3 死键清零+五形态核验、T0.4 三向对照双向零差集、T0.5 位置全部实证、T0.6 JSON 自检通过、T0.7 只标注未删除——**待 lead 随机抽检 20 项清单条目对照代码确认后，正式过 M0 进 P1**。
 
 ## P1 · 影响评估器 CLI（`agent-infra/zhudun/`，与图形分析 Agent 同构）
 
