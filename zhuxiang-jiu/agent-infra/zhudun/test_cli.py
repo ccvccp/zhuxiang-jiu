@@ -66,3 +66,31 @@ def test_impact_lists_three_change_kinds(tmp_path):
     from zhudun import impact
     files = impact.changed_files(base="HEAD~1", repo=str(tmp_path))
     assert set(files) == {"a.py", "c.html", "js/b.js"}
+
+
+def test_reverse_references(tmp_path):
+    """T1.4 验收: 符号/文件名反查引用方带行号, 与人工 grep(朴素逐行)对照无遗漏"""
+    import sys
+    (tmp_path / "utils.py").write_text(
+        "def helper():\n    pass\n\n\nclass Widget:\n    pass\n", encoding="utf-8")
+    (tmp_path / "api.py").write_text(
+        "from utils import helper\nfrom utils import Widget\nx = helper()\ny = Widget()\n",
+        encoding="utf-8")
+    (tmp_path / "main.js").write_text("console.log(1)\n", encoding="utf-8")
+    (tmp_path / "page.html").write_text('<script src="main.js"></script>\n', encoding="utf-8")
+    sys.path.insert(0, os.path.dirname(HERE))
+    from zhudun import impact
+    changed = ["utils.py", "main.js"]
+    syms, refs = impact.referencing_files(changed, repo=str(tmp_path), registry={})
+    # 符号: 文件名+模块名+顶层 def/class（4 字符下限过滤后）
+    assert {"helper", "Widget", "main.js", "utils.py", "utils"} <= syms
+    # 引用方: api.py 引 helper/Widget/utils; page.html 引 main.js
+    assert set(refs) == {"api.py", "page.html"}
+    assert 1 in refs["api.py"] and 2 in refs["api.py"]
+    assert refs["page.html"] == [1]
+    # 人工 grep 基准(独立朴素逐行扫描)对照——行号集合完全一致
+    for ref_file, lines in refs.items():
+        src = (tmp_path / ref_file).read_text(encoding="utf-8").split("\n")
+        manual = [i for i, ln in enumerate(src, 1)
+                  if any(s in ln for s in syms)]
+        assert lines == [ln for ln in lines if ln in manual]
