@@ -176,4 +176,11 @@ def run(args=None):
         print(f"  {rel}: 行 {lines}")
     if len(refs) > 10:
         print(f"  ...（共 {len(refs)} 文件, 截断显示）")
+    from zhudun import report
+    stats = (f"endpoints={registry.get('stats', {}).get('endpoints', '?')}"
+             f" switches={registry.get('stats', {}).get('switches', '?')}"
+             f" red_lines={registry.get('stats', {}).get('red_lines', '?')}")
+    path = report.generate(files, refs, assessment, checklist, base,
+                           syms=syms, registry_stats=stats)
+    print(f"[zhudun impact] 报告已归档: {path}")
     return 0

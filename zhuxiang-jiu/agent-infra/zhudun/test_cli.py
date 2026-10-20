@@ -164,3 +164,29 @@ def test_checklist_map_rules(tmp_path):
     assert any("C4" in it for it in cm["page.html"])         # 绝对 URL
     assert any("E " in it or it.startswith("E") for it in cm["deploy/deploy-x.ps1"])
     assert "notes.md" not in cm                              # md 无提醒
+
+
+def test_report_generate(tmp_path):
+    """T1.7: 报告生成含全部段落+签字确认行"""
+    import sys
+    sys.path.insert(0, os.path.dirname(HERE))
+    from zhudun import report
+    files = ["backend/routes/payment_routes.py", "docs/x.md"]
+    refs = {"js/main.js": [1, 5]}
+    assessment = {
+        "backend/routes/payment_routes.py": {"risk": "红", "hits": ["R1 支付回调白名单"]},
+        "docs/x.md": {"risk": "低", "hits": []},
+    }
+    checklist = {"backend/routes/payment_routes.py": ["F1 语法检查"]}
+    path = report.generate(files, refs, assessment, checklist, "origin/master",
+                           out_dir=str(tmp_path),
+                           registry_stats="endpoints=2612")
+    txt = (tmp_path / os.path.basename(path)).read_text(encoding="utf-8")
+    assert "风险分级汇总" in txt
+    assert "红" in txt and "R1 支付回调白名单" in txt
+    assert "回归建议" in txt and "专项流程" in txt        # 红→专项
+    assert "反向引用" in txt and "js/main.js" in txt
+    assert "复用建议" in txt
+    assert "检查清单映射" in txt and "F1" in txt
+    assert "签字确认" in txt and "lead 已复核" in txt      # 门2 凭证
+    assert "与 PR 一一对应" in txt                        # 归档说明
