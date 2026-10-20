@@ -33,10 +33,15 @@ log "   分支: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')
 log "   时间: $(date '+%Y-%m-%d %H:%M:%S')"
 log "============================================================"
 
-# ---------- 0. 竹盾 pre-commit 预检(78号 T1.9, 2026-10-20, 置于最前) ----------
-# F1 语法检查(py: python -m py_compile / js: node --check)=阻断;
-# B1 zhuxiang-jiu 前端资产改动 v=升位 / C4 绝对 URL = 告警不阻断(上线前打勾);
-# 整段超时(>10s)降级: 剩余文件跳过, 只告警不阻断(设计红线: 不得阻塞紧急提交)。
+# ---------- 0. 竹盾 pre-commit 预检(78号 T1.9/T2.4, 2026-10-21) ----------
+# ZHUDUN_MODE 三态: off=紧急逃生全旁路(事后补影响报告) / assist(默认, P2)=
+#   F1 语法阻断 + 缺影响报告提示不阻断并留痕 .zhudun_waiver.log / full(P3)=缺报告阻断。
+# B1 v=升位 / C4 绝对 URL = 告警不阻断; >10s 超时降级只告警。
+ZD_MODE="${ZHUDUN_MODE:-assist}"
+ZD_STAGED=""
+if [ "$ZD_MODE" = "off" ]; then
+    log "🛡️ [zhudun] ZHUDUN_MODE=off——竹盾预检旁路(紧急逃生, 事后须补影响报告)"
+else
 ZD_START=$SECONDS
 ZD_BLOCKFILE="$REPO_ROOT/.git/hooks/.zhudun_block"
 rm -f "$ZD_BLOCKFILE" 2>/dev/null || true
@@ -95,7 +100,20 @@ if [ -n "$ZD_STAGED" ]; then
         log "============================================================"
         exit 1
     fi
-    log "✅ 竹盾预检完成(告警项不阻断, 上线前逐项打勾检查清单)"
+    # T2.4 assist 档: backend/deploy 核心改动且窗口内无影响报告 → 提示+留痕(不阻断)
+    if [ "$ZD_MODE" = "assist" ]; then
+        ZD_WIN="${ZHUDUN_REPORT_WINDOW_MIN:-1440}"
+        ZD_CORE=$(echo "$ZD_STAGED" | grep -cE '^zhuxiang-jiu/(backend|deploy)/' || true)
+        ZD_RECENT=$(find "$REPO_ROOT/zhuxiang-jiu/docs/registry/reports" -name '影响报告-*.md' -mmin "-$ZD_WIN" 2>/dev/null | wc -l)
+        if [ "$ZD_CORE" -gt 0 ] && [ "$ZD_RECENT" -eq 0 ]; then
+            log "   ⚠️ [assist] 本批含 backend/deploy 核心改动 ${ZD_CORE} 个, 但 ${ZD_WIN} 分钟内无影响报告"
+            log "   建议: python agent-infra/zhudun/cli.py impact --base <base> 先出报告(五步 SOP 门 2)"
+            echo "[$(date '+%F %T')] WAIVED-NO-REPORT mode=assist core=$ZD_CORE staged=$(echo "$ZD_STAGED" | wc -l)" >> "$REPO_ROOT/.git/hooks/.zhudun_waiver.log"
+            log "   (assist 提示不阻断, 已留痕 .git/hooks/.zhudun_waiver.log)"
+        fi
+    fi
+    log "✅ 竹盾预检完成(mode=$ZD_MODE, 告警项不阻断, 上线前逐项打勾检查清单)"
+fi
 fi
 
 # ---------- 1. 获取暂存的 JS 文件 ----------
