@@ -33,6 +33,71 @@ log "   分支: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')
 log "   时间: $(date '+%Y-%m-%d %H:%M:%S')"
 log "============================================================"
 
+# ---------- 0. 竹盾 pre-commit 预检(78号 T1.9, 2026-10-20, 置于最前) ----------
+# F1 语法检查(py: python -m py_compile / js: node --check)=阻断;
+# B1 zhuxiang-jiu 前端资产改动 v=升位 / C4 绝对 URL = 告警不阻断(上线前打勾);
+# 整段超时(>10s)降级: 剩余文件跳过, 只告警不阻断(设计红线: 不得阻塞紧急提交)。
+ZD_START=$SECONDS
+ZD_BLOCKFILE="$REPO_ROOT/.git/hooks/.zhudun_block"
+rm -f "$ZD_BLOCKFILE" 2>/dev/null || true
+ZD_STAGED=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(py|js|css|html)$' || true)
+if [ -n "$ZD_STAGED" ]; then
+    log ""
+    log "🛡️ [zhudun] 竹盾预检(F1 语法阻断 / B1 v= / C4 URL 告警):"
+    echo "$ZD_STAGED" | while read -r zf; do
+        [ -n "$zf" ] || continue
+        if [ $((SECONDS - ZD_START)) -ge 10 ]; then
+            log "   ⚠️ 预检超时(>10s)——剩余文件跳过, 降级只告警不阻断"
+            break
+        fi
+        ZFULL="$REPO_ROOT/$zf"
+        [ -f "$ZFULL" ] || continue
+        case "$zf" in
+            *.py)
+                ZD_PY=$(command -v python 2>/dev/null || command -v py 2>/dev/null || true)
+                if [ -n "$ZD_PY" ]; then
+                    if ! "$ZD_PY" -m py_compile "$ZFULL" >/dev/null 2>&1; then
+                        log "   ❌ [F1] Python 语法错误(阻断): $zf"
+                        echo "block" >> "$ZD_BLOCKFILE"
+                    fi
+                else
+                    log "   ⚠️ [F1] 无 python, 跳过: $zf"
+                fi ;;
+            *.js)
+                if [ -z "$ZD_NODE" ]; then
+                    ZD_NODE=$(command -v node 2>/dev/null || echo "$REPO_ROOT/nodejs/node-v20.18.2-win-x64/node.exe")
+                fi
+                if [ -f "$ZD_NODE" ]; then
+                    if ! "$ZD_NODE" --check "$ZFULL" >/dev/null 2>&1; then
+                        log "   ❌ [F1] JS 语法错误(阻断): $zf"
+                        echo "block" >> "$ZD_BLOCKFILE"
+                    fi
+                else
+                    log "   ⚠️ [F1] 无 node, 跳过: $zf"
+                fi ;;
+        esac
+        case "$zf" in
+            zhuxiang-jiu/js/*|zhuxiang-jiu/css/*)
+                log "   ⚠️ [B1] $zf——部署前确认引用 html ?v= 升位(告警)" ;;
+        esac
+        case "$zf" in
+            zhuxiang-jiu/js/*|zhuxiang-jiu/*.html)
+                if grep -E 'https?://[a-z0-9]' "$ZFULL" >/dev/null 2>&1; then
+                    log "   ⚠️ [C4] $zf 含绝对 URL——资源应走 /images/ 相对路径(告警)"
+                fi ;;
+        esac
+    done
+    if [ -f "$ZD_BLOCKFILE" ]; then
+        rm -f "$ZD_BLOCKFILE"
+        log "❌ 竹盾预检 F1 语法错误——提交已阻断"
+        log "------------------------------------------------------------"
+        log "📊 决策: BLOCK (zhudun F1 语法错误)"
+        log "============================================================"
+        exit 1
+    fi
+    log "✅ 竹盾预检完成(告警项不阻断, 上线前逐项打勾检查清单)"
+fi
+
 # ---------- 1. 获取暂存的 JS 文件 ----------
 STAGED_FILES=$(git diff --cached --name-only --diff-filter ACM 2>/dev/null | grep '\.js$' | grep 'zhuxiang-jiu/js' || true)
 
@@ -242,7 +307,7 @@ log "✅ 静态检查通过 (括号/花括号均匹配)"
 #   test_ahm.js               AHM 哑流检出/自动恢复(10 项)
 #   test_tts_pipeline.js      v3 分句流水线容错(32 项)
 # 任何导致"哑流未检测/流水线打断失效"的变更自动阻断合并。
-VOICE_FILES=$(git diff --cached --name-only --diff-filter ACM 2>/dev/null | grep -E '(zhuxiang-jiu/js/.*\.js|zhuxiang-jiu/backend/xiaozhu-voice\.html)$' || true)
+VOICE_FILES=$(git diff --cached --name-only --diff-filter ACMR 2>/dev/null | grep -E '(zhuxiang-jiu/js/.*\.js|taro-app/public/js/.*\.js|taro-app/public/xiaozhu-voice\.html)$' || true)
 if [ -n "$VOICE_FILES" ]; then
     log ""
     log "🧪 检测到语音链路文件变更, 运行故障回归三件套:"
