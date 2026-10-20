@@ -61,13 +61,22 @@ foreach ($k in @('api_total', 'api_local', 'imgs', 'idx_mark', 'app_v', 'redis_p
     Write-Host ("  $k = " + $ecs[$k])
 }
 
-Write-Host '===== [3/4] 绝对阈值检查 ====='
-if ($ecs['api_ext'] -ne $null -and $ecs['api_ext'] -ne '0') {
-    Write-Host ("  [DRIFT] 存在外链图 {0} 张(必须为 0)" -f $ecs['api_ext']); $drift++
-} else { Write-Host '  [PASS] 外链图 = 0' }
-if ($ecs['stock_zero'] -ne $null -and $ecs['stock_zero'] -ne '0') {
-    Write-Host ("  [DRIFT] 存在零库存商品 {0} 款(必须为 0)" -f $ecs['stock_zero']); $drift++
-} else { Write-Host '  [PASS] 零库存商品 = 0' }
+Write-Host '===== [3/4] 绝对阈值检查(T2.3: 字段缺失=DRIFT 不放行) ====='
+foreach ($k in @('api_ext', 'stock_zero')) {
+    $v = $ecs[$k]
+    if ([string]::IsNullOrEmpty($v)) {
+        Write-Host "  [DRIFT] 探测字段 $k 缺失(上游 probe 失败)——不放行, 检查云助手通道"; $drift++
+    } elseif ($v -ne '0') {
+        Write-Host ("  [DRIFT] {0} = {1}(阈值须为 0)" -f $k, $v); $drift++
+    } else {
+        Write-Host "  [PASS] $k = 0"
+    }
+}
+if ([string]::IsNullOrEmpty($ecs['api_total'])) {
+    Write-Host '  [DRIFT] 探测字段 api_total 缺失——probe 主输出异常'; $drift++
+} else {
+    Write-Host ("  [PASS] api_total = " + $ecs['api_total'])
+}
 
 Write-Host '===== [4/4] 汇总 ====='
 $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
