@@ -49,7 +49,7 @@
 | T1.8 | ✅ | zhudun:stats 上报 | `stats.py`：报告数/红线命中数写 Redis（`zhudun:stats` hash + `zhudun:index:last_run`） | ECS `KEYS zhudun:*` 可见（本地 fakeredis 单测过） | T1.7 | 📗 |
 | T1.9 | ✅ | pre-commit 自动预检 | 接入 F3 既有钩子链：F1（python import/node --check）+ B1（v= 引用检查）+ C4（绝对 URL 扫描） | 漏检/误检各构造一例实测；**超时降级只告警不阻断** | T1.6 | 🧑‍🏫 |
 
-**M1 里程碑**：3 份真实影响报告 lead 复核通过，误报率初测 ≤30% → 进入 P2。
+**M1 里程碑**：✅ **已过门（2026-10-20）**——复核报告 [registry/reports/M1复核报告-20261020.md](registry/reports/M1复核报告-20261020.md)：最新影响报告 10 条判定抽验 9 条真实，**误报率 10% ≤ 30% 门槛**（红命中 R6/高命中 B2/C3·C4 告警全真实；1 条边界告警属复核断言口径差非误报）。P2 正式开启。
 
 ## P2 · 两项真实变更试点 + assist 档（试点即生产）
 
