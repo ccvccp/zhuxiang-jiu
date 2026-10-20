@@ -94,3 +94,45 @@ def test_reverse_references(tmp_path):
         manual = [i for i, ln in enumerate(src, 1)
                   if any(s in ln for s in syms)]
         assert lines == [ln for ln in lines if ln in manual]
+
+
+def test_redline_assess_three_cases():
+    """T1.5 验收: 3 个构造用例全命中——改支付回调文件=红、改行为资产=高、改无关文件=低"""
+    import sys
+    sys.path.insert(0, os.path.dirname(HERE))
+    from zhudun import impact
+    registry = {
+        "red_lines": [
+            {"id": "R1", "name": "支付回调白名单",
+             "files": ["backend/routes/payment_routes.py", "core/auth_middleware.py"]},
+            {"id": "R2", "name": "鉴权体系", "files": ["js/auth.js"]},
+        ],
+        "behavior_assets": [
+            {"id": "B2", "item": "订单评价同步",
+             "files": ["repositories/product_repository.py"]},
+        ],
+        "switches": [
+            {"key": "XIAOZHU_MODE", "rollback": "off",
+             "loc": "services/xiaozhu_mode_service.py:167"},
+        ],
+    }
+    a = impact.redline_assess(
+        ["zhuxiang-jiu/backend/routes/payment_routes.py",   # R1 红
+         "zhuxiang-jiu/backend/repositories/product_repository.py",  # B2 高
+         "zhuxiang-jiu/docs/随便.md"],                      # 低
+        registry)
+    pay = a["zhuxiang-jiu/backend/routes/payment_routes.py"]
+    assert pay["risk"] == "红"
+    assert any(h.startswith("R1") for h in pay["hits"])
+    rev = a["zhuxiang-jiu/backend/repositories/product_repository.py"]
+    assert rev["risk"] == "高"
+    assert any(h.startswith("B2") for h in rev["hits"])
+    doc = a["zhuxiang-jiu/docs/随便.md"]
+    assert doc["risk"] == "低" and doc["hits"] == []
+    # 附加用例: 改开关文件=高(带回滚值), 改 backend 普通 py=中
+    b = impact.redline_assess(
+        ["zhuxiang-jiu/backend/services/xiaozhu_mode_service.py",
+         "zhuxiang-jiu/backend/routes/other_routes.py"], registry)
+    assert b["zhuxiang-jiu/backend/services/xiaozhu_mode_service.py"]["risk"] == "高"
+    assert any("开关:XIAOZHU_MODE" in h for h in b["zhuxiang-jiu/backend/services/xiaozhu_mode_service.py"]["hits"])
+    assert b["zhuxiang-jiu/backend/routes/other_routes.py"]["risk"] == "中"

@@ -102,19 +102,70 @@ def referencing_files(changed, repo=DEFAULT_REPO, registry=None):
     return syms, refs
 
 
+def _path_suffix(changed_path, marker_path):
+    """marker 路径(backend 相对或 zhuxiang-jiu 相对)是否为改动路径的路径段后缀"""
+    cparts = changed_path.replace("\\", "/").split("/")
+    rparts = marker_path.replace("\\", "/").split("/")
+    return len(rparts) <= len(cparts) and cparts[-len(rparts):] == rparts
+
+
+def redline_assess(changed, registry):
+    """T1.5 红线命中判定: 改动文件 → {"risk": 红/高/中/低, "hits": [命中条目]}
+
+    判定序(从严到宽): R1-R6 红线文件面→红; B1-B5 行为资产/运行时开关 loc→高;
+    backend 核心 py 未直接命中→中; 其余→低。
+    """
+    reds = registry.get("red_lines", [])
+    behs = registry.get("behavior_assets", [])
+    switches = registry.get("switches", [])
+    out = {}
+    for f in changed:
+        norm = f.replace("\\", "/")
+        hits = []
+        risk = "低"
+        for r in reds:
+            if any(_path_suffix(norm, p) for p in r.get("files", [])):
+                hits.append(f"{r['id']} {r['name']}")
+                risk = "红"
+        if risk != "红":
+            for b in behs:
+                if any(_path_suffix(norm, p) for p in b.get("files", [])):
+                    hits.append(f"{b['id']} {b['item']}")
+                    risk = "高"
+            for s in switches:
+                if _path_suffix(norm, s.get("loc", ":").rsplit(":", 1)[0]):
+                    hits.append(f"开关:{s['key']}(回滚={s.get('rollback', '?')})")
+                    if risk != "高":
+                        risk = "高"
+        if risk == "低" and "backend" in norm.split("/") and norm.endswith(".py"):
+            risk = "中"
+        out[f] = {"risk": risk, "hits": hits[:10]}
+    return out
+
+
 def run(args=None):
     base = getattr(args, "base", None) or DEFAULT_BASE
     files = changed_files(base=base)
     if not files:
-        print(f"[zhudun impact] 改动面 0 文件（对照基线 {base}）——T1.5+ 判定层待接入")
+        print(f"[zhudun impact] 改动面 0 文件（对照基线 {base}）——T1.6+ 报告层待接入")
         return 0
-    syms, refs = referencing_files(files)
-    print(f"[zhudun impact] 改动面 {len(files)} 文件（对照基线 {base}）:")
+    registry = _load_registry(DEFAULT_REPO)
+    syms, refs = referencing_files(files, registry=registry)
+    assessment = redline_assess(files, registry)
+    counts = {"红": 0, "高": 0, "中": 0, "低": 0}
+    for a in assessment.values():
+        counts[a["risk"]] += 1
+    print(f"[zhudun impact] 改动面 {len(files)} 文件（对照基线 {base}）"
+          f"——风险分级: 🔴红 {counts['红']} / 🟠高 {counts['高']} / 🟡中 {counts['中']} / ⚪低 {counts['低']}")
     for f in files:
-        print("  " + f)
+        a = assessment[f]
+        mark = {"红": "🔴", "高": "🟠", "中": "🟡", "低": "⚪"}[a["risk"]]
+        print(f"  {mark} {f}")
+        for h in a["hits"][:4]:
+            print(f"       ↳ {h}")
     print(f"[zhudun impact] 反向引用: 符号 {len(syms)} 个, 引用方 {len(refs)} 文件")
-    for rel, lines in sorted(refs.items())[:20]:
+    for rel, lines in sorted(refs.items())[:10]:
         print(f"  {rel}: 行 {lines}")
-    if len(refs) > 20:
+    if len(refs) > 10:
         print(f"  ...（共 {len(refs)} 文件, 截断显示）")
     return 0
