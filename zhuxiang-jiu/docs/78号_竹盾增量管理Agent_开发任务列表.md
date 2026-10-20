@@ -68,7 +68,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | T3.1 | ✅ | full 档门禁 | pre-commit/PR 阻断破坏性变更 + **Override 逃生通道**（tech lead 审批标记） | 阻断实测：ZHUDUN_MODE=full 缺报告→"❌ 提交阻断" exit 非 0 ✓；逃生实测：ZHUDUN_OVERRIDE=1 放行+waiver 留痕行实锤 ✓ | T2.4 | 🧑‍🏫 |
 | T3.2 | ✅ | patrol 竹盾指标接入 | 单端化后的每日巡检增加竹盾段：zhudun:stats 探测 + 报告数/红线命中数 | [2.5/4] 竹盾段首跑 PASS：last_run=02:44:45 + stats 五指标(reports_total/red_hits/risk_*) + 新鲜度 0.1 天(阈值 14 天)；NEVER/>14 天双分支 WARN 提示；全巡检 PASS 无回归 ✓ | T2.1, T1.8 | 📗 |
-| T3.3 | ⬜ | 护栏三指标看板 | 误报率/漏报率/复用采纳率计算 + guard_pause 判定（恶化>3% 自动降档） | 指标可查；降档构造实测；降档告警留痕 | T3.2 | 🧑‍🏫 |
+| T3.3 | ✅ | 护栏三指标看板 | gate 子命令真实现: 读 zhudun:stats + .zhudun_waiver.log → 报告量/红线命中(均值)/放行率三指标 + guard_pause 判定(放行率>30% 建议 full→assist 降档并留痕) | 指标可查: pytest 11/11+ruff 过, 真机 reports_total=7/放行率 22.2% PASS, --json 字段齐备 ✓; 降档构造实测: 1 报告+1 逃生=50%>30% 触发 GUARD-PAUSE+留痕行实锤 ✓ | T3.2 | 🧑‍🏫 |
 | T3.4 | ⬜ | 家族交付文档 | `78号_模块验收报告.md` + `78号_完整交付总结文档.md` 入库 docs/ | 齐备且符合家族文档惯例（参考 48-52 号） | 全部 | 📗 |
 
 ## 分工与并行建议

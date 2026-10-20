@@ -19,11 +19,15 @@ def test_help_lists_three_subcommands():
         assert cmd in r.stdout
 
 
-def test_stub_dispatch_and_exit_zero():
-    r = _run("gate")
+def test_gate_real_dashboard_json():
+    """T3.3: gate --json 真实现——三指标字段齐备（替代旧 stub 占位断言）"""
+    r = _run("gate", "--json")
     assert r.returncode == 0
-    assert "骨架" in r.stdout
-    assert "T1.9/P2-P3" in r.stdout
+    import json
+    m = json.loads(r.stdout)
+    for k in ("reports_total", "red_hits", "red_avg", "waived", "override",
+              "waive_rate", "threshold", "guard_pause", "metrics_available"):
+        assert k in m
 
 
 def test_no_args_prints_help():
@@ -215,3 +219,36 @@ def test_stats_report():
     assert fake.get("zhudun:index:last_run")  # last_run 存在
     # 降级路径: 无 Redis 时返回 False 不抛异常
     assert stats.report_stats(a1, "x", client=None, out=lambda *_: None) is False or True
+
+
+def test_gate_guard_pause_constructed(tmp_path):
+    """T3.3 验收: 构造放行率 50% > 30% → guard_pause 触发 + run 人读模式降档告警留痕行实锤"""
+    import argparse
+    import sys
+    sys.path.insert(0, os.path.dirname(HERE))
+    from zhudun import gate
+    try:
+        import fakeredis
+    except ImportError:
+        import pytest
+        pytest.skip("fakeredis 未安装")
+    fake = fakeredis.FakeRedis()
+    fake.hset("zhudun:stats", mapping={"reports_total": 1, "red_hits": 1})
+    wlog = tmp_path / ".zhudun_waiver.log"
+    wlog.write_text(
+        "[2026-10-21 06:00:00] OVERRIDE-USED mode=full core=1 staged=1\n",
+        encoding="utf-8")
+    m = gate.collect(fake, str(wlog))
+    assert m["reports_total"] == 1 and m["red_hits"] == 1
+    assert m["red_avg"] == 1.0
+    assert m["override"] == 1 and m["waived"] == 0
+    assert m["waive_rate"] == 50.0                     # 1/(1+1)
+    assert m["guard_pause"] is True                     # 50% > 阈值 30%
+    lines = []
+    assert gate.run(argparse.Namespace(json=False), client=fake,
+                   waiver_path=str(wlog), out=lines.append) == 0
+    assert any("GUARD-PAUSE" in l for l in lines)               # 看板降档告警
+    assert "GUARD-PAUSE" in wlog.read_text(encoding="utf-8")   # 留痕行实锤
+    # 对照: 无放行记录时放行率 0 → 不触发(门禁健康)
+    m2 = gate.collect(fake, None)
+    assert m2["waive_rate"] == 0.0 and m2["guard_pause"] is False
