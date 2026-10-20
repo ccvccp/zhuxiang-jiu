@@ -61,6 +61,27 @@ foreach ($k in @('api_total', 'api_local', 'imgs', 'idx_mark', 'app_v', 'redis_p
     Write-Host ("  $k = " + $ecs[$k])
 }
 
+Write-Host '===== [2.5/4] 竹盾 registry 新鲜度(zhudun:stats, T3.2) ====='
+$zdOut = & python -c "import redis; r = redis.Redis.from_url('redis://localhost:6379/0', socket_timeout=2, socket_connect_timeout=2); lr = r.get('zhudun:index:last_run'); s = r.hgetall('zhudun:stats'); print((lr or b'').decode()[:19] or 'NEVER'); print('; '.join('%s=%s' % (k.decode(), v.decode()) for k, v in s.items()) or 'STATS-EMPTY')" 2>$null
+$zdLast = ($zdOut | Select-Object -First 1)
+$zdStats = ($zdOut | Select-Object -Skip 1 -First 1)
+Write-Host "  zhudun:last_run = $zdLast"
+Write-Host "  zhudun:stats = $zdStats"
+if ($zdLast -eq 'NEVER' -or [string]::IsNullOrEmpty($zdLast)) {
+    Write-Host '  [WARN] zhudun 从未运行——建议: python agent-infra/zhudun/cli.py index 重建资产图谱'
+} else {
+    try {
+        $ageDays = ((Get-Date) - [datetime]$zdLast).TotalDays
+        if ($ageDays -gt 14) {
+            Write-Host ("  [WARN] registry 已 {0:N0} 天未全链重建(>14)——建议跑 zhudun index 刷新资产图谱" -f $ageDays)
+        } else {
+            Write-Host ("  [PASS] registry 新鲜度 {0:N1} 天(阈值 14 天)" -f $ageDays)
+        }
+    } catch {
+        Write-Host '  [WARN] last_run 解析失败——检查 zhudun:stats 键'
+    }
+}
+
 Write-Host '===== [3/4] 绝对阈值检查(T2.3: 字段缺失=DRIFT 不放行) ====='
 foreach ($k in @('api_ext', 'stock_zero')) {
     $v = $ecs[$k]

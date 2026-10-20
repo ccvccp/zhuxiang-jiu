@@ -100,12 +100,23 @@ if [ -n "$ZD_STAGED" ]; then
         log "============================================================"
         exit 1
     fi
-    # T2.4 assist 档: backend/deploy 核心改动且窗口内无影响报告 → 提示+留痕(不阻断)
-    if [ "$ZD_MODE" = "assist" ]; then
-        ZD_WIN="${ZHUDUN_REPORT_WINDOW_MIN:-1440}"
-        ZD_CORE=$(echo "$ZD_STAGED" | grep -cE '^zhuxiang-jiu/(backend|deploy)/' || true)
-        ZD_RECENT=$(find "$REPO_ROOT/zhuxiang-jiu/docs/registry/reports" -name '影响报告-*.md' -mmin "-$ZD_WIN" 2>/dev/null | wc -l)
-        if [ "$ZD_CORE" -gt 0 ] && [ "$ZD_RECENT" -eq 0 ]; then
+    # T2.4/T3.1 门禁: assist=提示+留痕不阻断 / full=缺报告阻断, ZHUDUN_OVERRIDE=1 单次逃生
+    ZD_WIN="${ZHUDUN_REPORT_WINDOW_MIN:-1440}"
+    ZD_CORE=$(echo "$ZD_STAGED" | grep -cE '^zhuxiang-jiu/(backend|deploy)/' || true)
+    ZD_RECENT=$(find "$REPO_ROOT/zhuxiang-jiu/docs/registry/reports" -name '影响报告-*.md' -mmin "-$ZD_WIN" 2>/dev/null | wc -l)
+    if [ "$ZD_CORE" -gt 0 ] && [ "$ZD_RECENT" -eq 0 ]; then
+        if [ "${ZHUDUN_OVERRIDE:-0}" = "1" ]; then
+            log "   ⚠️ [OVERRIDE] ZHUDUN_OVERRIDE=1 人工放行(单次, 已留痕; 事后须补影响报告)"
+            echo "[$(date '+%F %T')] OVERRIDE-USED mode=$ZD_MODE core=$ZD_CORE staged=$(echo "$ZD_STAGED" | wc -l)" >> "$REPO_ROOT/.git/hooks/.zhudun_waiver.log"
+        elif [ "$ZD_MODE" = "full" ]; then
+            log "   ❌ [full] 本批含 backend/deploy 核心改动 ${ZD_CORE} 个, 窗口 ${ZD_WIN} 分钟内无影响报告——提交阻断"
+            log "   正道: python agent-infra/zhudun/cli.py impact --base <base> 出报告后重新提交"
+            log "   紧急逃生: ZHUDUN_OVERRIDE=1 git commit ...(单次放行+留痕, 事后补报告)"
+            log "------------------------------------------------------------"
+            log "📊 决策: BLOCK (zhudun full 缺影响报告)"
+            log "============================================================"
+            exit 1
+        else
             log "   ⚠️ [assist] 本批含 backend/deploy 核心改动 ${ZD_CORE} 个, 但 ${ZD_WIN} 分钟内无影响报告"
             log "   建议: python agent-infra/zhudun/cli.py impact --base <base> 先出报告(五步 SOP 门 2)"
             echo "[$(date '+%F %T')] WAIVED-NO-REPORT mode=assist core=$ZD_CORE staged=$(echo "$ZD_STAGED" | wc -l)" >> "$REPO_ROOT/.git/hooks/.zhudun_waiver.log"
