@@ -46,7 +46,7 @@
 | T1.5 | ✅ | 红线命中判定 | 改动文件 × 红线标记求交 → 风险分级 红/高/中/低 | 3 个构造用例全命中（改支付回调文件=红） | T1.4, T0.6 | 🧑‍🏫 |
 | T1.6 | ✅ | 检查清单映射 | `rules.py` 规则表：改 js/html→B1 v=升位提醒；改 Redis 读写→C3 备份；含 URL→C4；涉部署面→E 节 | 每条规则一个用例，输出进报告"检查清单映射"段 | T1.5 | 📗 |
 | T1.7 | ✅ | 影响报告生成 | `report.py`：`docs/registry/reports/影响报告-{ts}.md`（涉及文件/引用方/风险级/回归建议/复用建议/检查清单映射项） | **3 个真实改动试跑**，报告模板含签字确认行 | T1.5, T1.6 | 🧑‍🏫 |
-| T1.8 | ⬜ | zhudun:stats 上报 | `stats.py`：报告数/红线命中数写 Redis（`zhudun:stats` hash + `zhudun:index:last_run`） | ECS `KEYS zhudun:*` 可见（本地 fakeredis 单测过） | T1.7 | 📗 |
+| T1.8 | ✅ | zhudun:stats 上报 | `stats.py`：报告数/红线命中数写 Redis（`zhudun:stats` hash + `zhudun:index:last_run`） | ECS `KEYS zhudun:*` 可见（本地 fakeredis 单测过） | T1.7 | 📗 |
 | T1.9 | ⬜ | pre-commit 自动预检 | 接入 F3 既有钩子链：F1（python import/node --check）+ B1（v= 引用检查）+ C4（绝对 URL 扫描） | 漏检/误检各构造一例实测；**超时降级只告警不阻断** | T1.6 | 🧑‍🏫 |
 
 **M1 里程碑**：3 份真实影响报告 lead 复核通过，误报率初测 ≤30% → 进入 P2。

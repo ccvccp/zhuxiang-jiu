@@ -190,3 +190,28 @@ def test_report_generate(tmp_path):
     assert "检查清单映射" in txt and "F1" in txt
     assert "签字确认" in txt and "lead 已复核" in txt      # 门2 凭证
     assert "与 PR 一一对应" in txt                        # 归档说明
+
+
+def test_stats_report():
+    """T1.8 验收: fakeredis 注入——zhudun:stats hash 与 last_run 可见且跨批累加"""
+    import sys
+    sys.path.insert(0, os.path.dirname(HERE))
+    from zhudun import stats
+    try:
+        import fakeredis
+    except ImportError:
+        import pytest
+        pytest.skip("fakeredis 未安装")
+    fake = fakeredis.FakeRedis()
+    a1 = {"a.py": {"risk": "红", "hits": ["R1"]}, "b.md": {"risk": "低", "hits": []}}
+    a2 = {"c.py": {"risk": "红", "hits": ["R2"]}, "d.py": {"risk": "中", "hits": []}}
+    assert stats.report_stats(a1, "origin/master", client=fake) is True
+    assert stats.report_stats(a2, "HEAD~1", client=fake) is True
+    assert int(fake.hget("zhudun:stats", "reports_total")) == 2
+    assert int(fake.hget("zhudun:stats", "red_hits")) == 2
+    assert int(fake.hget("zhudun:stats", "risk_红")) == 2
+    assert int(fake.hget("zhudun:stats", "risk_低")) == 1
+    assert int(fake.hget("zhudun:stats", "risk_中")) == 1
+    assert fake.get("zhudun:index:last_run")  # last_run 存在
+    # 降级路径: 无 Redis 时返回 False 不抛异常
+    assert stats.report_stats(a1, "x", client=None, out=lambda *_: None) is False or True

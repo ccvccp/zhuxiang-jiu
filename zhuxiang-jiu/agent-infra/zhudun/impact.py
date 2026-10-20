@@ -183,4 +183,6 @@ def run(args=None):
     path = report.generate(files, refs, assessment, checklist, base,
                            syms=syms, registry_stats=stats)
     print(f"[zhudun impact] 报告已归档: {path}")
+    from zhudun import stats as zstats
+    zstats.report_stats(assessment, base)
     return 0
