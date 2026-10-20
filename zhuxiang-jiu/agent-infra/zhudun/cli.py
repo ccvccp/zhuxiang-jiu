@@ -33,6 +33,9 @@ def build_parser():
     ):
         sp = sub.add_parser(name, help=help_text)
         sp.add_argument("--json", action="store_true", help="输出机器可读结果（P1 预留）")
+        if name == "impact":
+            sp.add_argument("--base", default="origin/master",
+                            help="对照基线（默认 origin/master）")
     return parser
 
 
@@ -42,14 +45,16 @@ def main(argv=None):
     if not args.command:
         parser.print_help()
         return 0
+    import sys
+    pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if pkg_parent not in sys.path:
+        sys.path.insert(0, pkg_parent)
     if args.command == "index":
-        import sys
-        pkg_dir = os.path.dirname(os.path.abspath(__file__))
-        pkg_parent = os.path.dirname(pkg_dir)
-        if pkg_parent not in sys.path:
-            sys.path.insert(0, pkg_parent)
         from zhudun import index
         return index.run(args)
+    if args.command == "impact":
+        from zhudun import impact
+        return impact.run(args)
     print(f"[zhudun {args.command}] 骨架占位——{STUBS[args.command]}")
     return 0
 
