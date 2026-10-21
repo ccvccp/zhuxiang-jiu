@@ -1,0 +1,60 @@
+"""竹园 zhuyuan CLI 骨架验收测试（T0.1: --help 五命令可见 + 五 stub 分发）"""
+import os
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CLI = os.path.join(HERE, "cli.py")
+
+
+def _run(*args):
+    return subprocess.run([sys.executable, CLI, *args], check=False,
+                          capture_output=True, text=True, encoding="utf-8")
+
+
+def test_help_lists_five_subcommands():
+    r = _run("--help")
+    assert r.returncode == 0
+    for cmd in ("audit", "comply", "probe", "prescribe", "evolve"):
+        assert cmd in r.stdout
+
+
+def test_no_args_prints_help():
+    r = _run()
+    assert r.returncode == 0
+    assert "zhuyuan" in r.stdout
+
+
+def test_audit_stub():
+    r = _run("audit")
+    assert r.returncode == 0
+    assert "盘点" in r.stdout and "B2" in r.stdout
+
+
+def test_comply_stub():
+    r = _run("comply")
+    assert r.returncode == 0
+    assert "违禁词" in r.stdout and "100%" in r.stdout
+
+
+def test_probe_stub():
+    r = _run("probe")
+    assert r.returncode == 0
+    assert "探针" in r.stdout
+
+
+def test_prescribe_stub():
+    r = _run("prescribe")
+    assert r.returncode == 0
+    assert "只出不施" in r.stdout
+
+
+def test_evolve_stub():
+    r = _run("evolve")
+    assert r.returncode == 0
+    assert "自进化" in r.stdout and "人工确认" in r.stdout
+
+
+def test_unknown_command_rejected():
+    r = _run("nope")
+    assert r.returncode != 0
