@@ -40,10 +40,13 @@ def test_contract_stub():
     assert "死条目" in r.stdout
 
 
-def test_consult_stub():
-    r = _run("consult")
+def test_consult_t31_real():
+    """T3.1 实装: consult 分发案例检索——qr 关键词首中 qr 案例"""
+    r = _run("consult", "--query", "扫码登录 401")
     assert r.returncode == 0
-    assert "只出不施" in r.stdout
+    assert "T3.1 案例检索" in r.stdout
+    assert "C-20261021-01" in r.stdout
+    assert "T3.2 处方模板" in r.stdout  # 后续任务提示(只出不施铁律面在 T3.5)
 
 
 def test_unknown_command_rejected():

@@ -33,6 +33,8 @@ def build_parser():
     ):
         sp = sub.add_parser(name, help=help_text)
         sp.add_argument("--json", action="store_true", help="输出机器可读结果（预留）")
+        if name == "consult":
+            sp.add_argument("--query", default=None, help="案例检索关键词（T3.1）")
     return parser
 
 
@@ -51,6 +53,9 @@ def main(argv=None):
     if args.command == "contract":
         from zhuyi import contract
         return contract.run(args)
+    if args.command == "consult":
+        from zhuyi import cases
+        return cases.run(args)
     if args.command in STUBS:
         print(f"[zhuyi {args.command}] 骨架占位——{STUBS[args.command]}")
         return 0
