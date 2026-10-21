@@ -56,3 +56,35 @@ def test_cli_consult_query():
     assert r.returncode == 0
     assert "T3.1 案例检索" in r.stdout
     assert "qr白名单" in r.stdout and "C-20261021-01" in r.stdout
+
+
+# ---------- T3.2 处方模板引擎（每案例可产出处方骨架） ----------
+
+def test_t32_prescription_all_six_cases():
+    """验收: 6/6 案例全可产处方骨架——五要素(症状/根因/修正/回归/预防)非空"""
+    for c in cs.load_cases():
+        p = cs.build_prescription(c)
+        assert p["id"] and p["severity"]
+        for k in ("symptom", "root_cause", "patch_hint",
+                  "regression_hint", "prevention"):
+            assert p[k].strip(), f"{c['file']} 处方缺 {k}"
+
+
+def test_t32_qr_prescription_content():
+    """qr 处方: 根因含死条目语义+回归建议含挂载点 T1.2/T2.3"""
+    qr = next(c for c in cs.load_cases() if "qr" in c["file"])
+    p = cs.build_prescription(qr)
+    assert "死条目" in p["root_cause"]
+    assert "删 3" in p["patch_hint"] or "正则档" in p["patch_hint"]
+    assert "T1.2" in p["regression_hint"] and "T2.3" in p["regression_hint"]
+    assert p["commit"] == "e73f6800"
+
+
+def test_t32_render_prescription():
+    """渲染: 处方头+五要素节+只出不施铁律"""
+    qr = next(c for c in cs.load_cases() if "qr" in c["file"])
+    text = cs.render_prescription(cs.build_prescription(qr))
+    assert text.startswith("## 处方 · C-20261021-01")
+    assert "根因:" in text and "修正模板:" in text and "回归建议:" in text
+    assert "只出不施" in text
+    assert "e73f6800" in text

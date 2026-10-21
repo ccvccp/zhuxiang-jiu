@@ -46,7 +46,7 @@ def test_consult_t31_real():
     assert r.returncode == 0
     assert "T3.1 案例检索" in r.stdout
     assert "C-20261021-01" in r.stdout
-    assert "T3.2 处方模板" in r.stdout  # 后续任务提示(只出不施铁律面在 T3.5)
+    assert "T3.2 处方骨架" in r.stdout  # 后续任务提示(只出不施铁律面在 T3.5)
 
 
 def test_unknown_command_rejected():

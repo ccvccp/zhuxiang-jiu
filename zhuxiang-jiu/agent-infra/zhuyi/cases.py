@@ -94,18 +94,80 @@ def search(query, cases=None, top=3):
     return scored[:top]
 
 
+_SEC_RE = re.compile(r"## [一二三四五]、([^\n]+)\n(.*?)(?=## [一二三四五六]、|\Z)", re.DOTALL)
+_SEC_ORDER = ["现象", "根因", "错误代码/配置", "正确写法", "预防规则"]
+
+
+def _extract_sections(text):
+    """五段原文提取: {段名: 正文}。"""
+    out = {}
+    for m in _SEC_RE.finditer(text):
+        name = m.group(1).split("：", 1)[-1].strip()
+        out[name] = m.group(2).strip()
+    return out
+
+
+def build_prescription(case, cases_dir=None):
+    """T3.2 案例 → 处方骨架(只出不施: 修正模板+回归建议, 不生成可执行 Patch)。
+
+    结构: id/title/severity/commit/symptom/root_cause/patch_hint(错误→正确映射)
+    /regression_hint(回归建议=正确写法+挂载点)/prevention(预防规则)。
+    """
+    cases_dir = cases_dir or CASES_DIR
+    with open(os.path.join(cases_dir, case["file"]), encoding="utf-8") as fh:
+        text = fh.read()
+    sec = _extract_sections(text)
+    patch_hint = ""
+    if "错误代码/配置" in sec:
+        patch_hint = "修正方向(源自案例四段正确写法):\n" + sec.get("正确写法", "")
+    regression_hint = sec.get("正确写法", "")[:200]
+    refs = re.findall(r"[A-Z]{1,2}\d+(?:\.\d+)?|NEW-[A-Z]?\d+(?:\.\d+)?",
+                      sec.get("预防规则", ""))
+    if refs:
+        regression_hint += f"\n回归建议挂载点: {', '.join(sorted(set(refs)))}"
+    return {
+        "id": case["id"], "title": case["title"], "severity": case["severity"],
+        "commit": case["related_commit"], "date": case["date"],
+        "symptom": sec.get("现象", ""), "root_cause": sec.get("根因", ""),
+        "patch_hint": patch_hint, "regression_hint": regression_hint,
+        "prevention": sec.get("预防规则", ""),
+        "case_file": case["file"],
+    }
+
+
+def render_prescription(p):
+    """处方骨架 → Markdown 文本(T3.5 端到端报告的组件)。"""
+    return "\n".join([
+        f"## 处方 · {p['id']}（{p['severity']}）——{p['title']}",
+        "",
+        f"- 案例: {p['case_file']} · 事故日: {p['date']} · 修复参照: {p['commit'] or '—'}",
+        f"- 症状: {p['symptom'][:120]}…",
+        f"- 根因: {p['root_cause'][:120]}…",
+        "- 修正模板:\n```",
+        (p["patch_hint"] or "—")[:400],
+        "```",
+        f"- 回归建议: {p['regression_hint'][:200]}",
+        f"- 预防规则: {p['prevention'][:160]}",
+        "",
+        "> **只出不施**: 以上为修正方向模板与回归建议, 不写盘不改代码——人工确认后落地。",
+    ])
+
+
 def run(args=None):
-    """consult CLI 入口: T3.1 案例检索, T3.2-T3.5 逐任务补齐。"""
+    """consult CLI 入口: T3.1 检索 + T3.2 处方骨架, T3.3-T3.5 逐任务补齐。"""
     query = getattr(args, "query", None) or "扫码登录 401 白名单"
     results = search(query)
     print(f"[zhuyi consult] T3.1 案例检索: 「{query}」→ 命中 {len(results)} 条")
     for case, score, hits in results:
         print(f"  [{score}分] {case['id']} {case['file']}")
-        print(f"          {case['title']}")
-        print(f"          命中: {', '.join(sorted(set(hits))) or '无'}")
-    if not results:
-        print("  无命中案例")
-    print("[zhuyi consult] T3.2 处方模板 / T3.3 Blast Radius / "
+    if results:
+        top_case = results[0][0]
+        p = build_prescription(top_case)
+        print("[zhuyi consult] T3.2 处方骨架(首中案例 → 只出不施):")
+        for line in render_prescription(p).splitlines()[:8]:
+            print(f"  {line}")
+        print("  …(骨架渲染见 T3.5 端到端报告)")
+    print("[zhuyi consult] T3.3 Blast Radius / "
           "T3.4 分级+置信度 / T3.5 端到端处方: 后续任务实现")
     return 0
 
