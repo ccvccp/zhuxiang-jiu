@@ -47,10 +47,11 @@ def test_comply_t12_real():
             os.remove(os.path.join(rep_dir, n))
 
 
-def test_probe_stub():
+def test_probe_t21_real():
+    """T2.1 实装: probe 分发探针——线上详情页+选择器定位"""
     r = _run("probe")
     assert r.returncode == 0
-    assert "探针" in r.stdout
+    assert "探针成功" in r.stdout and "页面标题" in r.stdout
 
 
 def test_prescribe_stub():

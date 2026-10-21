@@ -41,6 +41,8 @@ def build_parser():
         sp.add_argument("--json", action="store_true", help="输出机器可读结果（预留）")
         if name == "prescribe":
             sp.add_argument("--query", default=None, help="缺口/违规检索词（预留）")
+        if name == "probe":
+            sp.add_argument("--url", default=None, help="探针目标 URL（默认线上详情页）")
     return parser
 
 
@@ -59,6 +61,9 @@ def main(argv=None):
     if args.command == "comply":
         from zhuyuan import comply
         return comply.run(args)
+    if args.command == "probe":
+        from zhuyuan import probe
+        return probe.run(args)
     if args.command in STUBS:
         print(f"[zhuyuan {args.command}] 骨架占位——{STUBS[args.command]}")
         return 0
