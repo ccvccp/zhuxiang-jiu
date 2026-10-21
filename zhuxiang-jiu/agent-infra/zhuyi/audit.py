@@ -1,14 +1,21 @@
-"""zhuyi audit: L1 业务链完整性审查（79号·P1, 当前实现 T1.1 端点在册检查）
+"""zhuyi audit: L1 业务链完整性审查（79号·P1, 当前实现 T1.1/T1.2）
 
-链步骤端点 × registry.json → 端点存在性检查（6 链逐 27 步）。
-miss = 端点不在册（断链候选第一类）。后续任务逐检扩展本模块:
-T1.2 鉴权可达（qr benchmark 核心）/ T1.3 前端调用点 / T1.4 数据流衔接 /
-T1.5 断链六段式报告。
+第一检(T1.1) 端点在册: 链步骤端点 × registry 存在性, miss=断链候选。
+第二检(T1.2) 鉴权可达: 链步骤鉴权期望(前置条件列) × registry 端点实际 auth 面——
+  期望公开但实际登录·JWT → auth_401(无登录态走链被拦, qr 死条目事故形态);
+  期望登录但实际公开 → auth_exposed(过度暴露风险, 非断链)。
+  **qr benchmark 核心**: build_qr_dead_registry 构造 e73f6800 修复前死条目
+  时代 registry 副本 → check_auth_reachable 必须检出扫码链 401 永拦。
+后续任务逐检扩展: T1.3 前端调用点 / T1.4 数据流衔接 / T1.5 断链六段式报告。
 """
+import re
+
 try:
     from zhuyi import chains as chains_mod
 except ImportError:
     import chains as chains_mod
+
+_AUTH_EXPECT_RE = re.compile(r"(公开·[A-Za-z·]+|登录·JWT|游客)")
 
 
 def check_endpoint_registry(chs=None, registry=None):
@@ -33,17 +40,84 @@ def check_endpoint_registry(chs=None, registry=None):
     return findings, total
 
 
+def _expected_auth(pre):
+    """从前置条件列提取鉴权期望: 公开·*→公开 / 登录·JWT→登录 / 游客→公开; 无→None"""
+    m = _AUTH_EXPECT_RE.search(pre)
+    if not m:
+        return None
+    token = m.group(1)
+    return "登录" if token == "登录·JWT" else "公开"
+
+
+def check_auth_reachable(chs=None, registry=None):
+    """第二检: 鉴权可达。链步骤鉴权期望 × registry 端点实际 auth 面。
+
+    仅检在册端点（不在册已由第一检报出）; 前置无鉴权词的步骤跳过（纯业务前置）。
+    返回 findings: [{chain, step, label, method, path, kind, expect, actual}]。
+    """
+    chs = chs if chs is not None else chains_mod.parse_chains()
+    registry = registry if registry is not None else chains_mod.load_registry()
+    index = {(e["method"], e["path"]): e for e in registry["endpoints"]}
+    findings = []
+    for chain in chs:
+        for step in chain["steps"]:
+            expect = _expected_auth(step["pre"])
+            if expect is None:
+                continue
+            for method, path, _amb in step["endpoints"]:
+                ep = index.get((method, path))
+                if ep is None:
+                    continue
+                actual = ep["auth"]
+                if expect == "公开" and actual.startswith("登录"):
+                    findings.append({
+                        "chain": chain["name"], "step": step["no"],
+                        "label": step["label"], "method": method, "path": path,
+                        "kind": "auth_401", "expect": expect, "actual": actual,
+                    })
+                elif expect == "登录" and actual.startswith("公开"):
+                    findings.append({
+                        "chain": chain["name"], "step": step["no"],
+                        "label": step["label"], "method": method, "path": path,
+                        "kind": "auth_exposed", "expect": expect, "actual": actual,
+                    })
+    return findings
+
+
+def build_qr_dead_registry(registry=None):
+    """qr benchmark fixture: e73f6800 修复前死条目时代的 registry 副本。
+
+    scan/exchange/cancel 鉴权=登录·JWT——三条 EXACT 无参死条目永不匹配带参路由
+    的实际拦截效果（案例 C-20261021-01 实况）。M1 回放: 用此 fixture 跑
+    check_auth_reachable 必须检出扫码登录链 401 永拦。
+    """
+    registry = registry if registry is not None else chains_mod.load_registry()
+    dead = {"endpoints": [dict(e) for e in registry["endpoints"]]}
+    for e in dead["endpoints"]:
+        if (e["method"] == "POST" and e["path"].startswith("/api/entry/qr/")
+                and e["path"].endswith(("/scan", "/exchange", "/cancel"))):
+            e["auth"] = "登录·JWT"
+    return dead
+
+
 def run(args=None):
-    """audit CLI 入口: 当前输出第一检（端点在册）, T1.2-T1.5 逐任务补齐。"""
-    print("[zhuyi audit] L1 业务链审查 · T1.1 端点在册检查")
+    """audit CLI 入口: 输出 T1.1/T1.2 两检, T1.3-T1.5 逐任务补齐。"""
+    print("[zhuyi audit] L1 业务链审查 · T1.1 端点在册 / T1.2 鉴权可达")
     findings, total = check_endpoint_registry()
     for f in findings:
-        print(f"  [{f['kind']}] {f['chain']} 步骤{f['step']}({f['label']}): "
+        print(f"  [T1.1:{f['kind']}] {f['chain']} 步骤{f['step']}({f['label']}): "
               f"{f['method']} {f['path']}")
-    print(f"  扫描汇总: hit={total['hit']} partial={total['partial']} "
+    print(f"  [T1.1] 扫描汇总: hit={total['hit']} partial={total['partial']} "
           f"miss={total['miss']} internal={total['internal']}")
-    print("[zhuyi audit] T1.2 鉴权可达 / T1.3 前端调用点 / "
-          "T1.4 数据流衔接 / T1.5 断链报告: 后续任务实现")
+    auth_findings = check_auth_reachable()
+    if not auth_findings:
+        print("  [T1.2 鉴权可达] 通过: 链上鉴权期望与 registry 实际面一致")
+    for f in auth_findings:
+        print(f"  [T1.2:{f['kind']}] {f['chain']} 步骤{f['step']}({f['label']}): "
+              f"{f['method']} {f['path']} 期望{f['expect']} 实际{f['actual']}"
+              + ("——401 永拦" if f["kind"] == "auth_401" else "——过度暴露"))
+    print("[zhuyi audit] T1.3 前端调用点 / T1.4 数据流衔接 / "
+          "T1.5 断链报告: 后续任务实现")
     return 0
 
 

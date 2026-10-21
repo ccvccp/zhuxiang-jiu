@@ -55,3 +55,37 @@ def test_audit_run_prints_report(capsys):
     assert "端点在册" in out
     assert "/api/cart" in out and "miss=1" in out
     assert "T1.2 鉴权可达" in out
+
+
+# ---------- T1.2 鉴权可达（qr benchmark 核心） ----------
+
+def test_t12_current_registry_all_pass():
+    """当前 registry: 六链鉴权期望×实际面全一致(e73f6800 修复后 qr 三步已公开·POST正则)"""
+    assert au.check_auth_reachable() == []
+
+
+def test_t12_qr_dead_fixture_exchanges_401():
+    """验收核心: 死条目 fixture → 扫码登录链 scan/exchange/cancel 检出 401 永拦"""
+    dead = au.build_qr_dead_registry()
+    findings = au.check_auth_reachable(registry=dead)
+    assert len(findings) == 3
+    assert all(f["kind"] == "auth_401" for f in findings)
+    paths = {f["path"] for f in findings}
+    assert paths == {"/api/entry/qr/{qr_id}/scan",
+                     "/api/entry/qr/{qr_id}/exchange",
+                     "/api/entry/qr/{qr_id}/cancel"}
+    ex = next(f for f in findings if f["path"].endswith("/exchange"))
+    assert ex["chain"] == "扫码登录链" and ex["step"] == 5  # exchange 步骤标 401 永拦
+    assert ex["actual"] == "登录·JWT"
+
+
+def test_t12_auth_exposed_flagged():
+    """反向构造: confirm(链上声明登录·JWT设计内)被改为公开 → 过度暴露检出"""
+    reg = au.build_qr_dead_registry()  # 复用副本改造
+    for e in reg["endpoints"]:
+        if e["path"].endswith("/confirm") and e["path"].startswith("/api/entry/qr/"):
+            e["auth"] = "公开·EXACT"
+    findings = au.check_auth_reachable(registry=reg)
+    exposed = [f for f in findings if f["kind"] == "auth_exposed"]
+    assert len(exposed) == 1
+    assert exposed[0]["step"] == 4 and exposed[0]["path"].endswith("/confirm")
