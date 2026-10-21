@@ -57,6 +57,52 @@ def test_audit_run_prints_report(capsys):
     assert "T1.2 鉴权可达" in out
 
 
+# ---------- T1.3 前端调用点（验收: 抽端点正反例） ----------
+
+def test_t13_called_qr_pc_side():
+    """正例: qr 链 PC 侧五端点在 entry-login.js 有调用点(含带参拼接写法)"""
+    call_map, _ = au.check_frontend_calls()
+    for method, path in [("POST", "/api/entry/qr/create"),
+                         ("GET", "/api/entry/qr/{qr_id}/status"),
+                         ("POST", "/api/entry/qr/{qr_id}/exchange"),
+                         ("POST", "/api/entry/qr/{qr_id}/cancel"),
+                         ("POST", "/api/entry/qr/{qr_id}/confirm")]:
+        assert (method, path) in call_map, f"qr 端点未检出调用点: {path}"
+        assert "js/entry-login.js" in call_map[(method, path)]
+    assert len(call_map) >= 8
+
+
+def test_t13_called_param_and_product_list():
+    """正例: 带参尾段引号匹配(decide)与静态完整路径(product/list)"""
+    call_map, _ = au.check_frontend_calls()
+    assert ("POST", "/api/promo/decisions/{hotspot_id}/decide") in call_map
+    assert ("GET", "/api/product/list") in call_map
+    assert ("POST", "/api/promo/radar/scan") in call_map
+
+
+def test_t13_no_call_transaction_side():
+    """反例: 交易类端点主站无调用点(taro 端/服务间)——如实报 no_call"""
+    _, no_call = au.check_frontend_calls()
+    paths = {f["path"] for f in no_call}
+    assert "/api/checkout/submit" in paths          # 结算在 taro 端
+    assert "/api/payment/callback/pay" in paths     # 渠道回调服务间
+    assert "/api/order/{order_id}/pay" in paths
+    ex = next(f for f in no_call if f["path"] == "/api/checkout/submit")
+    assert ex["chain"] == "下单支付链" and ex["step"] == 3
+    # 边界: '/pay' 尾段不误命中 '/payment/'——order pay 与 callback 各自独立报告
+    assert any(f["path"] == "/api/order/{order_id}/pay" for f in no_call)
+    assert not any(f["path"] == "/api/payment/callback/pay" and f["path"].startswith("/api/order")
+                   for f in no_call)
+
+
+def test_t13_call_tokens_unit():
+    """token 生成单元: 无参=完整路径; 带参=首段+尾段; 尾参数端=首段"""
+    assert au._call_tokens("/api/product/list") == ("/api/product/list", None)
+    assert au._call_tokens("/api/entry/qr/{qr_id}/scan") == ("/api/entry/qr/", "/scan")
+    assert au._call_tokens("/api/order/{order_id}/pay") == ("/api/order/", "/pay")
+    assert au._call_tokens("/api/product/{id}") == ("/api/product/", None)
+
+
 # ---------- T1.2 鉴权可达（qr benchmark 核心） ----------
 
 def test_t12_current_registry_all_pass():

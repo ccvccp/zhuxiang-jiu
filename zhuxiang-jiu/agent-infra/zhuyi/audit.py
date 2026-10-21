@@ -1,4 +1,4 @@
-"""zhuyi audit: L1 业务链完整性审查（79号·P1, 当前实现 T1.1/T1.2）
+"""zhuyi audit: L1 业务链完整性审查（79号·P1, 当前实现 T1.1/T1.2/T1.3）
 
 第一检(T1.1) 端点在册: 链步骤端点 × registry 存在性, miss=断链候选。
 第二检(T1.2) 鉴权可达: 链步骤鉴权期望(前置条件列) × registry 端点实际 auth 面——
@@ -6,8 +6,13 @@
   期望登录但实际公开 → auth_exposed(过度暴露风险, 非断链)。
   **qr benchmark 核心**: build_qr_dead_registry 构造 e73f6800 修复前死条目
   时代 registry 副本 → check_auth_reachable 必须检出扫码链 401 永拦。
-后续任务逐检扩展: T1.3 前端调用点 / T1.4 数据流衔接 / T1.5 断链六段式报告。
+第三检(T1.3) 前端调用点: 链步骤端点 × 主站前端(仓库根 html + js/*.js)文本
+  扫描(复用竹盾反向引用思路的文件面)——无参端点=完整路径子串; 带参端点=首段
+  子串+尾段带引号字面量(拼接写法 `'/api/x/' + id + '/scan'`); no_call=主站
+  前端无调用点(调用可能在 taro 端/服务间, 如实报出供人解读, 非必然断链)。
+后续任务逐检扩展: T1.4 数据流衔接 / T1.5 断链六段式报告。
 """
+import os
 import re
 
 try:
@@ -100,9 +105,78 @@ def build_qr_dead_registry(registry=None):
     return dead
 
 
+def _call_tokens(path):
+    """端点 path → (首段, 尾段|None)。
+
+    /api/product/list → (完整路径, None)——纯子串匹配(注释/代码均算证据面);
+    /api/product/{id} → ('/api/product/', None);
+    /api/entry/qr/{qr_id}/scan → ('/api/entry/qr/', '/scan')——尾段匹配须带
+    引号字面量(拼接写法 `+ '/scan'`), 防 '/pay' 前缀误命中 '/payment/'。
+    """
+    if "{" not in path:
+        return (path, None)
+    head = path.split("{")[0]
+    tail = path.split("}")[-1]
+    return (head, tail or None)
+
+
+def _frontend_texts(repo_root=None):
+    """主站前端扫描面: [(相对路径, 文本)]——仓库根 *.html + js/*.js。"""
+    root = repo_root or chains_mod.REPO_ROOT
+    texts = []
+    for name in sorted(os.listdir(root)):
+        if name.endswith(".html"):
+            with open(os.path.join(root, name), encoding="utf-8") as fh:
+                texts.append((name, fh.read()))
+    js_dir = os.path.join(root, "js")
+    if os.path.isdir(js_dir):
+        for name in sorted(os.listdir(js_dir)):
+            if name.endswith(".js"):
+                with open(os.path.join(js_dir, name), encoding="utf-8") as fh:
+                    texts.append((f"js/{name}", fh.read()))
+    return texts
+
+
+def check_frontend_calls(chs=None, repo_root=None):
+    """第三检: 前端调用点。链步骤端点 × 主站前端文本。
+
+    返回 (call_map, no_call)——call_map: (method, path) → [命中文件];
+    no_call: [{chain, step, label, method, path, kind='no_call'}]。
+    internal/不在册端点跳过(后者第一检已报)。
+    """
+    chs = chs if chs is not None else chains_mod.parse_chains()
+    texts = _frontend_texts(repo_root)
+    reg = chains_mod.load_registry()
+    known = {(e["method"], e["path"]) for e in reg["endpoints"]}
+    seen, call_map, no_call = set(), {}, []
+    for chain in chs:
+        for step in chain["steps"]:
+            for method, path, _amb in step["endpoints"]:
+                if (method, path) in seen or step["internal"]:
+                    continue
+                seen.add((method, path))
+                head, tail = _call_tokens(path)
+                hits = []
+                for fname, text in texts:
+                    if head not in text:
+                        continue
+                    if tail and not (f"'{tail}'" in text or f'"{tail}"' in text):
+                        continue
+                    hits.append(fname)
+                if hits:
+                    call_map[(method, path)] = hits
+                elif (method, path) in known:
+                    no_call.append({
+                        "chain": chain["name"], "step": step["no"],
+                        "label": step["label"], "method": method, "path": path,
+                        "kind": "no_call",
+                    })
+    return call_map, no_call
+
+
 def run(args=None):
-    """audit CLI 入口: 输出 T1.1/T1.2 两检, T1.3-T1.5 逐任务补齐。"""
-    print("[zhuyi audit] L1 业务链审查 · T1.1 端点在册 / T1.2 鉴权可达")
+    """audit CLI 入口: 输出 T1.1/T1.2/T1.3 三检, T1.4/T1.5 逐任务补齐。"""
+    print("[zhuyi audit] L1 业务链审查 · T1.1 端点在册 / T1.2 鉴权可达 / T1.3 前端调用点")
     findings, total = check_endpoint_registry()
     for f in findings:
         print(f"  [T1.1:{f['kind']}] {f['chain']} 步骤{f['step']}({f['label']}): "
@@ -116,8 +190,14 @@ def run(args=None):
         print(f"  [T1.2:{f['kind']}] {f['chain']} 步骤{f['step']}({f['label']}): "
               f"{f['method']} {f['path']} 期望{f['expect']} 实际{f['actual']}"
               + ("——401 永拦" if f["kind"] == "auth_401" else "——过度暴露"))
-    print("[zhuyi audit] T1.3 前端调用点 / T1.4 数据流衔接 / "
-          "T1.5 断链报告: 后续任务实现")
+    call_map, no_call = check_frontend_calls()
+    print(f"  [T1.3 前端调用点] called={len(call_map)} no_call={len(no_call)}")
+    for (method, path), files in sorted(call_map.items()):
+        print(f"  [T1.3:called] {method} {path} ← {', '.join(files[:3])}")
+    for f in no_call:
+        print(f"  [T1.3:{f['kind']}] {f['chain']} 步骤{f['step']}({f['label']}): "
+              f"{f['method']} {f['path']}——主站前端无调用点(可能在 taro 端/服务间)")
+    print("[zhuyi audit] T1.4 数据流衔接 / T1.5 断链报告: 后续任务实现")
     return 0
 
 
