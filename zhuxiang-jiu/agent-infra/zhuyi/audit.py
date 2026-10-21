@@ -21,8 +21,12 @@ import re
 
 try:
     from zhuyi import chains as chains_mod
+    from zhuyi import report as report_mod
+    from zhuyi import stats as stats_mod
 except ImportError:
     import chains as chains_mod
+    import report as report_mod
+    import stats as stats_mod
 
 _AUTH_EXPECT_RE = re.compile(r"(公开·[A-Za-z·]+|登录·JWT|游客)")
 
@@ -261,7 +265,17 @@ def run(args=None):
         print(f"  [T1.4:{f['kind']}] {f['chain']} 步骤{f['step']}({f['label']}): "
               f"入字段「{f['token']}」未溯源至前序产出(外部输入或链定义缺字段, "
               f"前序产出: {', '.join(f['prior_outs']) or '无'})")
-    print("[zhuyi audit] T1.5 断链报告: 后续任务实现")
+    # T1.5: 六段式断链报告归档 + T0.6 度量上报(audit 批次)——模块级导入防双实例
+    chs_now = chains_mod.parse_chains()
+    path = report_mod.generate(chs_now, chains_mod.load_registry(),
+                                findings, auth_findings, call_map, no_call, gaps)
+    print(f"  [T1.5 断链报告] 已归档: {path}")
+    broken_n = sum(1 for f in auth_findings if f["kind"] == "auth_401")
+    ok = stats_mod.report_stats(total={
+        "chains": len(chs_now), "steps": sum(len(c["steps"]) for c in chs_now),
+        "hit": total["hit"], "partial": total["partial"], "miss": total["miss"],
+        "internal": total["internal"], "broken": broken_n})
+    print(f"  [T1.5 度量] zhuyi:stats 上报{'成功' if ok else '降级(仅打印)'}")
     return 0
 
 
