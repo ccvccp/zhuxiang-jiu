@@ -33,10 +33,11 @@ def test_audit_t03_real():
     assert "healthy" in r.stdout and "missing" in r.stdout
 
 
-def test_comply_stub():
+def test_comply_t12_real():
+    """T1.2 实装: comply 分发扫描——违规计数+B1 检出率"""
     r = _run("comply")
     assert r.returncode == 0
-    assert "违禁词" in r.stdout and "100%" in r.stdout
+    assert "合规扫描" in r.stdout and "B1 整改实录回放" in r.stdout
 
 
 def test_probe_stub():

@@ -56,6 +56,9 @@ def main(argv=None):
     if args.command == "audit":
         from zhuyuan import audit
         return audit.run(args)
+    if args.command == "comply":
+        from zhuyuan import comply
+        return comply.run(args)
     if args.command in STUBS:
         print(f"[zhuyuan {args.command}] 骨架占位——{STUBS[args.command]}")
         return 0
