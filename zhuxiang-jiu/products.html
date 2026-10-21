@@ -13,25 +13,36 @@
     <meta name="description" content="竹奕酒全系产品介绍，独创竹香型，经典系列、珍藏系列、年份系列、礼盒系列等，翠竹酿造，匠心之选。">
     <link rel="stylesheet" href="css/style.css">
     <style>
-        /* 移动端筛选折叠(2026-10-21): 商品网格首屏优先, 筛选面板收起为按钮——
-           修复移动端首屏被侧栏霸占、商品沉底一屏外的"空壳"观感 */
-        .filter-toggle-btn { display: none; }
+        /* 移动端筛选重构 v3(2026-10-21): 干掉侧栏面板概念——系列 chips 横滑条常驻商品上方,
+           点选即筛同屏可见(结构上杜绝"点了没反应"); 桌面端保留原侧栏零改动 */
+        .series-chips { display: none; }
         @media (max-width: 768px) {
-            .sidebar { padding: 12px; }
-            .sidebar h3, .sidebar .filter-group { display: none; margin-bottom: 0; }
-            .sidebar .filter-toggle-btn {
-                display: block;
-                width: 100%;
-                padding: 12px 16px;
-                background: #f0f5ef;
-                border: 1px solid var(--color-primary, #4a7c59);
-                color: var(--color-primary-dark, #2d5a3d);
-                border-radius: 10px;
-                font-size: 15px;
-                font-family: inherit;
-                cursor: pointer;
+            .sidebar { display: none !important; }
+            .series-chips {
+                display: flex !important;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                gap: 8px;
+                padding: 10px 0 4px;
+                scrollbar-width: none;
             }
-            .sidebar.expanded h3, .sidebar.expanded .filter-group { display: block; }
+            .series-chips::-webkit-scrollbar { display: none; }
+        }
+        .series-chips .chip {
+            flex: 0 0 auto;
+            padding: 8px 16px;
+            border-radius: 20px;
+            background: #f0f5ef;
+            border: 1px solid var(--color-primary, #4a7c59);
+            font-size: 14px;
+            color: var(--color-primary-dark, #2d5a3d);
+            cursor: pointer;
+            user-select: none;
+        }
+        .series-chips .chip.active {
+            background: var(--color-primary, #4a7c59);
+            color: #fff;
+            border-color: var(--color-primary, #4a7c59);
         }
     </style>
 </head>
@@ -54,7 +65,6 @@
         <div class="products-layout">
             <!-- 侧边栏：分类筛选 -->
             <aside class="sidebar">
-                <button class="filter-toggle-btn" id="filterToggle" type="button">筛选 ▾</button>
                 <h3>🌿 产品分类</h3>
                 <div class="filter-group">
                     <h4>香型</h4>
@@ -90,6 +100,17 @@
 
             <!-- 主内容区 -->
             <main class="products-main">
+                <!-- 移动端系列 chips 横滑条(v3): 点选即筛, 与商品同屏 -->
+                <div class="series-chips" id="seriesChips">
+                    <span class="chip active" data-series="all">全部</span>
+                    <span class="chip" data-series="竹香系列">竹香</span>
+                    <span class="chip" data-series="经典系列">经典</span>
+                    <span class="chip" data-series="珍藏系列">珍藏</span>
+                    <span class="chip" data-series="年份系列">年份</span>
+                    <span class="chip" data-series="礼盒系列">礼盒</span>
+                    <span class="chip" data-series="便携系列">便携</span>
+                    <span class="chip" data-series="典藏系列">典藏</span>
+                </div>
                 <div class="toolbar">
                     <div class="sort-tabs">
                         <a href="#" class="active" data-sort="default">综合</a>
@@ -213,28 +234,23 @@
             new MutationObserver(apply).observe(document.getElementById('productList'), { childList: true });
         })();
 
-        // 移动端筛选折叠 v2(2026-10-21): 点"筛选"展开面板; **选定任一筛选项后自动收起**——
-        // 商品结果立即回到视口(修复展开态面板霸屏, 用户点系列后仍看不到结果的交互闭环缺陷)
+        // 移动端系列 chips v3(2026-10-21): 点选即筛+同步侧栏 active 态(桌面共用 filterState)
         (function () {
-            var btn = document.getElementById('filterToggle');
-            var sb = document.querySelector('.sidebar');
-            function collapse() {
-                sb.classList.remove('expanded');
-                btn.textContent = '筛选 ▾';
-            }
-            if (btn && sb) {
-                btn.addEventListener('click', function () {
-                    var open = sb.classList.toggle('expanded');
-                    btn.textContent = open ? '收起筛选 ▴' : '筛选 ▾';
+            var chips = document.getElementById('seriesChips');
+            if (!chips) return;
+            chips.addEventListener('click', function (e) {
+                var t = e.target;
+                var chip = t && t.closest ? t.closest('.chip') : null;
+                if (!chip) return;
+                chips.querySelectorAll('.chip').forEach(function (c) { c.classList.remove('active'); });
+                chip.classList.add('active');
+                filterState.series = chip.dataset.series;
+                renderList();
+                // 同步桌面侧栏选中态(视口切换状态一致)
+                document.querySelectorAll('#seriesFilter li').forEach(function (li) {
+                    li.classList.toggle('active', li.dataset.series === chip.dataset.series);
                 });
-                document.addEventListener('click', function (e) {
-                    var t = e.target;
-                    var li = t && t.closest ? t.closest('.filter-list li') : null;
-                    if (li && sb.classList.contains('expanded') && window.innerWidth <= 768) {
-                        collapse();
-                    }
-                });
-            }
+            });
         })();
     </script>
 </body>
