@@ -113,3 +113,39 @@ def test_t22_ws_call_matches_ws_route():
     assert ws and ws[0]["method"] == "WS"
     hits, _ = ct.check_contract_break(calls=ws)
     assert ("WS", "/api/entry/qr/{var}/ws") in hits
+
+
+# ---------- T2.3 死条目检测（M2 基准: qr 3 死条目回放 3/3） ----------
+
+def test_t23_extract_current_whitelist():
+    """白名单权威源提取: PUBLIC_EXACT ≥45 条, 关键活条目在列"""
+    entries = ct.extract_public_exact()
+    assert len(entries) >= 45
+    assert "/api/auth/login" in entries
+    assert "/api/entry/qr/create" in entries
+
+
+def test_t23_current_zero_dead():
+    """当前态: 死条目 0(e73f6800 清理后干净, 竹医复核与竹盾清零一致)"""
+    dead = ct.check_dead_exact()
+    assert dead == []
+
+
+def test_t23_qr_dead_fixture_3_of_3():
+    """**M2 验收核心**: 注入 qr 历史 3 死条目(无参形态, e73f6800 修复前实录)
+    → 检出 3/3, 当前 50 条活条目零误报"""
+    entries = ct.extract_public_exact() + [
+        "/qr/scan", "/qr/exchange", "/qr/confirm",
+    ]
+    dead = ct.check_dead_exact(entries=entries)
+    got = {d["entry"] for d in dead}
+    assert got == {"/qr/scan", "/qr/exchange", "/qr/confirm"}
+    assert len(dead) == 3
+
+
+def test_t23_template_compatible_unit():
+    """构型匹配单元: 全等活/段数差死/参数段吞具体值活/非参数段不等死"""
+    assert ct._template_compatible("/api/auth/login", "/api/auth/login")
+    assert not ct._template_compatible("/qr/scan", "/api/entry/qr/{qr_id}/scan")
+    assert ct._template_compatible("/api/product/123", "/api/product/{id}")
+    assert not ct._template_compatible("/api/product/x/list", "/api/product/{id}")
