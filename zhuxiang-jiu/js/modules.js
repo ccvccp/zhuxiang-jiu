@@ -23,10 +23,10 @@ const MODULES = [
         desc: '产品列表+详情+搜索+AI推荐+全竹发酵卖点展示',
         testCases: [
             { name: '产品列表渲染', expected: '展示11款竹香型竹奕酒产品，含价格/标签/图片', status: 'pending' },
-            { name: '产品详情页', expected: '含规格/产地(山东泰安)/健康密码/四大必买理由', status: 'pending' },
+            { name: '产品详情页', expected: '含规格/产地(山东泰安)/品质密码/四大必买理由', status: 'pending' },
             { name: '产品搜索', expected: '搜索"竹香"返回竹香型竹奕酒产品', status: 'pending' },
-            { name: '全竹发酵卖点', expected: '武夷山全竹+徂徕山富硒泉水+竹叶黄酮(AOB)', status: 'pending' },
-            { name: '健康密码展示', expected: '醒酒快/无酒气/不头疼/远超国标', status: 'pending' },
+            { name: '全竹发酵卖点', expected: '武夷山全竹+徂徕山泉水+竹叶黄酮(AOB)', status: 'pending' },
+            { name: '品质密码展示', expected: '竹香清雅/入口绵柔/回味悠长/远超国标', status: 'pending' },
             { name: 'AI智能推荐', expected: '基于浏览记录推荐相似产品', status: 'pending' },
             { name: 'AI素材生成', expected: '自动生成产品主图/文案', status: 'pending' }
         ],

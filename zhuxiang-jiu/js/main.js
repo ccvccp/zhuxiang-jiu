@@ -172,7 +172,7 @@ function renderFooter() {
                         <span class="logo-icon">竹</span>
                         <span class="logo-text">竹香酒</span>
                     </div>
-                    <p>山东瑞麒酒业有限公司<br>福来就喝竹奕酒，天赐鸿运随心走！<br>全竹发酵 · 竹酒首创 · 醒酒快 · 无酒气 · 不头疼</p>
+                    <p>山东瑞麒酒业有限公司<br>福来竹奕香，鸿运随心走！<br>全竹发酵 · 竹酒首创 · 竹香清雅 · 入口绵柔</p>
                     <div class="footer-social">
                         <a href="#" title="微信">💬</a>
                         <a href="#" title="微博">📢</a>
