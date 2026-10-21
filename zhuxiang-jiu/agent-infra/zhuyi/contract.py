@@ -175,8 +175,116 @@ def check_dead_exact(entries=None, registry=None):
             if not any(_template_compatible(p, rp) for rp in paths)]
 
 
+def compute_unused(calls=None, registry=None):
+    """未用端点: registry 路由中无任何前端调用形态命中的(method, path)。
+
+    返回 (used_n, unused=[endpoint...])——未用按模块聚合时消费。
+    """
+    calls = calls if calls is not None else extract_frontend_calls()
+    registry = registry if registry is not None else chains_mod.load_registry()
+    used = set()
+    for e in registry["endpoints"]:
+        for c in calls:
+            if (_url_matches(c["url"], e["path"])
+                    and (c["method"] == e["method"]
+                         or (c["method"] == "GET" and e["method"] == "WS"))):
+                used.add((e["method"], e["path"]))
+                break
+    unused = [e for e in registry["endpoints"]
+              if (e["method"], e["path"]) not in used]
+    return len(used), unused
+
+
+def link_chains(url, chs=None):
+    """断点 × 业务链关联标注(audit 联动)。
+
+    规则: 断契 url 构型匹配链步骤端点 path(_url_matches);
+    死条目 entry 末段匹配链端点末段 且 entry 任一段(≥2字符)出现在链端点
+    path 中(防 order/confirm 误连 qr/confirm——段语义交叉验证)。
+    返回 ["链名·步骤N", ...]。
+    """
+    chs = chs if chs is not None else chains_mod.parse_chains()
+    hits = []
+    segs = [s for s in url.strip("/").split("/") if len(s) >= 2]
+    tail = segs[-1] if segs else ""
+    for chain in chs:
+        for step in chain["steps"]:
+            for _m, p, _a in step["endpoints"]:
+                if _url_matches(url, p):
+                    hits.append(f"{chain['name']}·步骤{step['no']}")
+                    break
+                if (tail and p.rstrip("/").rsplit("/", 1)[-1] == tail
+                        and any(s in p for s in segs[:-1])):
+                    hits.append(f"{chain['name']}·步骤{step['no']}")
+    return sorted(set(hits))
+
+
+def generate_report(calls=None, registry=None, out_dir=None):
+    """契约 Diff 报告: 断契/死条目/未用端点三类清单+链关联 → 归档路径。"""
+    import datetime
+    calls = calls if calls is not None else extract_frontend_calls()
+    registry = registry if registry is not None else chains_mod.load_registry()
+    out_dir = out_dir or os.path.join(chains_mod.REPO_ROOT, "docs",
+                                      "registry", "reports")
+    os.makedirs(out_dir, exist_ok=True)
+    now = datetime.datetime.now(tz=datetime.timezone.utc).astimezone()
+    path = os.path.join(out_dir, now.strftime("契约报告-%Y%m%d-%H%M%S.md"))
+    hits, breaks = check_contract_break(calls, registry)
+    entries = extract_public_exact()
+    dead = check_dead_exact(entries, registry)
+    used_n, unused = compute_unused(calls, registry)
+    unused_pub = [e for e in unused if e["auth"].startswith("公开")]
+    by_mod = {}
+    for e in unused:
+        by_mod[e["module"]] = by_mod.get(e["module"], 0) + 1
+    top_mods = sorted(by_mod.items(), key=lambda kv: -kv[1])[:8]
+
+    lines = ["# 契约报告 · 竹医 zhuyi contract（79号·L2 前后端契约对齐）", ""]
+    lines.append(f"> 生成: {now.strftime('%Y-%m-%d %H:%M:%S')} · "
+                 f"基线: registry.json({len(registry['endpoints'])} 端点) · "
+                 f"前端调用形态 {len(hits) + len(breaks)}")
+    lines.append("")
+    lines.append("## 一、断契清单（前端调用 × 后端无对应路由）")
+    lines.append("")
+    if not breaks:
+        lines.append("- 无")
+    for b in breaks:
+        chains = "、".join(link_chains(b["url"])) or "（无关联链）"
+        extra = f"(registry 实际方法: {b['registered']})" if b["registered"] != "无" else ""
+        lines.append(f"- **{b['method']} {b['url']}** ← {', '.join(b['files'][:2])}"
+                     f"{extra} · 关联链: {chains}")
+    lines.append("")
+    lines.append("## 二、死条目清单（白名单 EXACT × 路由形态永不匹配）")
+    lines.append("")
+    if not dead:
+        lines.append(f"- 无（当前 EXACT {len(entries)} 条全部有效, "
+                     f"e73f6800 清理后干净）")
+    for d in dead:
+        chains = "、".join(link_chains(d["entry"])) or "（无关联链）"
+        lines.append(f"- **{d['entry']}** · 关联链: {chains}"
+                     f" · 处置: 对照 L0-端点清单修正形态或删除")
+    lines.append("")
+    lines.append("## 三、未用端点清单（registry 有路由 × 前端无调用）")
+    lines.append("")
+    lines.append(f"- 总计: {len(unused)} 个未用（registry "
+                 f"{len(registry['endpoints'])} - 前端命中 {used_n}）")
+    lines.append(f"- 公开面未用（安全关注, 全列 {len(unused_pub)} 条）:")
+    for e in unused_pub[:30]:
+        lines.append(f"  - {e['method']} {e['path']} ({e['auth']})")
+    if len(unused_pub) > 30:
+        lines.append(f"  - ... 其余 {len(unused_pub) - 30} 条见 registry")
+    lines.append("- 登录态未用按模块聚合 Top: "
+                 + ", ".join(f"{m}({n})" for m, n in top_mods))
+    lines.append("")
+    lines.append("> **只出不施**: 本报告仅输出契约差异与处置建议, 不写盘不改代码。")
+    lines.append("")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    return path
+
+
 def run(args=None):
-    """contract CLI 入口: T2.1-T2.3 三检, T2.4 逐任务补齐。"""
+    """contract CLI 入口: T2.1-T2.4 四件全量, 报告归档。"""
     calls = extract_frontend_calls()
     print(f"[zhuyi contract] T2.1 前端调用面: {len(calls)} 处调用")
     hits, breaks = check_contract_break(calls)
@@ -191,7 +299,11 @@ def run(args=None):
     for d in dead:
         print(f"  [dead_exact] {d['entry']}——白名单条目与任何注册路由形态永不匹配"
               f"(对照 L0-端点清单修正形态或删除)")
-    print("[zhuyi contract] T2.4 契约报告+链联动: 后续任务实现")
+    path = generate_report(calls)
+    used_n, unused = compute_unused(calls)
+    print(f"[zhuyi contract] T2.4 契约报告: 未用 {len(unused)}/{used_n + len(unused)}"
+          f"(公开面未用 {sum(1 for e in unused if e['auth'].startswith('公开'))})")
+    print(f"  已归档: {path}")
     return 0
 
 

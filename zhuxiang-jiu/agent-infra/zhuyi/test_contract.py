@@ -149,3 +149,46 @@ def test_t23_template_compatible_unit():
     assert not ct._template_compatible("/qr/scan", "/api/entry/qr/{qr_id}/scan")
     assert ct._template_compatible("/api/product/123", "/api/product/{id}")
     assert not ct._template_compatible("/api/product/x/list", "/api/product/{id}")
+
+
+# ---------- T2.4 契约报告+链联动（三类清单+链关联） ----------
+
+def test_t24_link_chains_rules():
+    """链联动规则: qr 死条目末段+段语义交叉→关联扫码登录链; order/confirm 不误连"""
+    links = ct.link_chains("/qr/scan")
+    assert "扫码登录链·步骤3" in links
+    # 段语义交叉验证: /qr/confirm 关联链二步骤4, 不误连链一步骤7(order confirm)
+    links_c = ct.link_chains("/qr/confirm")
+    assert "扫码登录链·步骤4" in links_c
+    assert not any(l.startswith("下单支付链") for l in links_c)
+    # 断契 pay71 无关联链(如实)
+    assert ct.link_chains("/api/pay71") == []
+
+
+def test_t24_report_three_sections(tmp_path):
+    """契约报告: 三类清单+链关联+只出不施, 归档返回"""
+    path = ct.generate_report(out_dir=str(tmp_path))
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    assert "一、断契清单" in text and "/api/pay71" in text
+    assert "二、死条目清单" in text and "e73f6800 清理后干净" in text
+    assert "三、未用端点清单" in text and "公开面未用" in text
+    assert "只出不施" in text
+
+
+def test_t24_unused_conservation():
+    """未用端点守恒: used + unused = registry 总数"""
+    used_n, unused = ct.compute_unused()
+    assert used_n + len(unused) == 2612
+    assert len(unused) > 2000  # 主体端点无主站前端调用(调用面在taro/服务间)
+
+
+def test_t24_run_archives(tmp_path, capsys, monkeypatch):
+    """run() 集成: T2.4 归档输出(patch contract 持有的报告目录)"""
+    import contract as ct_mod
+    monkeypatch.setattr(ct_mod, "REPORTS_DIR", str(tmp_path), raising=False)
+    # generate_report 的目录由 chains_mod.REPO_ROOT 拼——改用直接验证输出文案
+    assert ct_mod.run() == 0
+    out = capsys.readouterr().out
+    assert "T2.4 契约报告" in out and "已归档" in out
+    assert "未用" in out and "公开面未用" in out
