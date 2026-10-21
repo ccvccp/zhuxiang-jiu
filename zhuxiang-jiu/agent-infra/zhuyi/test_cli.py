@@ -1,4 +1,4 @@
-"""zhuyi CLI 骨架验收测试（T0.1: --help 三命令可见 + 三 stub 分发）"""
+"""zhuyi CLI 验收测试（T0.1 骨架 + T1.1 audit 实装分发）"""
 import os
 import subprocess
 import sys
@@ -25,11 +25,13 @@ def test_no_args_prints_help():
     assert "zhuyi" in r.stdout
 
 
-def test_audit_stub():
+def test_audit_t11_real():
+    """T1.1 实装: audit 分发真实现——端点在册检查+cart gap 检出+后续任务提示"""
     r = _run("audit")
     assert r.returncode == 0
-    assert "audit" in r.stdout and "骨架占位" in r.stdout
-    assert "qr" in r.stdout  # M1 benchmark 提示可见
+    assert "端点在册" in r.stdout
+    assert "/api/cart" in r.stdout and "miss=1" in r.stdout
+    assert "T1.2 鉴权可达" in r.stdout  # 后续检提示可见(M1 benchmark 链路)
 
 
 def test_contract_stub():
