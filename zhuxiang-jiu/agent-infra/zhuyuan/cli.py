@@ -53,6 +53,9 @@ def main(argv=None):
     pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if pkg_parent not in sys.path:
         sys.path.insert(0, pkg_parent)
+    if args.command == "audit":
+        from zhuyuan import audit
+        return audit.run(args)
     if args.command in STUBS:
         print(f"[zhuyuan {args.command}] 骨架占位——{STUBS[args.command]}")
         return 0

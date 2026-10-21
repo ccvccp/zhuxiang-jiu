@@ -25,10 +25,12 @@ def test_no_args_prints_help():
     assert "zhuyuan" in r.stdout
 
 
-def test_audit_stub():
+def test_audit_t03_real():
+    """T0.3 实装: audit 分发盘点——台账汇总+healthy 样本在列"""
     r = _run("audit")
     assert r.returncode == 0
-    assert "盘点" in r.stdout and "B2" in r.stdout
+    assert "资产台账" in r.stdout
+    assert "healthy" in r.stdout and "missing" in r.stdout
 
 
 def test_comply_stub():
