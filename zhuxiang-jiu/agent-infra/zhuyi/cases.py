@@ -19,6 +19,16 @@ def _parse_case(text):
     fm = text.split("---")[1] if text.startswith("---") else ""
 
     def _grab(key, cast=str):
+        if cast is list:
+            # 多行 YAML list: key: 后跟缩进 "- x" 行
+            mm = re.search(rf"{key}:\s*\n((?:[ \t]+-[^\n]+\n?)+)", fm)
+            if mm:
+                items = []
+                for ln in mm.group(1).splitlines():
+                    v = ln.strip().lstrip("-").strip().strip("'\"")
+                    if v:
+                        items.append(v)
+                return items
         m = re.search(rf"{key}:\s*(.+)", fm)
         if not m:
             return [] if cast is list else ""
@@ -132,12 +142,47 @@ def build_prescription(case, cases_dir=None):
         "patch_hint": patch_hint, "regression_hint": regression_hint,
         "prevention": sec.get("预防规则", ""),
         "case_file": case["file"],
+        "related_files": list(case.get("related_files") or []),
     }
+
+
+_BR_EXCLUDE = ("/.deps/", "/node_modules/", "/.git/", "agent-infra/",
+               "/taro-app/", "/__pycache__/", "/.docxgen/", "test_")
+
+
+def _impact_mod():
+    """跨包复用竹盾反向引用(延迟导入+agent-infra 路径注入)。"""
+    import sys
+    try:
+        from zhudun import impact
+        return impact
+    except ImportError:
+        pkg = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if pkg not in sys.path:
+            sys.path.insert(0, pkg)
+        from zhudun import impact
+        return impact
+
+
+def attach_blast_radius(p, repo=None):
+    """T3.3: 处方自动附影响面(Blast Radius)——related_files × zhudun.impact
+    反向引用, 过滤 .deps/工具目录等噪源聚焦生产面。写回 p['blast_radius']。"""
+    changed = [f for f in p.get("related_files") or [] if f]
+    if not changed:
+        p["blast_radius"] = {"changed": [], "refs": {}}
+        return p
+    impact = _impact_mod()
+    repo = repo or chains_mod.REPO_ROOT
+    _syms, refs = impact.referencing_files(changed, repo=repo, registry={})
+    refs = {f: lines for f, lines in refs.items()
+            if not any(x in f for x in _BR_EXCLUDE)}
+    p["blast_radius"] = {"changed": changed, "refs": refs}
+    return p
 
 
 def render_prescription(p):
     """处方骨架 → Markdown 文本(T3.5 端到端报告的组件)。"""
-    return "\n".join([
+    lines = [
         f"## 处方 · {p['id']}（{p['severity']}）——{p['title']}",
         "",
         f"- 案例: {p['case_file']} · 事故日: {p['date']} · 修复参照: {p['commit'] or '—'}",
@@ -148,9 +193,17 @@ def render_prescription(p):
         "```",
         f"- 回归建议: {p['regression_hint'][:200]}",
         f"- 预防规则: {p['prevention'][:160]}",
+    ]
+    br = p.get("blast_radius")
+    if br is not None:
+        preview = "; ".join(f"{f}:{br['refs'][f][0]}" for f in sorted(br["refs"])[:3])
+        lines.append(f"- 影响面(Blast Radius): 改动 {len(br['changed'])} 文件, "
+                     f"反向引用 {len(br['refs'])} 处——{preview or '无'}")
+    lines += [
         "",
         "> **只出不施**: 以上为修正方向模板与回归建议, 不写盘不改代码——人工确认后落地。",
-    ])
+    ]
+    return "\n".join(lines)
 
 
 def run(args=None):

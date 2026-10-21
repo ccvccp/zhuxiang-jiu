@@ -88,3 +88,29 @@ def test_t32_render_prescription():
     assert "根因:" in text and "修正模板:" in text and "回归建议:" in text
     assert "只出不施" in text
     assert "e73f6800" in text
+
+
+# ---------- T3.3 Blast Radius 集成（真实变更处方含反向引用） ----------
+
+def test_t33_qr_blast_radius_real_refs():
+    """验收: qr 处方(auth_middleware 改动)反向引用真实命中且去噪(无 .deps/工具目录)"""
+    qr = next(c for c in cs.load_cases() if "qr" in c["file"])
+    p = cs.attach_blast_radius(cs.build_prescription(qr))
+    br = p["blast_radius"]
+    assert br["changed"] == ["backend/core/auth_middleware.py"]
+    assert br["refs"], "真实仓库必有引用方(main.py 挂载中间件)"
+    assert all(not any(x in f for x in ("/.deps/", "agent-infra", "taro-app",
+                                         "test_")) for f in br["refs"])
+    assert any(f.startswith("backend/") for f in br["refs"])
+    # 渲染含影响面节
+    text = cs.render_prescription(p)
+    assert "影响面(Blast Radius)" in text and "反向引用" in text
+
+
+def test_t33_empty_related_files_safe():
+    """related_files 为空的处方 attach 不炸(空 BR 占位)"""
+    p = {"related_files": [], "symptom": "", "root_cause": "", "patch_hint": "",
+         "regression_hint": "", "prevention": "", "id": "C-x", "title": "t",
+         "severity": "P1", "commit": "", "date": "", "case_file": "x.md"}
+    cs.attach_blast_radius(p)
+    assert p["blast_radius"] == {"changed": [], "refs": {}}
