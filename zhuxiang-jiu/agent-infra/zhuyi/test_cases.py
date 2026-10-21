@@ -149,3 +149,33 @@ def test_t34_render_grade_section():
     text = cs.render_prescription(p)
     assert "分级: P0(阻断)" in text and "置信度: 高" in text
     assert "案例编号:C-20261021-01" in text
+
+
+# ---------- T3.5 端到端处方（真实变更全链+回归映射） ----------
+
+def test_t35_regression_map_groups():
+    """回归资产映射: qr 组来自 test_qr_public_baseline, B1 组来自 feature_baseline"""
+    groups = cs._regression_map()
+    assert groups["qr"], "qr 白名单基线(test_qr_public_baseline)函数须在列"
+    assert all(fn.startswith("test_") for fn in groups["qr"])
+    assert groups["b1"], "B1 运费基线函数须在列"
+
+
+def test_t35_full_prescription_end_to_end(tmp_path):
+    """验收: 真实变更全链——检索命中→BR→分级→回归映射→报告归档"""
+    path, p = cs.generate_full_prescription("扫码登录 401 白名单",
+                                             out_dir=str(tmp_path))
+    assert path and p["id"] == "C-20261021-01"
+    assert p["grade"] == "P0(阻断)" and p["confidence"] == "高"
+    assert p["blast_radius"]["refs"], "BR 真实反向引用"
+    qr_mapped = [g for g in p["regression_tests"] if "qr" in g[0]]
+    assert qr_mapped and all(fn.startswith("test_") for fn in qr_mapped[0][1])
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    assert "端到端" in text and "回归测试建议" in text and "只出不施" in text
+    assert "test_qr" in text or qr_mapped[0][1][0] in text
+
+
+def test_t35_no_hit_no_report(tmp_path):
+    path, p = cs.generate_full_prescription("完全不相关xyz", out_dir=str(tmp_path))
+    assert path is None and p == []

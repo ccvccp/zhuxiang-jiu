@@ -202,6 +202,85 @@ def grade_prescription(p):
     return p
 
 
+def _regression_map(repo=None):
+    """回归资产映射: 挂载点 → 基线测试断言编号(函数名)。
+
+    扫描 backend/test_feature_baseline.py(B1/B2/B3 组) 与
+    backend/test_qr_public_baseline.py(qr 组) 的测试函数名。
+    """
+    repo = repo or chains_mod.REPO_ROOT
+    groups = {"b1": [], "b2": [], "b3": [], "qr": []}
+    specs = [
+        (os.path.join(repo, "backend", "test_feature_baseline.py"), ("b1", "b2", "b3")),
+        (os.path.join(repo, "backend", "test_qr_public_baseline.py"), ("qr",)),
+    ]
+    for path, keys in specs:
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as fh:
+            for m in re.finditer(r"def (test_([a-z0-9]+)_\w+)", fh.read()):
+                for k in keys:
+                    if m.group(2).startswith(k):
+                        groups[k].append(m.group(1))
+    return groups
+
+
+def map_regression(p, repo=None):
+    """T3.5: 处方挂载点 → 基线断言编号映射, 写回 p['regression_tests']。"""
+    groups = _regression_map(repo)
+    text = p.get("regression_hint", "") + " " + p.get("prevention", "")
+    mapped = []
+    if any(x in text for x in ("T1.2", "T2.3", "qr", "白名单", "死条目")) and groups["qr"]:
+        mapped.append(("qr 白名单基线(test_qr_public_baseline)", groups["qr"]))
+    if "B1" in text and groups["b1"]:
+        mapped.append(("B1 运费基线(test_feature_baseline)", groups["b1"]))
+    if "B2" in text or "评价" in text and groups["b2"]:
+        mapped.append(("B2 评价双写基线", groups["b2"]))
+    if "B3" in text and groups["b3"]:
+        mapped.append(("B3 注册面基线", groups["b3"]))
+    p["regression_tests"] = mapped
+    return p
+
+
+def generate_full_prescription(query, out_dir=None, repo=None):
+    """T3.5 端到端: 检索 → 处方 → BR → 分级 → 回归映射 → 归档处方报告。"""
+    import datetime
+    results = search(query, cases=load_cases(repo and os.path.join(
+        repo, "docs", "registry", "cases") or None), top=1)
+    if not results:
+        return None, []
+    p = build_prescription(results[0][0])
+    attach_blast_radius(p, repo)
+    grade_prescription(p)
+    map_regression(p, repo)
+    out_dir = out_dir or os.path.join(chains_mod.REPO_ROOT, "docs",
+                                      "registry", "reports")
+    os.makedirs(out_dir, exist_ok=True)
+    now = datetime.datetime.now(tz=datetime.timezone.utc).astimezone()
+    path = os.path.join(out_dir, now.strftime("处方报告-%Y%m%d-%H%M%S.md"))
+    lines = [
+        "# 处方报告 · 竹医 zhuyi consult（79号·L3 修正处方, 端到端）", "",
+        (f"> 生成: {now.strftime('%Y-%m-%d %H:%M:%S')} · 检索词: 「{query}」 · "
+         f"命中: {results[0][0]['id']}(得分 {results[0][1]})"), "",
+        render_prescription(p), "",
+        "## 回归测试建议(映射到基线断言编号)", "",
+    ]
+    if p["regression_tests"]:
+        for label, fns in p["regression_tests"]:
+            lines.append(f"- {label}: " + ", ".join(fns))
+    else:
+        lines.append("- 无直接基线映射——按处方挂载点人工补充回归断言")
+    lines += [
+        "",
+        ("> **只出不施(铁律 1)**: 本报告为修正方向模板, 不写盘不改代码——"
+         "人工确认后经竹盾五步 SOP 落地。"),
+        "",
+    ]
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    return path, p
+
+
 def render_prescription(p):
     """处方骨架 → Markdown 文本(T3.5 端到端报告的组件)。"""
     lines = [
@@ -232,7 +311,7 @@ def render_prescription(p):
 
 
 def run(args=None):
-    """consult CLI 入口: T3.1 检索 + T3.2 处方骨架, T3.3-T3.5 逐任务补齐。"""
+    """consult CLI 入口: T3.1-T3.5 全链(检索→处方→BR→分级→回归映射→报告归档)。"""
     query = getattr(args, "query", None) or "扫码登录 401 白名单"
     results = search(query)
     print(f"[zhuyi consult] T3.1 案例检索: 「{query}」→ 命中 {len(results)} 条")
@@ -240,13 +319,16 @@ def run(args=None):
         print(f"  [{score}分] {case['id']} {case['file']}")
     if results:
         top_case = results[0][0]
-        p = build_prescription(top_case)
-        print("[zhuyi consult] T3.2 处方骨架(首中案例 → 只出不施):")
-        for line in render_prescription(p).splitlines()[:8]:
-            print(f"  {line}")
-        print("  …(骨架渲染见 T3.5 端到端报告)")
-    print("[zhuyi consult] T3.3 Blast Radius / "
-          "T3.4 分级+置信度 / T3.5 端到端处方: 后续任务实现")
+        p = grade_prescription(attach_blast_radius(
+            map_regression(build_prescription(top_case))))
+        print(f"[zhuyi consult] T3.2-T3.4 处方: {p['grade']} · 置信{p['confidence']}"
+              f" · BR 反向引用 {len(p['blast_radius']['refs'])} 处"
+              f" · 回归映射 {len(p['regression_tests'])} 组")
+    path, _ = generate_full_prescription(query)
+    if path:
+        print(f"[zhuyi consult] T3.5 端到端处方报告已归档: {path}")
+    else:
+        print("[zhuyi consult] T3.5 无命中案例, 未生成报告")
     return 0
 
 
