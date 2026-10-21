@@ -34,10 +34,17 @@ def test_audit_t03_real():
 
 
 def test_comply_t12_real():
-    """T1.2 实装: comply 分发扫描——违规计数+B1 检出率"""
-    r = _run("comply")
-    assert r.returncode == 0
-    assert "合规扫描" in r.stdout and "B1 整改实录回放" in r.stdout
+    """T1.2 实装: comply 分发扫描——违规计数+B1 检出率(子进程归档自清理)"""
+    import audit as za
+    rep_dir = os.path.join(za._REPO_ROOT, "docs", "registry", "reports")
+    before = set(os.listdir(rep_dir))
+    try:
+        r = _run("comply")
+        assert r.returncode == 0
+        assert "合规扫描" in r.stdout and "B1 整改实录回放" in r.stdout
+    finally:
+        for n in set(os.listdir(rep_dir)) - before:
+            os.remove(os.path.join(rep_dir, n))
 
 
 def test_probe_stub():

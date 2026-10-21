@@ -18,6 +18,9 @@ except ImportError:
 
 _JS_EXEMPT = ("modules", "test", "ai-", "voice-", "challenge-", "entry-login")
 
+# 归档目录注入点(测试隔离用; None=默认 REPO_ROOT/docs/registry/reports)
+REPORTS_DIR = None
+
 # 微信整改实录核心违规词(B1 已知答案)
 B1_WORDS = ["醒酒", "无酒气", "不头疼", "畅饮", "尽兴更尽兴", "富硒",
             "天然健康", "有益微量元素", "有益成分", "健康密码",
@@ -68,8 +71,63 @@ def b1_replay():
     return hit, miss
 
 
+def generate_report(violations=None, out_dir=None):
+    """T1.3 合规报告(四节) → 归档路径。"""
+    import datetime
+    try:
+        from zhuyuan import audit as _a
+    except ImportError:
+        import audit as _a
+    if violations is None:
+        violations = scan_compliance()
+    out_dir = out_dir or REPORTS_DIR or os.path.join(
+        _a._REPO_ROOT, "docs", "registry", "reports")
+    os.makedirs(out_dir, exist_ok=True)
+    now = datetime.datetime.now(tz=datetime.timezone.utc).astimezone()
+    path = os.path.join(out_dir, now.strftime("合规报告-%Y%m%d-%H%M%S.md"))
+    by_cat = {}
+    for v in violations:
+        by_cat[v["category"]] = by_cat.get(v["category"], 0) + 1
+    high_n = sum(1 for v in violations if v["risk"] == "high")
+    lines = ["# 合规报告 · 竹园 zhuyuan comply（80号·合规审查）", ""]
+    lines.append(f"> 生成: {now.strftime('%Y-%m-%d %H:%M:%S')} · "
+                 f"扫描面: 主站 html+js(豁免内部工具页) · "
+                 f"违规 {len(violations)} 处(high {high_n}/med {len(violations) - high_n})")
+    lines += ["", "## 一、违规清单", ""]
+    if not violations:
+        lines.append("- 无(当前态合规通过)")
+    for v in violations:
+        lines.append(f"- **{v['file']}:{v['line']}** 「{v['word']}」"
+                     f"[{v['risk']}:{v['rule_id']}·{v['category']}]")
+    lines += ["", "## 二、分类统计", ""]
+    if by_cat:
+        for cat, n in sorted(by_cat.items(), key=lambda kv: -kv[1]):
+            lines.append(f"- {cat}: {n} 处")
+    else:
+        lines.append("- 全类别 0")
+    lines += ["", "## 三、处置建议", ""]
+    for v in violations:
+        lines.append(f"- {v['file']}:{v['line']} {v['suggestion']}"
+                     + ("（边缘案例: 新闻纪实/引语语境, 建议人工裁量改写）"
+                        if v["risk"] == "med" else ""))
+    if not violations:
+        lines.append("- 无待处置项; 新内容接入时以 rules.py 词表为准入校验")
+    lines += ["", "## 四、案例关联", "",
+              ("- 案例库暂无合规类案例——微信外链整改实录为首批入库候选"
+               "(任务 T3.5, 五段式: 现象=申诉被拒/根因=功效宣称+怂恿/错误=17处文案/"
+               "正确=口感工艺化改写/预防=rules 词表上线拦截)。"),
+              "> **只出不施**: 本报告仅输出处置建议, 不写盘不改代码。", ""]
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    return path
+
+
 def run(args=None):
-    """zhuyuan comply CLI: 违规明细+当前态+B1 自检。"""
+    """zhuyuan comply CLI: 违规明细+B1 自检+T1.3 报告归档+度量上报。"""
+    try:
+        from zhuyuan import stats as stats_mod
+    except ImportError:
+        import stats as stats_mod
     violations = scan_compliance()
     print(f"[zhuyuan comply] 主站合规扫描: 违规 {len(violations)} 处")
     for v in violations:
@@ -80,6 +138,10 @@ def run(args=None):
     print(f"[zhuyuan comply] B1 整改实录回放: 检出率 {rate}%"
           f"（{len(hit)}/{len(B1_WORDS)}）"
           + (f" 未中: {', '.join(miss)}" if miss else "——B1 PASS"))
+    path = generate_report(violations)
+    print(f"[zhuyuan comply] T1.3 合规报告已归档: {path}")
+    ok = stats_mod.report_stats(metrics={"violations": len(violations)})
+    print(f"[zhuyuan comply] 度量上报 zhuyuan:stats {'成功' if ok else '降级(仅打印)'}")
     return 0
 
 
