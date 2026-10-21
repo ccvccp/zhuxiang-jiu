@@ -213,14 +213,26 @@
             new MutationObserver(apply).observe(document.getElementById('productList'), { childList: true });
         })();
 
-        // 移动端筛选折叠(2026-10-21): 点"筛选"展开面板, 再点收起; 桌面端按钮隐藏无感
+        // 移动端筛选折叠 v2(2026-10-21): 点"筛选"展开面板; **选定任一筛选项后自动收起**——
+        // 商品结果立即回到视口(修复展开态面板霸屏, 用户点系列后仍看不到结果的交互闭环缺陷)
         (function () {
             var btn = document.getElementById('filterToggle');
             var sb = document.querySelector('.sidebar');
+            function collapse() {
+                sb.classList.remove('expanded');
+                btn.textContent = '筛选 ▾';
+            }
             if (btn && sb) {
                 btn.addEventListener('click', function () {
                     var open = sb.classList.toggle('expanded');
                     btn.textContent = open ? '收起筛选 ▴' : '筛选 ▾';
+                });
+                document.addEventListener('click', function (e) {
+                    var t = e.target;
+                    var li = t && t.closest ? t.closest('.filter-list li') : null;
+                    if (li && sb.classList.contains('expanded') && window.innerWidth <= 768) {
+                        collapse();
+                    }
                 });
             }
         })();
