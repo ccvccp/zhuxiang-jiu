@@ -48,6 +48,9 @@ def main(argv=None):
     if args.command == "audit":
         from zhuyi import audit
         return audit.run(args)
+    if args.command == "contract":
+        from zhuyi import contract
+        return contract.run(args)
     if args.command in STUBS:
         print(f"[zhuyi {args.command}] 骨架占位——{STUBS[args.command]}")
         return 0
