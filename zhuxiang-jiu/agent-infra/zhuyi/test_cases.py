@@ -114,3 +114,38 @@ def test_t33_empty_related_files_safe():
          "severity": "P1", "commit": "", "date": "", "case_file": "x.md"}
     cs.attach_blast_radius(p)
     assert p["blast_radius"] == {"changed": [], "refs": {}}
+
+
+# ---------- T3.4 分级+置信度（P0/P1/P2 + 证据引用） ----------
+
+def test_t34_grade_rules_qr_high():
+    """qr 处方: P0(阻断)+高置信(三证: 案例编号+commit e73f6800+反向引用)"""
+    qr = next(c for c in cs.load_cases() if "qr" in c["file"])
+    p = cs.grade_prescription(cs.attach_blast_radius(cs.build_prescription(qr)))
+    assert p["grade"] == "P0(阻断)"
+    assert p["confidence"] == "高" and len(p["evidence"]) == 3
+    assert any("C-20261021-01" in e for e in p["evidence"])
+    assert any("e73f6800" in e for e in p["evidence"])
+    assert any(e.startswith("反向引用:") for e in p["evidence"])
+
+
+def test_t34_grade_p1_and_low_confidence():
+    """599 案例分级 P1(隐患); 无 commit 无 BR 的处方→低置信"""
+    c599 = next(c for c in cs.load_cases() if "599" in c["file"])
+    p = cs.grade_prescription(cs.attach_blast_radius(cs.build_prescription(c599)))
+    assert p["grade"] == "P1(隐患)"
+    assert p["confidence"] in ("中", "高")
+    bare = {"id": "C-x", "severity": "P2", "commit": "", "related_files": [],
+            "blast_radius": {"changed": [], "refs": {}}}
+    p2 = cs.grade_prescription(bare)
+    assert p2["grade"] == "P2(优化)" and p2["confidence"] == "低"
+    assert p2["evidence"] == ["案例编号:C-x"]  # 无出处标低置信(铁律2)
+
+
+def test_t34_render_grade_section():
+    """渲染: 分级/置信度/证据节齐备"""
+    qr = next(c for c in cs.load_cases() if "qr" in c["file"])
+    p = cs.grade_prescription(cs.attach_blast_radius(cs.build_prescription(qr)))
+    text = cs.render_prescription(p)
+    assert "分级: P0(阻断)" in text and "置信度: 高" in text
+    assert "案例编号:C-20261021-01" in text

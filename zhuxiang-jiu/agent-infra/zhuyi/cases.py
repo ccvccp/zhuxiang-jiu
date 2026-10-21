@@ -180,6 +180,28 @@ def attach_blast_radius(p, repo=None):
     return p
 
 
+def grade_prescription(p):
+    """T3.4: P0(阻断)/P1(隐患)/P2(优化) 分级 + 置信度 + 证据引用。
+
+    铁律 2(证据驱动): 证据=案例编号/修复参照(commit)/反向引用(BR), 三证齐→高,
+    二证→中, 少于二证→低(无出处标低置信)。写回 grade/confidence/evidence。
+    """
+    grade = {"P0": "P0(阻断)", "P1": "P1(隐患)", "P2": "P2(优化)"}.get(
+        p.get("severity", ""), "P2(优化)")
+    evidence = []
+    if p.get("id"):
+        evidence.append(f"案例编号:{p['id']}")
+    if p.get("commit"):
+        evidence.append(f"修复参照:{p['commit']}")
+    br = p.get("blast_radius")
+    if br and br.get("refs"):
+        first = min(br["refs"])
+        evidence.append(f"反向引用:{first}:{br['refs'][first][0]}(行)")
+    confidence = "高" if len(evidence) >= 3 else ("中" if len(evidence) == 2 else "低")
+    p["grade"], p["confidence"], p["evidence"] = grade, confidence, evidence
+    return p
+
+
 def render_prescription(p):
     """处方骨架 → Markdown 文本(T3.5 端到端报告的组件)。"""
     lines = [
@@ -199,6 +221,9 @@ def render_prescription(p):
         preview = "; ".join(f"{f}:{br['refs'][f][0]}" for f in sorted(br["refs"])[:3])
         lines.append(f"- 影响面(Blast Radius): 改动 {len(br['changed'])} 文件, "
                      f"反向引用 {len(br['refs'])} 处——{preview or '无'}")
+    if p.get("grade"):
+        lines.append(f"- 分级: {p['grade']} · 置信度: {p['confidence']} · "
+                     f"证据: {'; '.join(p['evidence']) or '无(低置信)'}")
     lines += [
         "",
         "> **只出不施**: 以上为修正方向模板与回归建议, 不写盘不改代码——人工确认后落地。",
