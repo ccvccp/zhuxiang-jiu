@@ -10,7 +10,11 @@
   扫描(复用竹盾反向引用思路的文件面)——无参端点=完整路径子串; 带参端点=首段
   子串+尾段带引号字面量(拼接写法 `'/api/x/' + id + '/scan'`); no_call=主站
   前端无调用点(调用可能在 taro 端/服务间, 如实报出供人解读, 非必然断链)。
-后续任务逐检扩展: T1.4 数据流衔接 / T1.5 断链六段式报告。
+后续任务逐检扩展: T1.5 断链六段式报告。
+第四检(T1.4) 数据流衔接: 链内衔接字段列(入→出)的关键 ID 抽验——identifier
+  类入字段(_id/pay_no/JWT等)须可溯源至前序步骤产出(宽匹配, 豁免链首步外部
+  输入); 未溯源 → dataflow_gap(外部输入或链定义缺字段, 供人工确认——
+  audit-1 升档触发点/audit-2 结算端分工取证点在此口径下核对)。
 """
 import os
 import re
@@ -174,9 +178,62 @@ def check_frontend_calls(chs=None, repo_root=None):
     return call_map, no_call
 
 
+_FIELD_SPLIT_RE = re.compile(r"[/+、,，()（）\s]+")
+_KEY_EXTRA = {"pay_no", "payout_no", "JWT", "level", "commission"}
+
+
+def _field_tokens(fields):
+    """衔接字段列 `入 → 出` → (入 tokens, 出 tokens); 无 → 返回空。"""
+    if "→" not in fields:
+        return [], []
+    ins, _, outs = fields.partition("→")
+    tok = lambda s: [t for t in _FIELD_SPLIT_RE.split(s.strip()) if t]
+    return tok(ins), tok(outs)
+
+
+def _is_key_field(t):
+    """关键 identifier 抽验口径: *_id 后缀 + 少量关键产物名。"""
+    return t.endswith("_id") or t in _KEY_EXTRA
+
+
+def _linked(tok, outs):
+    """宽匹配衔接: sku 命中 sku_id(简写/全称互含)。"""
+    return any(tok in o or o in tok for o in outs)
+
+
+def check_dataflow(chs=None):
+    """第四检: 数据流衔接(从简——关键 ID 抽验)。
+
+    规则: identifier 类入字段须在链内前序已出现的字段(入+出——链上下文延续,
+    如 order_id 贯穿多步)中宽匹配命中; 未命中 → dataflow_gap(凭空出现的
+    关键 ID, 外部输入或链定义缺字段)。链首步入字段豁免(外部输入起点)。
+    产出未消费(如 JWT=链目标产物)不检——语义留给人工。
+    返回 findings: [{chain, step, token, kind='dataflow_gap', prior_outs}]。
+    """
+    chs = chs if chs is not None else chains_mod.parse_chains()
+    findings = []
+    for chain in chs:
+        produced = set()
+        for i, step in enumerate(chain["steps"]):
+            ins, outs = _field_tokens(step["fields"])
+            if i > 0:
+                for tok in ins:
+                    if _is_key_field(tok) and not _linked(tok, produced):
+                        findings.append({
+                            "chain": chain["name"], "step": step["no"],
+                            "label": step["label"], "token": tok,
+                            "kind": "dataflow_gap",
+                            "prior_outs": sorted(produced)[:6],
+                        })
+            produced.update(ins)
+            produced.update(outs)
+    return findings
+
+
 def run(args=None):
-    """audit CLI 入口: 输出 T1.1/T1.2/T1.3 三检, T1.4/T1.5 逐任务补齐。"""
-    print("[zhuyi audit] L1 业务链审查 · T1.1 端点在册 / T1.2 鉴权可达 / T1.3 前端调用点")
+    """audit CLI 入口: 输出 T1.1-T1.4 四检, T1.5 逐任务补齐。"""
+    print("[zhuyi audit] L1 业务链审查 · T1.1 端点在册 / T1.2 鉴权可达 / "
+          "T1.3 前端调用点 / T1.4 数据流衔接")
     findings, total = check_endpoint_registry()
     for f in findings:
         print(f"  [T1.1:{f['kind']}] {f['chain']} 步骤{f['step']}({f['label']}): "
@@ -197,7 +254,14 @@ def run(args=None):
     for f in no_call:
         print(f"  [T1.3:{f['kind']}] {f['chain']} 步骤{f['step']}({f['label']}): "
               f"{f['method']} {f['path']}——主站前端无调用点(可能在 taro 端/服务间)")
-    print("[zhuyi audit] T1.4 数据流衔接 / T1.5 断链报告: 后续任务实现")
+    gaps = check_dataflow()
+    if not gaps:
+        print("  [T1.4 数据流衔接] 通过: 关键 ID 前序溯源全命中")
+    for f in gaps:
+        print(f"  [T1.4:{f['kind']}] {f['chain']} 步骤{f['step']}({f['label']}): "
+              f"入字段「{f['token']}」未溯源至前序产出(外部输入或链定义缺字段, "
+              f"前序产出: {', '.join(f['prior_outs']) or '无'})")
+    print("[zhuyi audit] T1.5 断链报告: 后续任务实现")
     return 0
 
 

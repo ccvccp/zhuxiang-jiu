@@ -9,10 +9,10 @@ import audit as au
 import chains as ch
 
 
-def _step(no, label, eps, internal=False, pending=False):
+def _step(no, label, eps, internal=False, pending=False, fields=""):
     return {"no": no, "label": label, "endpoints": eps,
             "internal": internal, "pending": pending,
-            "pre": "", "fields": ""}
+            "pre": "", "fields": fields}
 
 
 def test_real_chains_cart_gap_detected():
@@ -101,6 +101,46 @@ def test_t13_call_tokens_unit():
     assert au._call_tokens("/api/entry/qr/{qr_id}/scan") == ("/api/entry/qr/", "/scan")
     assert au._call_tokens("/api/order/{order_id}/pay") == ("/api/order/", "/pay")
     assert au._call_tokens("/api/product/{id}") == ("/api/product/", None)
+
+
+# ---------- T1.4 数据流衔接（从简——关键 ID 抽验） ----------
+
+def test_t14_qr_chain_clean():
+    """M1 基准链数据流完整: 扫码登录链 qr_id 全程衔接, 0 gap"""
+    gaps = au.check_dataflow()
+    assert not any(g["chain"] == "扫码登录链" for g in gaps)
+
+
+def test_t14_known_gaps_reported():
+    """真实审计发现如实报出: 4 个已知 gap(链定义完善项/外部输入样例)"""
+    gaps = au.check_dataflow()
+    got = {(g["chain"], g["token"]) for g in gaps}
+    assert ("下单支付链", "address_id") in got          # 外部输入: 用户地址簿
+    assert ("评价双写链", "product_id") in got           # 链定义缺字段: confirm 应带订单上下文
+    assert ("评价双写链", "member_id") in got
+    assert ("内容检测链", "hotspot_id") in got            # hotspots 集合→单体选择隐含
+    assert len(gaps) == 4
+
+
+def test_t14_fixture_orphan_detected():
+    """验收口径: 构造断流链(凭空关键 ID) → 检出 dataflow_gap"""
+    fake = [{"name": "断流链", "goal": "", "steps": [
+        _step(1, "起点", [], fields="a_id → b_id"),
+        _step(2, "凭空消费", [], fields="ghost_id → c_id"),
+    ]}]
+    gaps = au.check_dataflow(chs=fake)
+    assert len(gaps) == 1 and gaps[0]["token"] == "ghost_id"
+    assert gaps[0]["step"] == 2 and gaps[0]["chain"] == "断流链"
+
+
+def test_t14_first_step_exempt_and_continuity():
+    """链首外部输入豁免 + 既有 ID 延续不误报(order_id 贯穿)"""
+    fake = [{"name": "延续链", "goal": "", "steps": [
+        _step(1, "首步外部输入", [], fields="x_id → order_id"),
+        _step(2, "贯穿使用", [], fields="order_id → pay_no"),
+        _step(3, "再贯穿", [], fields="order_id → 终态"),
+    ]}]
+    assert au.check_dataflow(chs=fake) == []  # x_id 链首豁免, order_id 全程延续
 
 
 # ---------- T1.2 鉴权可达（qr benchmark 核心） ----------
