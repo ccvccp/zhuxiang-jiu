@@ -122,7 +122,7 @@ def scan_assets(repo_root=None):
 
 
 def run(args=None):
-    """zhuyuan audit CLI: 资产台账输出。"""
+    """zhuyuan audit CLI: 资产台账输出 + T0.4 度量上报。"""
     assets, summary = scan_assets()
     print(f"[zhuyuan audit] 资产台账: healthy={summary['healthy']} "
           f"missing={summary['missing']} exempt={summary['exempt']}")
@@ -134,6 +134,17 @@ def run(args=None):
             print(f"  [healthy] {a['asset_id']}")
         else:
             print(f"  [{a['priority']}:{a['gap_type']}] {a['asset_id']} —— {a['evidence']}")
+    try:
+        from zhuyuan import stats as stats_mod
+    except ImportError:
+        import stats as stats_mod
+    pri = {"p0": 0, "p1": 0, "p2": 0}
+    for a in assets:
+        p = (a.get("priority") or "").lower()
+        if p in pri:
+            pri[p] += 1
+    ok = stats_mod.report_stats(metrics={**summary, **pri})
+    print(f"[zhuyuan audit] 度量上报 zhuyuan:stats {'成功' if ok else '降级(仅打印)'}")
     return 0
 
 
