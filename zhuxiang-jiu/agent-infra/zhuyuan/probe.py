@@ -1,13 +1,17 @@
-"""zhuyuan probe: 性能探针（80号·T2.1 基座+T2.2 转化探针, 本会话截图实战沉淀）
+"""zhuyuan probe: 性能探针（80号·T2.1 基座+T2.2 转化探针+T2.3 信任探针）
 
 Playwright 基座: 微信 UA + networkidle 等待 + 关键选择器定位 + 首屏截图。
 坑位沉淀: Playwright 浏览器二进制缺失 → channel="msedge" 系统浏览器零下载。
 T2.2 转化探针: 购物流程关键元素存在性 + 立即购买按钮首屏可见性。
   - 选择器取证自 product-detail.html 真实 DOM(价格/规格/数量/双购买按钮)
   - 反例验证: service.html 真实内容页无商品卡容器, renderProductCard 不触发
-T2.3 信任探针在本基座上加检查器。
+T2.3 信任探针: 资质三件套(ICP/许可证/警示语)+产地+评分——渲染态 innerText 取证
+  (页脚共享资质块=main.js renderFooter+首页 hero 警示语)。
+  评分★误报防坑: ai-hub-widget 有客服满意度★按钮, 不等于商品评分——
+  匹配口径收窄为 好评率/用户评分类短语 + .rating/.stars 精确类。
 """
 import os
+import re
 
 DEFAULT_URL = "https://zyjiu.com/product-detail.html?id=1"
 _SHOT_DIR = os.path.join(os.environ.get("TEMP", "."), "zhuyuan-probe")
@@ -24,6 +28,19 @@ CONVERSION_ELEMENTS = (
     ("add_cart", "加入购物车按钮", "button:has-text('加入购物车')", "P0"),
     ("buy_now", "立即购买按钮", "button:has-text('立即购买')", "P0"),
 )
+
+# 信任要素(T2.3): (key, 名称, 渲染态 innerText 正则, 缺失分级)
+# P0=资质三件套(合规底线), P1=产地信任信息, P2=评分体验增强
+TRUST_TEXT_CHECKS = (
+    ("icp", "ICP备案号", r"ICP备\d+", "P0"),
+    ("license", "食品经营许可证", r"SC\d{14}", "P0"),
+    ("warning", "健康警示语", r"过量饮酒|未成年|孕妇", "P0"),
+    ("origin", "产地信息", r"产地", "P1"),
+    ("rating", "评分展示", r"好评率|用户评分|商品评分|综合评分", "P2"),
+)
+# 评分类名兜底: 精确类匹配, 不用 [class*=] 子串(防 start/operating 类误报)
+TRUST_RATING_SELECTORS = (".rating", ".stars")
+_TRUST_P0 = ("icp", "license", "warning")
 
 
 def _new_context(browser):
@@ -107,34 +124,89 @@ def probe_conversion(url=DEFAULT_URL, timeout=40000, shot_name=None):
             "shot": shot}
 
 
+def probe_trust(url=DEFAULT_URL, timeout=40000, shot_name=None):
+    """信任探针(T2.3): 资质三件套(ICP/许可证/警示语)+产地+评分展示检查。
+
+    取证口径: 页面渲染后 document.body.innerText 正则匹配——
+    资质三件套来自页脚共享资质块(main.js renderFooter), 首页另有 hero 警示语;
+    评分另查 .rating/.stars 精确类兜底(满意度★不算商品评分)。
+    pass=P0 资质三件套齐备(合规底线); P1 产地/P2 评分缺失记 findings 不阻断。
+    返回 {"url", "ok", "pass", "title", "elements", "missing", "findings", "shot"}。
+    页面加载失败抛出的异常由调用方处理。
+    """
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel="msedge")
+        page = _new_context(browser).new_page()
+        page.goto(url, wait_until="networkidle", timeout=timeout)
+        page.wait_for_timeout(2000)
+        body_text = page.evaluate("() => document.body.innerText") or ""
+        elements = {
+            key: re.search(pat, body_text) is not None
+            for key, _name, pat, _prio in TRUST_TEXT_CHECKS}
+        if not elements["rating"]:
+            elements["rating"] = any(
+                page.locator(sel).count() > 0
+                for sel in TRUST_RATING_SELECTORS)
+        shot = _take_shot(page, shot_name)
+        title = page.title()
+        browser.close()
+    missing = [key for key, hit in elements.items() if not hit]
+    findings = [
+        {"level": prio, "msg": f"信任要素缺失{name}({key})"}
+        for key, name, _pat, prio in TRUST_TEXT_CHECKS if not elements[key]]
+    passed = all(elements[k] for k in _TRUST_P0)
+    return {"url": url, "ok": True, "pass": passed, "title": title,
+            "elements": elements, "missing": missing, "findings": findings,
+            "shot": shot}
+
+
 def run(args=None):
-    """zhuyuan probe CLI: 转化探针——购物流程关键元素+购买按钮首屏可见性。"""
+    """zhuyuan probe CLI: 转化+信任双探针(T2.2/T2.3)。"""
     url = getattr(args, "url", None) or DEFAULT_URL
     try:
-        r = probe_conversion(url=url, shot_name="t22-conversion.png")
+        conv = probe_conversion(url=url, shot_name="t22-conversion.png")
+        trust = probe_trust(url=url, shot_name="t23-trust.png")
     except Exception as exc:  # noqa: BLE001 探针对环境故障如实报告
         print(f"[zhuyuan probe] 探针失败: {exc}")
         return 1
-    print(f"[zhuyuan probe] 转化探针成功: {r['url']}")
-    print(f"  页面标题: {r['title']}")
+    # ---- 转化探针段(T2.2) ----
+    print(f"[zhuyuan probe] 转化探针成功: {conv['url']}")
+    print(f"  页面标题: {conv['title']}")
     print("  购物流程关键元素:")
     for key, name, sel, _prio in CONVERSION_ELEMENTS:
-        hit = r["elements"][key]
+        hit = conv["elements"][key]
         print(f"    {'✓' if hit else '✗'} {name} {sel}")
-    if r["buy_box"]:
-        mark = "✓" if r["buy_first_screen"] else "✗"
-        print(f"  {mark} 立即购买首屏可见 (y={int(r['buy_box']['y'])}, "
+    if conv["buy_box"]:
+        mark = "✓" if conv["buy_first_screen"] else "✗"
+        print(f"  {mark} 立即购买首屏可见 (y={int(conv['buy_box']['y'])}, "
               f"首屏高{VIEWPORT_H})")
     else:
         print("  ✗ 立即购买按钮未渲染")
-    for f in r["findings"]:
+    for f in conv["findings"]:
         print(f"  [{f['level']}] {f['msg']}")
-    if r["shot"]:
-        print(f"  首屏截图: {r['shot']}")
-    verdict = "PASS——购物流程关键元素齐备" if r["pass"] else \
-        f"FAIL——缺失 {', '.join(r['missing'])}"
+    verdict = "PASS——购物流程关键元素齐备" if conv["pass"] else \
+        f"FAIL——缺失 {', '.join(conv['missing'])}"
     print(f"  转化结论: {verdict}")
-    return 0 if r["pass"] else 1
+    # ---- 信任探针段(T2.3) ----
+    print(f"[zhuyuan probe] 信任探针成功: {trust['url']}")
+    print(f"  页面标题: {trust['title']}")
+    print("  信任要素(资质三件套+产地+评分):")
+    for key, name, _pat, prio in TRUST_TEXT_CHECKS:
+        hit = trust["elements"][key]
+        print(f"    {'✓' if hit else '✗'} {name} [缺失分级{prio}]")
+    for f in trust["findings"]:
+        print(f"  [{f['level']}] {f['msg']}")
+    if trust["shot"]:
+        print(f"  首屏截图: {trust['shot']}")
+    p0_missing = [k for k in _TRUST_P0 if not trust["elements"][k]]
+    verdict = "PASS——资质三件套齐备(合规底线)" if trust["pass"] else \
+        f"FAIL——资质三件套缺失: {', '.join(p0_missing)}"
+    print(f"  信任结论: {verdict}")
+    # ---- 综合 ----
+    ok = conv["pass"] and trust["pass"]
+    print(f"  综合结论: {'PASS——双探针通过' if ok else 'FAIL(见上明细)'}")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

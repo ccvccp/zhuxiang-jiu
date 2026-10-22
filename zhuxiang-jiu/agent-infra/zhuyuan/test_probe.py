@@ -10,6 +10,8 @@ import probe as zp
 # T2.2 反例页: 真实内容页(留言服务), 无商品卡容器→renderProductCard 不触发,
 # 共享头尾亦不含购买按钮文案——干净的"无购物流程"负样本
 NEG_URL = "https://zyjiu.com/service.html"
+# T2.3 首页: hero 警示语+页脚资质三件套; 商品卡无产地字段
+HOME_URL = "https://zyjiu.com/"
 
 
 def test_t21_probe_live_detail_page():
@@ -70,3 +72,25 @@ def test_t22_cli_conversion_negative():
     assert r.returncode == 1
     assert "转化结论: FAIL" in r.stdout
     assert "P0" in r.stdout
+
+
+def test_t23_trust_detail_page():
+    """信任探针·详情页(双页验证之一): 资质三件套(页脚)+产地✓; 评分缺失如实 P2"""
+    r = zp.probe_trust(url=zp.DEFAULT_URL, timeout=45000)
+    assert r["ok"] is True
+    assert r["pass"] is True, f"资质三件套应齐: {r['missing']}"
+    for k in ("icp", "license", "warning", "origin"):
+        assert r["elements"][k] is True
+    assert r["elements"]["rating"] is False, "真实 UI 无商品评分模块——如实缺失"
+    assert any(f["level"] == "P2" for f in r["findings"])
+
+
+def test_t23_trust_homepage():
+    """信任探针·首页(双页验证之二): hero警示语+页脚三件套齐; 产地缺失如实 P1"""
+    r = zp.probe_trust(url=HOME_URL, timeout=45000)
+    assert r["ok"] is True
+    assert r["pass"] is True, f"资质三件套应齐: {r['missing']}"
+    for k in ("icp", "license", "warning"):
+        assert r["elements"][k] is True
+    assert r["elements"]["origin"] is False, "首页商品卡无产地字段——如实缺失"
+    assert any(f["level"] == "P1" for f in r["findings"])
