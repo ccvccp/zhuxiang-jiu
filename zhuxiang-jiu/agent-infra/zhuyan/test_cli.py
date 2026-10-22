@@ -81,10 +81,14 @@ def test_analogize_t24_real():
             os.remove(os.path.join(rep_dir, n))
 
 
-def test_evolve_stub():
-    r = _run("evolve")
+def test_evolve_t31_real():
+    """T3.1 实装: evolve 分发(慢路径全量采集由 test_evolve 覆盖;
+    此处断言子命令存在且非 stub 输出)"""
+    r = _run("evolve", "--help")
     assert r.returncode == 0
-    assert "人工确认门" in r.stdout
+    assert "--json" in r.stdout, "evolve 子命令参数可见"
+    r2 = _run()
+    assert "进化沉淀" in r2.stdout, "主 help 描述含进化沉淀(全实装)"
 
 
 def test_unknown_command_rejected():

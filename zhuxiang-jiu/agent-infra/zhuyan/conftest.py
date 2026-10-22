@@ -35,3 +35,9 @@ def _isolated_seed_reports(tmp_path, monkeypatch):
 def _isolated_analogize_reports(tmp_path, monkeypatch):
     import analogize as za
     monkeypatch.setattr(za, "REPORTS_DIR", str(tmp_path))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_evolve_drafts(tmp_path, monkeypatch):
+    import evolve as ze
+    monkeypatch.setattr(ze, "DRAFTS_DIR", str(tmp_path))

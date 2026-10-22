@@ -83,8 +83,12 @@ def _strategies(m, ap_hits, case_ref, ref_seed):
     return plan
 
 
-def analogize_unit(unit_id, ctxs=None, units=None, src_ctx=None, all_cases=None):
-    """单目标深度类比 → 方案 dict(痛点/反模式/案例/三策略/种子参照)。"""
+def analogize_unit(unit_id, ctxs=None, units=None, src_ctx=None, all_cases=None,
+                   ref_seed=None):
+    """单目标深度类比 → 方案 dict(痛点/反模式/案例/三策略/种子参照)。
+
+    ref_seed 可预计算传入(批量采集时省去逐目标全量种子核查)。
+    """
     units = units if units is not None else fingerprint.enumerate_units()
     src_ctx = src_ctx if src_ctx is not None else {}
     unit = next(u for u in units if u["unit_id"] == unit_id)
@@ -103,8 +107,9 @@ def analogize_unit(unit_id, ctxs=None, units=None, src_ctx=None, all_cases=None)
     case_ref = ({"id": results[0][0]["id"], "title": results[0][0]["title"],
                  "score": results[0][1], "hits": results[0][2]}
                 if results else None)
-    cands = seed_mod.top_candidates(units, ctxs, top_n=1)
-    ref_seed = cands[0][0]["unit"]["unit_id"] if cands else "无候选(如实)"
+    if ref_seed is None:
+        cands = seed_mod.top_candidates(units, ctxs, top_n=1)
+        ref_seed = cands[0][0]["unit"]["unit_id"] if cands else "无候选(如实)"
     return {"unit": unit, "m": m, "pains": pain_points(m), "ap_hits": ap_hits,
             "case_ref": case_ref, "ref_seed": ref_seed,
             "strategies": _strategies(m, ap_hits, case_ref, ref_seed)}

@@ -1,6 +1,6 @@
-"""竹演 zhuyan CLI（81号·进化功能 Agent · P0 T0.1 骨架）
+"""竹演 zhuyan CLI（81号·进化功能 Agent · 四子命令全部实装）
 
-四子命令（逐任务实现，当前为骨架占位）:
+四子命令（全部实装）:
   score      成熟度评分——三维加权 S_b 业务价值/S_r 运行稳健/S_e 工程复用+罚分项 → 评分报告
   matrix     痛点矩阵——价值×质量四象限(优先进化区/战略保护区/观察等待区/维持现状区)
   analogize  类比推荐——种子检索+差距分析+反模式拦截 → 进化方案三策略(只出不施)
@@ -13,10 +13,6 @@ import os
 import sys
 
 __version__ = "0.1.0"
-
-STUBS = {
-    "evolve": "P3(T3.2) 实现: 进化案例 EVO 编号五段式/六要素 schema→草稿人工确认门入 cases",
-}
 
 
 def build_parser():
@@ -62,9 +58,12 @@ def main(argv=None):
             sys.path.insert(0, pkg_parent)
         from zhuyan import analogize
         return analogize.run(args)
-    if args.command in STUBS:
-        print(f"[zhuyan {args.command}] 骨架占位——{STUBS[args.command]}")
-        return 0
+    if args.command == "evolve":
+        pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if pkg_parent not in sys.path:
+            sys.path.insert(0, pkg_parent)
+        from zhuyan import evolve
+        return evolve.run(args)
     pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if pkg_parent not in sys.path:
         sys.path.insert(0, pkg_parent)
