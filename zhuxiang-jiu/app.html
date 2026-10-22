@@ -1,4 +1,5 @@
-<!doctype html><html lang="zh-CN"><head><meta content="text/html; charset=utf-8" http-equiv="Content-Type"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover"/><meta name="theme-color" content="#355c44"/><meta name="apple-mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/><meta name="apple-mobile-web-app-title" content="竹香酒"/><meta name="apple-touch-fullscreen" content="yes"/><meta name="mobile-web-app-capable" content="yes"/><meta name="format-detection" content="telephone=no,address=no,email=no"/><meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/><title>竹香酒</title><script>// 固定 html fontSize，防止 flexible 脚本动态修改
+<!doctype html><html lang="zh-CN"><head><meta content="text/html; charset=utf-8" http-equiv="Content-Type"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover"/><meta name="theme-color" content="#355c44"/><meta name="apple-mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/><meta name="apple-mobile-web-app-title" content="竹香酒"/><meta name="apple-touch-fullscreen" content="yes"/><meta name="mobile-web-app-capable" content="yes"/><meta name="format-detection" content="telephone=no,address=no,email=no"/><meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/><title>竹香酒</title>
+    <meta name="description" content="竹香酒官方 App——翠竹酿造白酒在线商城、会员服务、订单管理与竹文化传播, 扫码下载开启竹香美酒之旅。"><script>// 固定 html fontSize，防止 flexible 脚本动态修改
       (function() {
         var html = document.documentElement;
         html.style.fontSize = '18px';
@@ -7,14 +8,166 @@
           set: function() { /* 忽略所有修改 */ }
         });
       })();
-      !function(n){function f(){var e=n.document.documentElement,r=e.getBoundingClientRect(),width=r.width,height=r.height,arr=[width,height].filter(function(value){return Boolean(value)}),w=Math.min.apply(Math,arr),x=37.5*w/375;e.style.fontSize=x>=40?"40px":x<=20?"20px":x+"px"}; n.addEventListener("resize",(function(){f()})),f()}(window);</script><script defer="defer" src="/js/taro.6f3e5fe0.js"></script><script defer="defer" src="/js/app.b984e24b.js"></script><link href="/css/app.b241c438098a04dbd156.css" rel="stylesheet"></head><body><div id="app"></div><script defer="defer" src="/js/scene-widget.js"></script><script defer="defer" src="/js/voice-wake-widget.js?v=100"></script><script defer="defer" src="/js/v72-variant.js?v=1"></script>
+      !function(n){function f(){var e=n.document.documentElement,r=e.getBoundingClientRect(),width=r.width,height=r.height,arr=[width,height].filter(function(value){return Boolean(value)}),w=Math.min.apply(Math,arr),x=37.5*w/375;e.style.fontSize=x>=40?"40px":x<=20?"20px":x+"px"}; n.addEventListener("resize",(function(){f()})),f()}(window);</script><script defer="defer" src="/js/taro.6f3e5fe0.js"></script><script defer="defer" src="/js/app.b984e24b.js?v=co20261019"></script><link href="/css/app.b241c438098a04dbd156.css" rel="stylesheet"></head><body><div id="app"></div><script defer="defer" src="/js/scene-widget.js"></script><script defer="defer" src="/js/voice-wake-widget.js?v=100"></script><script defer="defer" src="/js/v72-variant.js?v=1"></script>
 <script>
 /* 官网入口修正 v2(2026-10-19): 固定回商城首页 /index.html(功能全)。
    v1 跳根路径在 PC 上被 UA 分流到品牌官网页(内容少), 与用户预期不符 */
+/* [进化 2026-10-19] 结算流程 totalQty 未定义兜底: bundle 内阶段4直接使用
+   未声明标识符致提交支付中断(真机报 totalQty is not defined, 无成功页);
+   bundle 不可重建, 全局预置使其沿作用域链命中, 待下次重打包以源码修复为准 */
+window.totalQty = window.totalQty || 1;
 (function () {
   document.addEventListener('click', function (e) {
     var t = e.target && e.target.closest ? e.target.closest('[class*="officialEntry"]') : null;
     if (t) { e.preventDefault(); e.stopPropagation(); window.location.href = '/index.html'; }
   }, true);
+})();
+</script>
+<script>
+/* 商城热销图与详情大图修复(2026-10-19):
+   1) 热销推荐卡原本写死🍶emoji -> 注入商城 API 同源商品图(名称精确/token 匹配)
+   2) 商品详情大图 aspectFill 裁剪显示不完整 -> CSS 改 contain 完整展示 */
+(function () {
+  try {
+    var st = document.createElement('style');
+    /* Taro aspectFill = 绝对定位+原图放大+溢出裁剪(非 object-fit),
+       故先取消定位放大, 再 contain 完整绘制; 热销小图同理 contain */
+    st.textContent =
+      '[class*="heroImg"] img,[class*="hotThumb"] img[data-hotfix-img]{' +
+      'position:static!important;transform:none!important;top:auto!important;left:auto!important;' +
+      'width:100%!important;height:100%!important;min-width:0!important;min-height:0!important;' +
+      'object-fit:contain!important;display:block!important;border-radius:inherit}';
+    document.head.appendChild(st);
+  } catch (e) { /* 样式注入失败不影响页面 */ }
+
+  var IMG_BY_NAME = {};
+  var norm = function (s) { return (s || '').replace(/竹奕|竹香|·/g, '').replace(/\s+/g, ''); };
+  var inited = false;
+
+  function fixHot() {
+    var thumbs = document.querySelectorAll('[class*="hotThumb"]:not([data-hotfix])');
+    if (!thumbs.length) return;
+    Array.prototype.forEach.call(thumbs, function (thumb) {
+      var card = thumb.closest('[class*="hotCard"]') || thumb.parentElement;
+      if (!card) return;
+      var nameEl = card.querySelector('[class*="hotName"]');
+      var name = nameEl ? (nameEl.textContent || '') : '';
+      var img = IMG_BY_NAME[norm(name)];
+      if (!img) return; /* 无匹配保持原 emoji 占位 */
+      thumb.setAttribute('data-hotfix', '1');
+      var im = document.createElement('img');
+      im.src = img; im.alt = name;
+      im.setAttribute('data-hotfix-img', '1');
+      /* 完整显示(contain): 不裁剪, 留白处透出卡片渐变底 */
+      im.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;border-radius:inherit';
+      thumb.textContent = '';
+      thumb.appendChild(im);
+    });
+  }
+
+  fetch('/api/product/list?page=1&pageSize=50').then(function (r) { return r.json(); }).then(function (d) {
+    (d.products || []).forEach(function (p) {
+      if (!p.image) return;
+      IMG_BY_NAME[norm(p.name)] = p.image;
+      (p.name || '').split(/[\s°()0-9a-zA-Z×·]+/).forEach(function (t) {
+        t = t.replace(/竹奕|竹香|·/g, '');
+        if (t.length >= 2 && !IMG_BY_NAME[t]) IMG_BY_NAME[t] = p.image;
+      });
+    });
+    inited = true;
+    fixHot();
+  }).catch(function () { /* API 失败保持 emoji 兜底 */ });
+
+  var timer = null;
+  new MutationObserver(function () {
+    if (!inited) return;
+    clearTimeout(timer);
+    timer = setTimeout(fixHot, 250);
+  }).observe(document.body, { childList: true, subtree: true });
+})();
+</script>
+<script>
+/* 商品详情图集(2026-10-19): hero 下注入缩略图条, 点击切换大图;
+   单图商品不渲染条; 图源 /api/product/<pid> 的 images.main+gallery */
+(function () {
+  var GAL = {};
+  function pidFromHash() {
+    var m = location.hash.match(/#\/pages\/product-detail\/index\?id=([^&]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+  function loadGal(pid) {
+    if (GAL[pid]) return Promise.resolve(GAL[pid]);
+    return fetch('/api/product/' + encodeURIComponent(pid)).then(function (r) { return r.json(); }).then(function (d) {
+      var p = d.product || d;
+      var im = p.images || {};
+      var imgs = [];
+      if (im.main) imgs.push(im.main);
+      (im.gallery || []).forEach(function (g) { if (imgs.indexOf(g) < 0) imgs.push(g); });
+      if (p.image && imgs.indexOf(p.image) < 0) imgs.unshift(p.image);
+      GAL[pid] = imgs;
+      return imgs;
+    }).catch(function () { return []; });
+  }
+  function renderStrip() {
+    var pid = pidFromHash();
+    if (!pid) return;
+    var box = document.querySelector('[class*="heroBox"]');
+    if (!box || box.dataset.galPid === pid) return;
+    var old = document.getElementById('__galStrip');
+    if (old) old.remove();
+    loadGal(pid).then(function (imgs) {
+      if (imgs.length <= 1) { box.dataset.galPid = pid; return; }
+      var strip = document.createElement('div');
+      strip.id = '__galStrip';
+      strip.style.cssText = 'display:flex;gap:8px;padding:8px 16px;overflow-x:auto;background:#fff';
+      imgs.forEach(function (g, i) {
+        var t = document.createElement('img');
+        t.src = g; t.alt = '图' + (i + 1);
+        t.style.cssText = 'width:56px;height:56px;object-fit:cover;border-radius:8px;flex:0 0 auto;' +
+          'border:2px solid ' + (i === 0 ? '#355c44' : 'transparent') + ';background:#f7f3ec;cursor:pointer';
+        t.onclick = function (ev) {
+          ev.stopPropagation();
+          var hero = box.querySelector('img');
+          if (hero) hero.src = g;
+          var all = strip.querySelectorAll('img');
+          for (var k = 0; k < all.length; k++) all[k].style.borderColor = 'transparent';
+          t.style.borderColor = '#355c44';
+        };
+        strip.appendChild(t);
+      });
+      box.parentElement.insertBefore(strip, box.nextSibling);
+      box.dataset.galPid = pid;
+    });
+  }
+  var gt = null;
+  new MutationObserver(function () {
+    clearTimeout(gt);
+    gt = setTimeout(renderStrip, 300);
+  }).observe(document.body, { childList: true, subtree: true });
+  window.addEventListener('hashchange', renderStrip);
+})();
+</script>
+<script>
+/* 结算页收款主体展示(2026-10-19): 订单结算页注入"收款方+证照"信息,
+   使网址付款页截图同框包含 商品/金额/商户主体(对应驳回点"商品信息与实际经营一致") */
+(function () {
+  function injectMerchant() {
+    if (location.hash.indexOf('checkout') < 0) return;
+    var btn = document.querySelector('[class*="submitButton"]');
+    if (!btn || document.getElementById('__merchantLine')) return;
+    var box = document.createElement('div');
+    box.id = '__merchantLine';
+    box.style.cssText = 'margin:0 16px 10px;padding:10px 14px;background:#f5f8f4;' +
+      'border-radius:8px;font-size:12px;color:#4a6b56;line-height:1.8';
+    box.innerHTML = '收款方：<b>泰安市元禾生物科技有限公司</b><br>' +
+      '食品经营许可证：SC11537090100608 · 鲁ICP备2026059492号-1 · 客服 4009025669';
+    btn.parentElement.insertBefore(box, btn);
+  }
+  var mt = null;
+  new MutationObserver(function () {
+    clearTimeout(mt);
+    mt = setTimeout(injectMerchant, 300);
+  }).observe(document.body, { childList: true, subtree: true });
+  window.addEventListener('hashchange', injectMerchant);
 })();
 </script></body></html>

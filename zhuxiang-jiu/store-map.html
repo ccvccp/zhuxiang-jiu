@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>门店导航 · 竹香酒</title>
+    <meta name="description" content="竹香酒门店地图——全国线下门店与品鉴点分布查询, 就近体验翠竹酿造系列白酒与竹文化空间。">
+<style>
+  :root { --green:#1f5c3d; --gold:#b8860b; --bg:#f6f4ef; --ink:#26332c; --muted:#7d8a82; }
+  * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--ink); min-height:100vh; }
+  .wrap { max-width:640px; margin:0 auto; padding:18px 16px 40px; }
+  header { text-align:center; padding:10px 0 4px; }
+  header h1 { font-size:20px; color:var(--green); letter-spacing:2px; }
+  header p { font-size:12.5px; color:var(--muted); margin-top:4px; }
+
+  .card { background:#fff; border-radius:14px; margin-top:14px; padding:18px;
+          box-shadow:0 2px 10px rgba(0,0,0,.05); }
+  .store-name { font-size:18px; font-weight:700; color:var(--green); }
+  .row { display:flex; align-items:flex-start; gap:8px; margin-top:12px; font-size:14px; line-height:1.6; }
+  .row .ic { flex:none; width:18px; text-align:center; }
+  .row a { color:var(--gold); text-decoration:none; font-weight:600; }
+
+  #map { width:100%; height:52vh; min-height:280px; border-radius:12px; margin-top:14px;
+         background:#e8e4da; position:relative; overflow:hidden; }
+  #map .placeholder { position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; padding:26px;
+    color:var(--muted); font-size:13.5px; line-height:1.9; }
+  #map .placeholder b { color:var(--ink); font-size:15px; }
+
+  .btns { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
+  .btns a { flex:1 1 140px; text-align:center; border-radius:10px; padding:13px 8px;
+            font-size:15px; font-weight:600; text-decoration:none; min-width:140px; }
+  .b-amap { background:var(--green); color:#fff; }
+  .b-bmap { background:#3385ff; color:#fff; }
+  .b-tel  { background:var(--gold); color:#fff; }
+  .b-copy { background:#eee; color:#555; }
+  .btns a:active { opacity:.85; }
+
+  footer { text-align:center; font-size:11px; color:#bbb; margin-top:22px; line-height:1.8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>门店导航</h1>
+    <p>到店选购 · 品鉴 · 批发零售</p>
+  </header>
+
+  <div class="card">
+    <div class="store-name" id="storeName">竹香酒 · 元禾门店</div>
+    <div class="row"><span class="ic">📍</span><span id="storeAddr">山东省泰安市（地址完善中，可先电话确认）</span></div>
+    <div class="row"><span class="ic">🕒</span><span id="storeHours">09:00 - 18:00</span></div>
+    <div class="row"><span class="ic">📞</span><a href="tel:4009025669">400-9025-669</a></div>
+
+    <div id="map">
+      <div class="placeholder" id="ph">
+        <b>地图加载中…</b>
+        <span>如长时间未显示，可使用下方按钮<br>直接唤起高德/百度地图导航</span>
+      </div>
+    </div>
+
+    <div class="btns">
+      <a class="b-amap" id="navAmap" href="#" rel="noopener">高德地图导航</a>
+      <a class="b-bmap" id="navBmap" href="#" rel="noopener">百度地图导航</a>
+      <a class="b-tel" href="tel:4009025669">电话咨询</a>
+      <a class="b-copy" id="btnCopy" href="javascript:void(0)">复制地址</a>
+    </div>
+  </div>
+
+  <footer>竹香酒 · 竹奕酒 官方运营<br>识别结果与导航信息仅供参考，以门店实际为准</footer>
+</div>
+
+<script>
+/* ====== 配置区(2026-10-20): 申请高德 key 后填入即可启用交互地图 ======
+ * 1) lbs.amap.com 注册 -> 创建应用(Web端(JS API)) -> 获得 KEY 与安全密钥
+ * 2) 填入下方两个常量; 留空则页面自动降级为"地址卡+一键导航"(完全可用)
+ * 3) 坐标为泰安市区占位, 提供实际门店地址后替换 LNG/LAT 与地址文本
+ */
+var AMAP_KEY = "";          // 高德 JS API Key(可留空)
+var AMAP_SEC = "";          // 高德 JS API 安全密钥(与 key 配套)
+var STORE = {
+  name: "竹香酒 · 元禾门店",
+  addr: "山东省泰安市（地址完善中，可先电话确认）",
+  hours: "09:00 - 18:00",
+  lng: 117.0892,            // 占位: 泰安市区; 待实际坐标替换
+  lat: 36.2000             // 占位: 泰安市区; 待实际坐标替换
+};
+</script>
+<script>
+(function () {
+  if (typeof STORE.lat !== "number" || isNaN(STORE.lat)) { STORE.lat = 36.2000; }
+  STORE.addr = STORE.addr || "山东省泰安市";
+
+  var pos = STORE.lng + "," + STORE.lat;
+  document.getElementById("storeName").textContent = STORE.name;
+  document.getElementById("storeAddr").textContent = STORE.addr;
+  document.getElementById("storeHours").textContent = STORE.hours || "09:00 - 18:00";
+
+  /* 一键导航: 高德/百度 URI API 官方免 key, 手机唤起对应 App */
+  document.getElementById("navAmap").href =
+    "https://uri.amap.com/marker?position=" + pos + "&name=" +
+    encodeURIComponent(STORE.name) + "&src=zhuxiang&callnative=1";
+  document.getElementById("navBmap").href =
+    "https://api.map.baidu.com/marker?location=" + STORE.lat + "," + STORE.lng +
+    "&title=" + encodeURIComponent(STORE.name) +
+    "&content=" + encodeURIComponent(STORE.addr) + "&output=html&src=zhuxiang";
+
+  document.getElementById("btnCopy").onclick = function () {
+    var txt = STORE.name + " " + STORE.addr;
+    if (navigator.clipboard) { navigator.clipboard.writeText(txt); }
+    else { var ta = document.createElement("textarea"); ta.value = txt;
+      document.body.appendChild(ta); ta.select(); document.execCommand("copy");
+      document.body.removeChild(ta); }
+    this.textContent = "已复制"; var s = this;
+    setTimeout(function () { s.textContent = "复制地址"; }, 1600);
+  };
+
+  /* 交互地图: 配置了 key 才加载 JS API; 未配置保持降级占位 */
+  if (!AMAP_KEY) {
+    document.getElementById("ph").innerHTML =
+      "<b>交互地图未启用</b><span>申请高德 Key 后即可展示可拖动地图<br>当前可直接使用下方一键导航</span>";
+    return;
+  }
+  window._AMapSecurityConfig = { securityJsCode: AMAP_SEC };
+  var s = document.createElement("script");
+  s.src = "https://webapi.amap.com/maps?v=2.0&key=" + encodeURIComponent(AMAP_KEY);
+  s.onload = function () {
+    var map = new AMap.Map("map", {
+      zoom: 15, center: [STORE.lng, STORE.lat],
+      viewMode: "2D", mapStyle: "amap://normal"
+    });
+    var mk = new AMap.Marker({ position: [STORE.lng, STORE.lat], title: STORE.name });
+    map.add(mk);
+    var iw = new AMap.InfoWindow({
+      content: "<div style='padding:2px 4px'><b>" + STORE.name +
+               "</b><br/>" + STORE.addr + "</div>", offset: new AMap.Pixel(0, -32)
+    });
+    iw.open(map, [STORE.lng, STORE.lat]);
+    map.addControl(new AMap.ToolBar({ position: "RB" }));
+  };
+  s.onerror = function () {
+    document.getElementById("ph").innerHTML =
+      "<b>地图加载失败</b><span>请使用下方一键导航</span>";
+  };
+  document.head.appendChild(s);
+})();
+</script>
+</body>
+</html>
