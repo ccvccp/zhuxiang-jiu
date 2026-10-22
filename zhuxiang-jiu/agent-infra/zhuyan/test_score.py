@@ -150,3 +150,77 @@ def test_t12_sr_fault_kinds_normalization():
         n = len(ev["fault_features"])
         fault_v = 0.0 if n == 0 else (0.5 if n == 1 else 1.0)
         assert abs(fault_v - expect) < 0.01, f"特征 {ev['fault_features']} 档位"
+
+
+# ---------- T1.3 S_e 工程复用 ----------
+
+def _fake_se_ctx(src=None, test_asserts=None):
+    return {"src": src or {}, "test_asserts": test_asserts or {}}
+
+
+def _ep_unit(tests=None, **kw):
+    u = {"unit_id": "POST /api/x", "unit_type": "endpoint",
+         "file": "backend/routes/x.py", "docstring_rate": 0.5,
+         "imports": 3, "tests": tests or []}
+    u.update(kw)
+    return u
+
+
+def test_t13_test_baseline_boost():
+    """验收核心: qr/b1-b3 基线测试命中加权 1.5 封顶 1.0"""
+    base = "backend/test_qr_public_baseline.py"
+    # 基线+断言 10 → 0.7×1.5=1.05 封顶 1.0
+    ctx = _fake_se_ctx(test_asserts={base: 10})
+    _s, ev = zs.se_unit(_ep_unit(tests=[base]), ctx)
+    assert ev["test_value"] == 1.0 and ev["baseline_boost"] is True
+    # 非基线+断言 10 → 0.7 无加权
+    other = "backend/test_x.py"
+    ctx = _fake_se_ctx(test_asserts={other: 10})
+    _s, ev = zs.se_unit(_ep_unit(tests=[other]), ctx)
+    assert ev["test_value"] == 0.7 and ev["baseline_boost"] is False
+    # 基线+低断言 2 → 0.5×1.5=0.75
+    ctx = _fake_se_ctx(test_asserts={base: 2})
+    _s, ev = zs.se_unit(_ep_unit(tests=[base]), ctx)
+    assert ev["test_value"] == 0.75
+    # 无测试 → 0
+    _s, ev = zs.se_unit(_ep_unit(), _fake_se_ctx())
+    assert ev["test_value"] == 0.0
+
+
+def test_t13_coup_and_syntax_norm():
+    """低耦合四档+规范性 compile 代理(坏语法=0)"""
+    for imports, expect in ((0, 1.0), (2, 0.7), (5, 0.4), (9, 0.1)):
+        assert zs._coup_norm(imports) == expect
+    good = _fake_se_ctx(src={"backend/routes/x.py": "def a():\n    return 1\n"})
+    _s, ev = zs.se_unit(_ep_unit(), good)
+    assert ev["syntax_ok"] is True
+    bad = _fake_se_ctx(src={"backend/routes/x.py": "def a(:\n"})
+    _s, ev = zs.se_unit(_ep_unit(), bad)
+    assert ev["syntax_ok"] is False, "语法坏→规范性 0"
+
+
+def test_t13_page_se():
+    """页面 S_e: SEO 契约近似(双 True=1.0/单 True=0.5)+测试规范性如实 0"""
+    page = {"unit_id": "index.html", "unit_type": "page", "imports": 0,
+            "contract": {"has_title": True, "has_description": True}}
+    s, ev = zs.se_unit(page, _fake_se_ctx())
+    assert ev["contract"] == 1.0
+    expect = round(0.30 * 0 + 0.30 * 1.0 + 0.25 * 1.0 + 0.15 * 0, 2)
+    assert s == expect, "页面=契约 0.3+低耦合 0.25"
+    half = {"unit_id": "a.html", "unit_type": "page", "imports": 0,
+            "contract": {"has_title": True, "has_description": False}}
+    _s, ev = zs.se_unit(half, _fake_se_ctx())
+    assert ev["contract"] == 0.5
+
+
+def test_t13_real_qr_baseline():
+    """真实回放: qr 扫描链端点关联基线测试(竹医 qr 基线加权生效)"""
+    import fingerprint as zf
+    units = zf.enumerate_units()
+    ctx = zs.build_se_context(units)
+    qr = next(u for u in units
+              if u["unit_id"] == "POST /api/entry/qr/{qr_id}/scan")
+    s, ev = zs.se_unit(qr, ctx)
+    assert ev["baseline_boost"] is True, "qr 端点应关联 qr 公开基线测试"
+    assert ev["test_value"] == 1.0, "基线断言量×1.5 封顶"
+    assert s > 0.5, "qr 端点 S_e 高分(B3 高分样本)"

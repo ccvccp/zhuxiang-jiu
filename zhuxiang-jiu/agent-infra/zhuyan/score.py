@@ -42,6 +42,10 @@ _SR_VALID = ("required", "validate", "isinstance", "必填", "校验", "assert "
 _SR_CONC = ("Lock", "锁", "atomic", "threading", "setnx")
 _DEF_LINE_RE = re.compile(r"^\s*def\s+\w+")
 
+# S_e 基线测试集(竹医 qr/b1-b3 回归基线, 命中加权 ×1.5 封顶 1.0)
+_SE_BASELINE_TESTS = ("backend/test_qr_public_baseline.py",
+                      "backend/test_feature_baseline.py")
+
 
 def build_sb_context(chains=None, calls=None):
     """S_b 数据源一次性构建: 链端点倒排 + 前端调用面。
@@ -167,35 +171,126 @@ def sr_unit(unit, ctx=None):
     return s, ev
 
 
+def build_se_context(units=None, repo_root=None):
+    """S_e 数据缓存: 源文件文本(复用 S_r 缓存构建)+测试文件断言计数。
+
+    返回 {"src": {rel: text}, "test_asserts": {rel: n}}。
+    """
+    units = units if units is not None else fingerprint.enumerate_units()
+    repo_root = repo_root or fingerprint.REPO_ROOT
+    src = build_sr_context(units, repo_root)
+    test_asserts = {}
+    bdir = os.path.join(repo_root, "backend")
+    if os.path.isdir(bdir):
+        for name in sorted(os.listdir(bdir)):
+            if not (name.startswith("test") and name.endswith(".py")):
+                continue
+            rel = f"backend/{name}"
+            try:
+                with open(os.path.join(bdir, name), encoding="utf-8",
+                          errors="replace") as fh:
+                    text = fh.read()
+                test_asserts[rel] = text.count("assert ") + text.count("assert(")
+            except OSError:
+                continue
+    return {"src": src, "test_asserts": test_asserts}
+
+
+def _coup_norm(imports):
+    """低耦合归一(评分标准): 0 依赖=1.0 / 1-3=0.7 / 4-6=0.4 / ≥7=0.1。"""
+    if imports == 0:
+        return 1.0
+    if imports <= 3:
+        return 0.7
+    if imports <= 6:
+        return 0.4
+    return 0.1
+
+
+def se_unit(unit, ctx=None):
+    """工程复用 S_e → (0-1 分, 证据 dict)。
+
+    口径(评分标准): 测试保障 30%(关联测试断言密度阈值映射, qr/b1-b3 基线
+    命中加权 ×1.5 封顶)+契约清晰 30%(docstring 覆盖率, 页面用 SEO 契约近似)
+    +低耦合 25%(import 计数倒数)+规范性 15%(compile 语法健全性代理——
+    ruff 风格级全仓口径在报告级呈现, 单元级以语法健全近似, 如实标注)。
+    页面无 Python 代码面: 测试保障/规范性如实 0。
+    """
+    ctx = ctx or build_se_context()
+    if unit["unit_type"] == "page":
+        c = unit.get("contract") or {}
+        contract = (1.0 if c.get("has_title") and c.get("has_description")
+                   else (0.5 if c.get("has_title") else 0.0))
+        test_v, norm = 0.0, 0.0
+        ev = {"tests": [], "asserts": 0, "baseline_boost": False,
+              "contract": contract, "imports": unit.get("imports", 0),
+              "syntax_ok": None, "norm_proxy": "页面无 Python 代码面, 规范性如实 0"}
+    else:
+        tests = unit.get("tests") or []
+        asserts = sum(ctx["test_asserts"].get(t, 0) for t in tests)
+        boost = any(t in _SE_BASELINE_TESTS for t in tests)
+        if not tests:
+            test_v = 0.0
+        else:
+            base = (0.3 if asserts == 0 else
+                    0.5 if asserts <= 4 else
+                    0.7 if asserts <= 14 else 1.0)
+            test_v = min(base * 1.5, 1.0) if boost else base
+        contract = unit.get("docstring_rate", 0.0)
+        text = ctx["src"].get(unit.get("file"))
+        syntax_ok = None
+        norm = 0.0
+        if text:
+            try:
+                compile(text, unit.get("file") or "<unit>", "exec")
+                syntax_ok, norm = True, 1.0
+            except SyntaxError:
+                syntax_ok, norm = False, 0.0
+        ev = {"tests": tests, "asserts": asserts, "baseline_boost": boost,
+              "contract": contract, "imports": unit.get("imports", 0),
+              "syntax_ok": syntax_ok,
+              "norm_proxy": "compile 语法健全性代理(ruff 全仓口径在报告级)"}
+    coup = _coup_norm(unit.get("imports", 0))
+    s = round(0.30 * test_v + 0.30 * contract + 0.25 * coup + 0.15 * norm, 2)
+    ev["test_value"] = test_v
+    return s, ev
+
+
 def run(args=None):
-    """zhuyan score CLI: S_b+S_r 双维度评分视图(S_e/罚分 T1.3-T1.4 实装)。"""
+    """zhuyan score CLI: S_b+S_r+S_e 三维度评分视图(罚分总分 T1.4 实装)。"""
     units = fingerprint.enumerate_units()
     sb_ctx = build_sb_context()
     sr_ctx = build_sr_context(units)
+    se_ctx = build_se_context(units)
     scored = []
     for u in units:
         sb, sb_ev = sb_unit(u, sb_ctx)
         sr, sr_ev = sr_unit(u, sr_ctx)
-        scored.append((u, sb, sb_ev, sr, sr_ev))
+        se, se_ev = se_unit(u, se_ctx)
+        scored.append((u, sb, sb_ev, sr, sr_ev, se, se_ev))
     chain_hits = Counter()
-    for _u, _sb, ev, _sr, _sr_ev in scored:
-        for name in ev["hit_chains"]:
+    for row in scored:
+        for name in row[2]["hit_chains"]:
             chain_hits[name] += 1
     print(f"[zhuyan score] S_b 业务价值: {len(scored)} 单元已评分(权重 0.40)")
     print("  端点链命中分布: " + (
         ", ".join(f"{k}={v}" for k, v in chain_hits.most_common()) or "无命中"))
     top = sorted(scored, key=lambda x: -x[1])[:5]
-    for u, s, ev, _sr, _sr_ev in top:
+    for u, s, ev, *_r in top:
         print(f"  [S_b={s:.2f}] {u['unit_id']} —— 链{ev['hit_chains'] or '—'}"
               f" 调用{ev['call_count']}处 转化{ev['conversion']}")
     print("[zhuyan score] S_r 运行稳健(权重 0.35, 静态代理=APM 缺位代码特征近似):")
-    top_sr = sorted(scored, key=lambda x: -x[3])[:5]
-    for u, _sb, _sb_ev, sr, ev in top_sr:
+    for u, _sb, _sb_ev, sr, ev, *_e in sorted(scored, key=lambda x: -x[3])[:5]:
         print(f"  [S_r={sr:.2f}] {u['unit_id']} —— 异常{ev['exception_rate']}"
               f" 容错{ev['fault_features'] or '—'}"
               f" 校验{ev['validation_rate']} 并发{ev['concurrency']}")
-    print("[zhuyan score] S_e(T1.3)/罚分总分(T1.4)逐任务实装——"
-          "当前 S_b+S_r 双维度")
+    print("[zhuyan score] S_e 工程复用(权重 0.25, 基线测试命中加权 1.5 封顶):")
+    for u, *_b, se, ev in sorted(scored, key=lambda x: -x[5])[:5]:
+        boost = "✓基线" if ev["baseline_boost"] else "—"
+        print(f"  [S_e={se:.2f}] {u['unit_id']} —— 测试{ev['test_value']}"
+              f"(断言{ev['asserts']} {boost}) 契约{ev['contract']}"
+              f" 耦合{ev['imports']} 语法{ev['syntax_ok']}")
+    print("[zhuyan score] 罚分项+总分分档(T1.4)下一任务实装——当前三维齐备")
     return 0
 
 
