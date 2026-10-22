@@ -11,7 +11,7 @@ import cases as cs
 
 def test_load_six_cases_full_meta():
     cases = cs.load_cases()
-    assert len(cases) == 10  # 首批 6(竹医 T0.3)+二批 4(竹园 80号 T3.5 首批资产案例)
+    assert len(cases) == 12  # 首批6(竹医)+二批4(竹园80号)+三批2(竹演81号 T3.4 EVO)
     assert all(c["sections"] == 5 for c in cases)
     qr = next(c for c in cases if "qr" in c["file"])
     assert qr["id"] == "C-20261021-01"
