@@ -1,8 +1,9 @@
-﻿﻿﻿# 73号(sv) 黄金时段发布队列自动转态——每日 18:01(北京时间)
+﻿﻿# 73号(sv) 黄金时段发布队列自动转态——每日 18:01(北京时间)
 # queued(scheduledAt<=now) → rpa_pending; 输出留档 publish_process.log
-# RPA 发布段不在本任务内(bot 半值守——到点由 agent/人工触发)
+# RPA 发布段不在本任务内(由 sv73_autopublish.ps1 自动消费, 2026-10-23 起服务器无人值守)
 # 2026-10-11 迁国内: SSH 海外 docker 链已替换为国内生产 API(https://zyjiu.com)
-$log = 'd:\网站架构设计\channels-bot\publish_process.log'
+# 2026-10-23 可移植化: 日志路径改脚本目录相对(迁新机 C:\channels-bot 零改动)
+$log = Join-Path $PSScriptRoot 'publish_process.log'
 $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 try {
     $BASE = 'https://zyjiu.com'

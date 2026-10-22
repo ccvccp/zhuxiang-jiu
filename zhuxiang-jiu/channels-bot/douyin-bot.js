@@ -6,8 +6,9 @@
 // config: { action: "probe"|"publish", mp4, desc, waitLoginMinutes }
 const puppeteer = require('puppeteer-core');
 const fs = require('fs');
+const path = require('path');
 
-const CFG = JSON.parse(fs.readFileSync(process.argv[2], 'utf-8'));
+const CFG = JSON.parse(fs.readFileSync(process.argv[2], 'utf-8').replace(/^\uFEFF/, ''));
 const LOG = (m) => {
   const line = `[${new Date().toISOString().slice(11, 19)}] ${m}`;
   console.log(line);
@@ -20,9 +21,12 @@ const DOUYIN_HOME = 'https://creator.douyin.com/';
 const DOUYIN_UPLOAD = 'https://creator.douyin.com/creator-micro/content/upload/video';
 
 (async () => {
+  // Chrome 落位回退链: 新机数据盘 D:\Chrome 优先, PC 标准 C: 路径兜底(双端同码)
+  const chromeExe = ['D:\\Chrome\\Application\\chrome.exe', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe']
+    .find(p => fs.existsSync(p)) || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
   const browser = await puppeteer.launch({
-    executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    userDataDir: 'd:\\网站架构设计\\channels-bot\\douyin-profile',
+    executablePath: chromeExe,
+    userDataDir: path.join(__dirname, 'douyin-profile'),
     headless: false,
     pipe: true,
     ignoreDefaultArgs: ['--enable-automation'],
