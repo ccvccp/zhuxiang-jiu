@@ -25,14 +25,23 @@ def test_no_args_prints_help():
     assert "zhuyan" in r.stdout
 
 
-def test_score_t13_real():
-    """T1.3 实装: score 分发 S_b+S_r+S_e 三维度视图(基线加权标注)"""
-    r = _run("score")
-    assert r.returncode == 0
-    for dim in ("S_b 业务价值", "S_r 运行稳健", "S_e 工程复用"):
-        assert dim in r.stdout
-    assert "[S_e=" in r.stdout and "基线" in r.stdout, "S_e Top 样例+加权标注"
-    assert "T1.4" in r.stdout, "罚分总分待实装指引"
+def test_score_t14_real():
+    """T1.4 实装: score 完整评分+报告归档(子进程落盘真 reports, 差集自清理)"""
+    import os
+
+    rep_dir = os.path.join(os.path.dirname(HERE), "..", "docs", "registry",
+                           "reports")
+    rep_dir = os.path.abspath(rep_dir)
+    before = set(os.listdir(rep_dir)) if os.path.isdir(rep_dir) else set()
+    try:
+        r = _run("score")
+        assert r.returncode == 0
+        assert "成熟度评分完成" in r.stdout and "分档分布" in r.stdout
+        assert "B3 分档回放" in r.stdout and "评分报告已归档" in r.stdout
+        assert "度量上报" in r.stdout
+    finally:
+        for n in set(os.listdir(rep_dir)) - before:
+            os.remove(os.path.join(rep_dir, n))
 
 
 def test_matrix_stub():

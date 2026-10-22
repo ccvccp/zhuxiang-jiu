@@ -11,3 +11,9 @@ import pytest
 def _isolated_fingerprints(tmp_path, monkeypatch):
     import fingerprint as zf
     monkeypatch.setattr(zf, "FINGERPRINTS_PATH", str(tmp_path / "fp.json"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_score_reports(tmp_path, monkeypatch):
+    import score as zsc
+    monkeypatch.setattr(zsc, "REPORTS_DIR", str(tmp_path))

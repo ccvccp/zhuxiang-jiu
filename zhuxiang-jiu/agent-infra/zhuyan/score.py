@@ -46,6 +46,18 @@ _DEF_LINE_RE = re.compile(r"^\s*def\s+\w+")
 _SE_BASELINE_TESTS = ("backend/test_qr_public_baseline.py",
                       "backend/test_feature_baseline.py")
 
+# 罚分特征(静态取证; 生产文件不含测试文件, 天然满足"排除测试"口径)
+_SECRET_RE = re.compile(
+    r"(api_key|apikey|secret|password)\s*=\s*[\"'][^\"']+[\"']", re.IGNORECASE)
+_SQL_LINE_RE = re.compile(
+    r"(f[\"'][^\n]*\b(select|insert|update|delete)\b"
+    r"|\b(select|insert|update|delete)\b[^\n]*?(\.format\(|\+\s*[\"']))",
+    re.IGNORECASE)  # f-string(前置形态)/format/字符串+ 为拼接; %s 参数化安全不命中
+_DANGER_TOKENS = ("eval(", "exec(", "shell=True")
+
+# 归档目录注入点(测试隔离; None=默认 REPO_ROOT/docs/registry/reports)
+REPORTS_DIR = None
+
 
 def build_sb_context(chains=None, calls=None):
     """S_b 数据源一次性构建: 链端点倒排 + 前端调用面。
@@ -256,41 +268,184 @@ def se_unit(unit, ctx=None):
     return s, ev
 
 
+def penalty_unit(unit, src_ctx=None):
+    """P_penalty 取证 → (罚分值, 证据 dict)。
+
+    口径(评分标准): 硬否决=硬编码密钥字面量(总分直判 0 档);
+    重扣=无关联测试 −0.20 / SQL 字符串拼接 −0.20(f-string/format/字符串+;
+    %s 参数化安全不命中)/危险模式 −0.15 每处封顶 −0.30。叠加下限 0。
+    页面单元无 Python 代码面 → 罚分 0 如实。
+    """
+    if unit["unit_type"] == "page":
+        return 0.0, {"vetoed": False, "items": [], "lines": []}
+    text = (src_ctx or {}).get(unit.get("file")) or ""
+    items, lines = [], []
+    if _SECRET_RE.search(text):
+        for m in _SECRET_RE.finditer(text):
+            ln = text.count("\n", 0, m.start()) + 1
+            lines.append(f"{unit['file']}:{ln} {m.group(0)[:50]}")
+        return 0.0, {"vetoed": True, "items": ["硬否决: 硬编码密钥字面量"],
+                     "lines": lines[:5]}
+    penalty = 0.0
+    if not (unit.get("tests") or []):
+        penalty += 0.20
+        items.append("无关联测试 −0.20")
+    sql_hits = []
+    for m in _SQL_LINE_RE.finditer(text):
+        sql_hits.append(text.count("\n", 0, m.start()) + 1)
+    if sql_hits:
+        penalty += 0.20
+        items.append(f"SQL 字符串拼接 −0.20(行 {sql_hits[:3]})")
+        lines.extend(f"{unit['file']}:{ln} SQL 拼接" for ln in sql_hits[:3])
+    danger = sum(text.count(t) for t in _DANGER_TOKENS)
+    if danger:
+        penalty += min(0.15 * danger, 0.30)
+        items.append(f"危险模式 −{min(0.15 * danger, 0.30):.2f}({danger} 处)")
+    return round(penalty, 2), {"vetoed": False, "items": items, "lines": lines[:5]}
+
+
+def maturity_unit(unit, sb_ctx=None, sr_ctx=None, se_ctx=None):
+    """完整成熟度评分: 三维+罚分+总分+分档 → dict(S_b/S_r/S_e/penalty/total/grade)。
+
+    总分 = 0.40·S_b + 0.35·S_r + 0.25·S_e − P_penalty(下限 0);
+    分档: ≥0.70 高分(种子候选) / 0.40-0.70 中分(观察) / <0.40 或硬否决 低分(痛点)。
+    """
+    sb, sb_ev = sb_unit(unit, sb_ctx)
+    sr, sr_ev = sr_unit(unit, sr_ctx)
+    se, se_ev = se_unit(unit, se_ctx)
+    pen, pen_ev = penalty_unit(unit, sr_ctx)
+    if pen_ev["vetoed"]:
+        total, grade = 0.0, "low"
+    else:
+        total = max(round(0.40 * sb + 0.35 * sr + 0.25 * se - pen, 2), 0.0)
+        grade = "high" if total >= 0.70 else ("mid" if total >= 0.40 else "low")
+    return {"unit": unit, "s_b": sb, "s_r": sr, "s_e": se,
+            "penalty": pen, "total": total, "grade": grade,
+            "sb_ev": sb_ev, "sr_ev": sr_ev, "se_ev": se_ev,
+            "pen_ev": pen_ev}
+
+
+def b3_replay(units=None, ctxs=None):
+    """B3 基准: 已知答案分档回放 → (hits, misses)。
+
+    口径: 成熟端点样本(扫码登录链 qr scan)不得落入低分=检不出高分;
+    竹园已证缺口页(activity-detail.html)必须低分=检得出痛点。
+    misses 非空即 B3 FAIL(检不出即不合格)。
+    """
+    units = units if units is not None else fingerprint.enumerate_units()
+    if ctxs is None:
+        ctxs = (build_sb_context(), build_sr_context(units),
+                build_se_context(units))
+    hits, misses = [], []
+    qr = maturity_unit(
+        next(u for u in units
+             if u["unit_id"] == "POST /api/entry/qr/{qr_id}/scan"), *ctxs)
+    if qr["grade"] != "low":
+        hits.append(f"qr scan 端点分档 {qr['grade']}(总分 {qr['total']})——成熟端点未误判痛点")
+    else:
+        misses.append(f"qr scan 端点落入 low(总分 {qr['total']})——成熟端点被误判")
+    act = maturity_unit(
+        next(u for u in units if u["unit_id"] == "activity-detail.html"),
+        *ctxs)
+    if act["grade"] == "low":
+        hits.append(f"activity-detail 分档 low(总分 {act['total']})——竹园缺口检得出")
+    else:
+        misses.append(f"activity-detail 落入 {act['grade']}(总分 {act['total']})——缺口页未检出")
+    return hits, misses
+
+
+def generate_report(scored, out_dir=None):
+    """T1.4 评分报告(四节) → 归档路径。每分证据链可追溯。"""
+    import datetime
+    out_dir = out_dir or REPORTS_DIR or os.path.join(
+        fingerprint.REPO_ROOT, "docs", "registry", "reports")
+    os.makedirs(out_dir, exist_ok=True)
+    now = datetime.datetime.now(tz=datetime.timezone.utc).astimezone()
+    path = os.path.join(out_dir, now.strftime("评分报告-%Y%m%d-%H%M%S.md"))
+    grades = Counter(m["grade"] for m in scored)
+    n = len(scored)
+    avg = {k: round(sum(m[k] for m in scored) / n, 2) if n else 0
+           for k in ("s_b", "s_r", "s_e", "total")}
+    lines = ["# 评分报告 · 竹演 zhuyan score（81号·成熟度评分）", ""]
+    lines.append(f"> 生成: {now.strftime('%Y-%m-%d %H:%M:%S')} · 单元 {n} 个 · "
+                 f"口径: 《成熟度评分标准》(S=0.40S_b+0.35S_r+0.25S_e−P)")
+    lines += ["", "## 一、评分总览", ""]
+    lines.append(f"- 三维均分: S_b={avg['s_b']} / S_r={avg['s_r']} / "
+                 f"S_e={avg['s_e']}; 总分均分 {avg['total']}")
+    lines.append(f"- 分档分布: high(种子候选)={grades['high']} / "
+                 f"mid(观察)={grades['mid']} / low(痛点)={grades['low']}")
+    lines += ["", "## 二、分档清单(样例)", ""]
+    for grade, key in (("high", "种子候选"), ("mid", "观察"), ("low", "痛点")):
+        grp = sorted((m for m in scored if m["grade"] == grade),
+                     key=lambda m: -m["total"])[:5]
+        lines.append(f"- {grade}({key}) 前 5:")
+        if grp:
+            for m in grp:
+                lines.append(f"  - {m['unit']['unit_id']} 总分 {m['total']}"
+                             f"(S_b {m['s_b']}/S_r {m['s_r']}/S_e {m['s_e']}"
+                             f"/罚 {m['penalty']})")
+        else:
+            lines.append("  - 无")
+    lines += ["", "## 三、罚分明细(静态取证)", ""]
+    vetoed = [m for m in scored if m["pen_ev"]["vetoed"]]
+    penalized = [m for m in scored if m["penalty"] > 0]
+    lines.append(f"- 硬否决 {len(vetoed)} / 重扣 {len(penalized)}")
+    for m in (vetoed + penalized)[:10]:
+        for ln in m["pen_ev"]["lines"][:2] or [m["unit"]["unit_id"]]:
+            lines.append(f"- {ln} —— {', '.join(m['pen_ev']['items'])}")
+    lines += ["", "## 四、B3 分档回放与口径", ""]
+    hits, misses = b3_replay()
+    for h in hits:
+        lines.append(f"- ✓ {h}")
+    for mm in misses:
+        lines.append(f"- ✗ {mm}")
+    lines.append(f"- B3 结论: {'PASS' if not misses else 'FAIL'}"
+                 f"({len(hits)}/{len(hits) + len(misses)} 命中)")
+    lines += ["", ("> 口径声明: S_r 为 APM 缺位的代码特征静态代理; "
+                   "每子指标证据链在 score 视图可追溯; "
+                   "**只出不施**——报告仅输出评分与建议, 不写盘不改代码。"), ""]
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    return path
+
+
 def run(args=None):
-    """zhuyan score CLI: S_b+S_r+S_e 三维度评分视图(罚分总分 T1.4 实装)。"""
+    """zhuyan score CLI: 完整成熟度评分(三维+罚分+总分分档+报告归档+度量)。"""
     units = fingerprint.enumerate_units()
     sb_ctx = build_sb_context()
     sr_ctx = build_sr_context(units)
     se_ctx = build_se_context(units)
-    scored = []
-    for u in units:
-        sb, sb_ev = sb_unit(u, sb_ctx)
-        sr, sr_ev = sr_unit(u, sr_ctx)
-        se, se_ev = se_unit(u, se_ctx)
-        scored.append((u, sb, sb_ev, sr, sr_ev, se, se_ev))
-    chain_hits = Counter()
-    for row in scored:
-        for name in row[2]["hit_chains"]:
-            chain_hits[name] += 1
-    print(f"[zhuyan score] S_b 业务价值: {len(scored)} 单元已评分(权重 0.40)")
-    print("  端点链命中分布: " + (
-        ", ".join(f"{k}={v}" for k, v in chain_hits.most_common()) or "无命中"))
-    top = sorted(scored, key=lambda x: -x[1])[:5]
-    for u, s, ev, *_r in top:
-        print(f"  [S_b={s:.2f}] {u['unit_id']} —— 链{ev['hit_chains'] or '—'}"
-              f" 调用{ev['call_count']}处 转化{ev['conversion']}")
-    print("[zhuyan score] S_r 运行稳健(权重 0.35, 静态代理=APM 缺位代码特征近似):")
-    for u, _sb, _sb_ev, sr, ev, *_e in sorted(scored, key=lambda x: -x[3])[:5]:
-        print(f"  [S_r={sr:.2f}] {u['unit_id']} —— 异常{ev['exception_rate']}"
-              f" 容错{ev['fault_features'] or '—'}"
-              f" 校验{ev['validation_rate']} 并发{ev['concurrency']}")
-    print("[zhuyan score] S_e 工程复用(权重 0.25, 基线测试命中加权 1.5 封顶):")
-    for u, *_b, se, ev in sorted(scored, key=lambda x: -x[5])[:5]:
-        boost = "✓基线" if ev["baseline_boost"] else "—"
-        print(f"  [S_e={se:.2f}] {u['unit_id']} —— 测试{ev['test_value']}"
-              f"(断言{ev['asserts']} {boost}) 契约{ev['contract']}"
-              f" 耦合{ev['imports']} 语法{ev['syntax_ok']}")
-    print("[zhuyan score] 罚分项+总分分档(T1.4)下一任务实装——当前三维齐备")
+    scored = [maturity_unit(u, sb_ctx, sr_ctx, se_ctx) for u in units]
+    grades = Counter(m["grade"] for m in scored)
+    n = len(scored)
+    avg = round(sum(m["total"] for m in scored) / n, 2) if n else 0
+    print(f"[zhuyan score] 成熟度评分完成: {n} 单元 · 总分均分 {avg}")
+    print(f"  分档分布: high(种子候选)={grades['high']}"
+          f" / mid(观察)={grades['mid']} / low(痛点)={grades['low']}")
+    for grade in ("high", "low"):
+        grp = sorted((m for m in scored if m["grade"] == grade),
+                     key=lambda m: -m["total"])[:3]
+        print(f"  {grade} 样例:")
+        for m in grp:
+            print(f"    [{m['total']:.2f}] {m['unit']['unit_id']}"
+                  f" S_b={m['s_b']}/S_r={m['s_r']}/S_e={m['s_e']}"
+                  f"/罚{m['penalty']}")
+    vetoed = sum(1 for m in scored if m["pen_ev"]["vetoed"])
+    penal = sum(1 for m in scored if m["penalty"] > 0)
+    print(f"  罚分: 硬否决 {vetoed} · 重扣 {penal}(明细见报告)")
+    hits, misses = b3_replay(units, (sb_ctx, sr_ctx, se_ctx))
+    print(f"[zhuyan score] B3 分档回放: "
+          f"{'PASS' if not misses else 'FAIL'}"
+          f"({len(hits)}/{len(hits) + len(misses)})")
+    path = generate_report(scored)
+    print(f"[zhuyan score] T1.4 评分报告已归档: {path}")
+    try:
+        from zhuyan import stats as stats_mod
+    except ImportError:
+        import stats as stats_mod
+    ok = stats_mod.report_stats(metrics={
+        "high": grades["high"], "mid": grades["mid"], "low": grades["low"]})
+    print(f"[zhuyan score] 度量上报 zhuyan:stats {'成功' if ok else '降级(仅打印)'}")
     return 0
 
 

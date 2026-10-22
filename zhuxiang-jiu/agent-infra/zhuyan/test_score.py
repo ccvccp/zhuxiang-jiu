@@ -224,3 +224,63 @@ def test_t13_real_qr_baseline():
     assert ev["baseline_boost"] is True, "qr 端点应关联 qr 公开基线测试"
     assert ev["test_value"] == 1.0, "基线断言量×1.5 封顶"
     assert s > 0.5, "qr 端点 S_e 高分(B3 高分样本)"
+
+
+# ---------- T1.4 罚分+总分+报告 ----------
+
+def test_t14_penalty_veto_and_items():
+    """罚分取证: 硬否决(密钥字面量)+三重扣(无测试/SQL 拼接/危险封顶)"""
+    secret_src = {"backend/routes/x.py": 'api_key = "sk-live-123"\n'}
+    _p, ev = zs.penalty_unit(_ep_unit(), secret_src)
+    assert ev["vetoed"] is True and "硬否决" in ev["items"][0]
+    # 无测试 −0.20(有 SQL f-string 再 −0.20 = 0.40)
+    sql_src = {"backend/routes/x.py":
+               "def f():\n    sql = f\"SELECT * FROM t WHERE id={i}\"\n"}
+    p, ev = zs.penalty_unit(_ep_unit(), sql_src)
+    assert abs(p - 0.40) < 0.01 and not ev["vetoed"]
+    assert any("SQL" in it for it in ev["items"])
+    # 危险模式 3 处 → 0.45 封顶 0.30; 无测试 → 共 0.50
+    danger_src = {"backend/routes/x.py":
+                  "eval('1')\nexec('2')\nsubprocess.run(c, shell=True)\n"}
+    p, ev = zs.penalty_unit(_ep_unit(), danger_src)
+    assert abs(p - 0.50) < 0.01, "0.20 无测试+0.30 危险封顶"
+    # 有测试无风险 → 0
+    good = _ep_unit(tests=["backend/test_x.py"])
+    p, ev = zs.penalty_unit(good, {"backend/routes/x.py": "def f():\n    return\n"})
+    assert p == 0.0 and ev["items"] == []
+
+
+def test_t14_maturity_total_and_grade():
+    """总分公式+分档: 三维加权−罚分; 硬否决直判 low"""
+    m = zs.maturity_unit(_ep_unit(tests=["backend/test_x.py"]))
+    expect = round(0.40 * m["s_b"] + 0.35 * m["s_r"] + 0.25 * m["s_e"]
+                   - m["penalty"], 2)
+    assert m["total"] == max(expect, 0.0)
+    assert m["grade"] in ("high", "mid", "low")
+    veto_unit = _ep_unit()
+    veto_unit["file"] = "backend/routes/x.py"
+    m = zs.maturity_unit(veto_unit, None,
+                          {"backend/routes/x.py": 'password = "x"\n'}, None)
+    assert m["total"] == 0.0 and m["grade"] == "low", "硬否决直判 0 档"
+
+
+def test_t14_b3_replay():
+    """B3 基准: 已知答案分档回放——成熟端点不落 low+缺口页必 low"""
+    hits, misses = zs.b3_replay()
+    assert not misses, f"B3 FAIL: {misses}"
+    assert len(hits) == 2 and "qr scan" in hits[0] and "activity-detail" in hits[1]
+
+
+def test_t14_report(tmp_path):
+    """评分报告四节+每分证据链口径(隔离目录生成)"""
+    units = __import__("fingerprint").enumerate_units()
+    ctxs = (zs.build_sb_context(), zs.build_sr_context(units),
+            zs.build_se_context(units))
+    scored = [zs.maturity_unit(u, *ctxs) for u in units[:50]]
+    path = zs.generate_report(scored, out_dir=str(tmp_path))
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    for sec in ("一、评分总览", "二、分档清单", "三、罚分明细", "四、B3 分档回放"):
+        assert sec in text
+    assert "S=0.40S_b" in text and "只出不施" in text
+    assert "静态代理" in text or "静态近似" in text, "口径声明"
