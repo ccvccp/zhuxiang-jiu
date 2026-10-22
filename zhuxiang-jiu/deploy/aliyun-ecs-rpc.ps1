@@ -71,7 +71,7 @@ switch ($Mode) {
         $wrapped = "powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand $b64; exit `$LASTEXITCODE"
         Write-Host "Script: $CommandFile ($($body.Length) chars)  Timeout: ${TimeoutSec}s"
         $res = Invoke-Rpc @{
-            Action='RunCommand'; RegionId='cn-wulanchabu'
+            Action='RunCommand'; RegionId=$(if ($RegionId) { $RegionId } else { 'cn-wulanchabu' })
             "InstanceId.1"=$InstanceId
             Type='RunPowerShellScript'
             CommandContent=$wrapped
@@ -83,7 +83,7 @@ switch ($Mode) {
     }
     'Invoke' {
         if (-not $InvokeId) { Write-Host 'Need -InvokeId'; exit 1 }
-        $res = Invoke-Rpc @{ Action='DescribeInvocationResults'; InvokeId=$InvokeId; RegionId='cn-wulanchabu' }
+        $res = Invoke-Rpc @{ Action='DescribeInvocationResults'; InvokeId=$InvokeId; RegionId=$(if ($RegionId) { $RegionId } else { 'cn-wulanchabu' }) }
         if ($res.Invocation) {
             Write-Host "InvokeId: $InvokeId  Status: $($res.Invocation.InvokeStatus)  OK:$($res.Invocation.SuccessCount) FAIL:$($res.Invocation.FailedCount) RUNNING:$($res.Invocation.RunCount)"
         }
