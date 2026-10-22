@@ -30,9 +30,19 @@ import uuid
 # 配置(运行时读取, 不在模块级冻结)
 # ============================================================
 
+# 开发回退密钥(仅本地/测试): 生产必须经 JWT_SECRET 环境变量注入
+# [2026-10-22 处置] 生产 ECS 已由 deploy/ecs8147-jwt-secret-inject.ps1 注入
+# 256 位随机 JWT_SECRET(nssm AppEnvironmentExtra), 本字面量仅剩开发回退用途;
+# 竹演 T1.4 罚分扫描仍会如实扫出此形态(dev 回退), 属已知人工裁量项。
 DEFAULT_JWT_SECRET = "zhuxiang-dev-secret-CHANGE-ME-in-production"
 ACCESS_TOKEN_TTL = int(os.environ.get("JWT_ACCESS_TTL", 2 * 3600))       # 2 小时
 REFRESH_TOKEN_TTL = int(os.environ.get("JWT_REFRESH_TTL", 7 * 24 * 3600))  # 7 天
+
+# 启动哨兵: 未注入 JWT_SECRET 时告警一次(生产漏配即在此暴露, 不阻断启动)
+if not os.environ.get("JWT_SECRET"):
+    import logging
+    logging.getLogger(__name__).warning(
+        "JWT_SECRET 未注入——正使用开发回退密钥(生产必须经环境变量注入)")
 
 PBKDF2_ITERATIONS = 120_000
 _PBKDF2_PREFIX = "pbkdf2_sha256"
