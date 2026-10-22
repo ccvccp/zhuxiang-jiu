@@ -10,7 +10,12 @@ param(
     [string]$CommandFile = '',
     [string]$InstanceId = 'i-0jl2lh29xbe4d0sownat',
     [int]$TimeoutSec = 3600,
-    [string]$CommandName = 'cmd'
+    [string]$CommandName = 'cmd',
+    [string]$SecurityGroupId = '',
+    [string]$IpProtocol = 'tcp',
+    [string]$PortRange = '3389/3389',
+    [string]$SourceCidrIp = '',
+    [string]$NicType = 'intranet'
 )
 
 # credentials via env (never hardcode): set ALIYUN_AK_ID / ALIYUN_AK_SECRET before running
@@ -103,5 +108,51 @@ switch ($Mode) {
             if ($inv.ErrorInfo) { Write-Host "ERROR: $($inv.ErrorInfo)" -ForegroundColor Red }
         }
     }
-    default { Write-Host "Unknown mode: $Mode (FindInstance|Invoke)" }
+    'SGQuery' {
+        # query security group of an instance (and its inbound rules if -SecurityGroupId given)
+        if (-not $RegionId) { Write-Host 'Need -RegionId'; exit 1 }
+        if ($SecurityGroupId) {
+            $res = Invoke-Rpc @{ Action='DescribeSecurityGroupAttribute'; RegionId=$RegionId; SecurityGroupId=$SecurityGroupId; Direction='ingress' }
+            $res.Permissions.Permission | ForEach-Object {
+                Write-Host ("  " + $_.IpProtocol + "/" + $_.PortRange + "  src=" + $_.SourceCidrIp + "  policy=" + $_.Policy + "  prio=" + $_.Priority + "  desc=" + $_.Description)
+            }
+            if (-not $res.Permissions.Permission) { Write-Host '  (no ingress rules)' }
+        } else {
+            $res = Invoke-Rpc @{ Action='DescribeInstances'; RegionId=$RegionId; "InstanceId.1"=$InstanceId }
+            $ins = $res.Instances.Instance[0]
+            if ($ins) {
+                Write-Host ("Instance: " + $ins.InstanceId + "  SG: " + ($ins.SecurityGroupIds.SecurityGroupId -join ', '))
+            } else { Write-Host 'instance not found' }
+        }
+    }
+    'SGAuth' {
+        # authorize one inbound rule: SGAuth -SecurityGroupId sg-xxx -SourceCidrIp 1.2.3.4/32 -PortRange 3389/3389
+        if (-not $RegionId -or -not $SecurityGroupId -or -not $SourceCidrIp) { Write-Host 'Need -RegionId -SecurityGroupId -SourceCidrIp'; exit 1 }
+        $res = Invoke-Rpc @{
+            Action='AuthorizeSecurityGroup'; RegionId=$RegionId; SecurityGroupId=$SecurityGroupId
+            'Permissions.1.IpProtocol'=$IpProtocol
+            'Permissions.1.PortRange'=$PortRange
+            'Permissions.1.SourceCidrIp'=$SourceCidrIp
+            'Permissions.1.Policy'='Accept'
+            'Permissions.1.Priority'='1'
+            'Permissions.1.NicType'=$NicType
+            'Permissions.1.Description'='RDP-from-pc'
+        }
+        if ($res.RequestId) { Write-Host ("SG rule authorized: " + $IpProtocol + "/" + $PortRange + " <- " + $SourceCidrIp + "  RequestId=" + $res.RequestId) }
+        else { Write-Host ("FAILED: " + ($res | ConvertTo-Json -Depth 5)) }
+    }
+    'SGRevoke' {
+        # revoke one inbound rule: SGRevoke -SecurityGroupId sg-xxx -SourceCidrIp 0.0.0.0/0 -PortRange 3389/3389
+        if (-not $RegionId -or -not $SecurityGroupId -or -not $SourceCidrIp) { Write-Host 'Need -RegionId -SecurityGroupId -SourceCidrIp'; exit 1 }
+        $res = Invoke-Rpc @{
+            Action='RevokeSecurityGroup'; RegionId=$RegionId; SecurityGroupId=$SecurityGroupId
+            'Permissions.1.IpProtocol'=$IpProtocol
+            'Permissions.1.PortRange'=$PortRange
+            'Permissions.1.SourceCidrIp'=$SourceCidrIp
+            'Permissions.1.NicType'=$NicType
+        }
+        if ($res.RequestId) { Write-Host ("SG rule revoked: " + $IpProtocol + "/" + $PortRange + " <- " + $SourceCidrIp + " nic=" + $NicType + "  RequestId=" + $res.RequestId) }
+        else { Write-Host ("FAILED: " + ($res | ConvertTo-Json -Depth 5)) }
+    }
+    default { Write-Host "Unknown mode: $Mode (FindInstance|Invoke|Send|SGQuery|SGAuth|SGRevoke)" }
 }
