@@ -19,7 +19,6 @@ STUBS = {
     "audit": "P0(T0.3) 实现: 主站 html+js 完整性盘点(占位符/空正文/断链图/ALT 缺/SEO 空)→资产台账, B2 挖空样本检出",
     "comply": "P1(T1.1-T1.3) 实现: 违禁词 regex 引擎(微信整改 20 处实战沉淀)→合规报告, B1 整改实录回放检出 100%",
     "probe": "P2(T2.1-T2.4) 实现: Playwright 业务探针(购买按钮首屏/资质模块/评分展示)→探针报告",
-    "prescribe": "P3(T3.1) 实现: 缺口/违规→竹医 cases 检索复用→修正建议处方, 铁律=只出不施",
     "evolve": "P3(T3.2-T3.5) 实现: 审查发现→五段式案例草稿生成入库(人工确认)——自进化闭环",
 }
 
@@ -64,6 +63,9 @@ def main(argv=None):
     if args.command == "probe":
         from zhuyuan import probe
         return probe.run(args)
+    if args.command == "prescribe":
+        from zhuyuan import prescribe
+        return prescribe.run(args)
     if args.command in STUBS:
         print(f"[zhuyuan {args.command}] 骨架占位——{STUBS[args.command]}")
         return 0
