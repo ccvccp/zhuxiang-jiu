@@ -1,9 +1,9 @@
-"""竹园 zhuyuan CLI（80号·网站资产自进化 Agent · P0 T0.1 骨架）
+"""竹园 zhuyuan CLI（80号·网站资产自进化 Agent）
 
-五子命令（逐任务实现，当前为骨架占位）:
+五子命令（T0.1-T3.2 已全部实装分发）:
   audit       资产盘点——主站完整性缺口检测(占位符/空正文/断链图/ALT缺/SEO空) → 资产台账
   comply      合规审查——违禁词 regex 引擎(微信整改 20 处实战沉淀) → 合规报告
-  probe       性能探针——Playwright 业务指标(购买按钮首屏/资质模块) → 探针报告
+  probe       性能探针——Playwright 三探针(基座/转化/信任) → 探针报告
   prescribe   缺口处方——竹医 cases 检索复用 → 修正建议(只出不施)
   evolve      自进化——审查发现 → 五段式案例草稿入库(人工确认)
 
@@ -14,13 +14,6 @@ import os
 import sys
 
 __version__ = "0.1.0"
-
-STUBS = {
-    "audit": "P0(T0.3) 实现: 主站 html+js 完整性盘点(占位符/空正文/断链图/ALT 缺/SEO 空)→资产台账, B2 挖空样本检出",
-    "comply": "P1(T1.1-T1.3) 实现: 违禁词 regex 引擎(微信整改 20 处实战沉淀)→合规报告, B1 整改实录回放检出 100%",
-    "probe": "P2(T2.1-T2.4) 实现: Playwright 业务探针(购买按钮首屏/资质模块/评分展示)→探针报告",
-    "evolve": "P3(T3.2-T3.5) 实现: 审查发现→五段式案例草稿生成入库(人工确认)——自进化闭环",
-}
 
 
 def build_parser():
@@ -66,9 +59,9 @@ def main(argv=None):
     if args.command == "prescribe":
         from zhuyuan import prescribe
         return prescribe.run(args)
-    if args.command in STUBS:
-        print(f"[zhuyuan {args.command}] 骨架占位——{STUBS[args.command]}")
-        return 0
+    if args.command == "evolve":
+        from zhuyuan import evolve
+        return evolve.run(args)
     parser.print_help()
     return 1
 

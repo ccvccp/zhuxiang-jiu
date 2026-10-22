@@ -69,9 +69,18 @@ def test_prescribe_stub():
 
 
 def test_evolve_stub():
-    r = _run("evolve")
-    assert r.returncode == 0
-    assert "自进化" in r.stdout and "人工确认" in r.stdout
+    """T3.2 实装: evolve 分发自进化草稿(子进程落盘 cases 目录, 差集自清理)"""
+    import audit as za
+    cases_dir = os.path.join(za._REPO_ROOT, "docs", "registry", "cases")
+    before = set(os.listdir(cases_dir))
+    try:
+        r = _run("evolve")
+        assert r.returncode == 0
+        assert "自进化" in r.stdout and "人工确认" in r.stdout
+        assert "草稿已生成" in r.stdout
+    finally:
+        for n in set(os.listdir(cases_dir)) - before:
+            os.remove(os.path.join(cases_dir, n))
 
 
 def test_unknown_command_rejected():
