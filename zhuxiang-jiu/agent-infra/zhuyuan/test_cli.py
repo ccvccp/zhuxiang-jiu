@@ -48,10 +48,18 @@ def test_comply_t12_real():
 
 
 def test_probe_t21_real():
-    """T2.1 实装: probe 分发探针——线上详情页+选择器定位"""
-    r = _run("probe")
-    assert r.returncode == 0
-    assert "探针成功" in r.stdout and "页面标题" in r.stdout
+    """T2.1-T2.4 实装: probe 三探针分发+报告归档(子进程归档自清理)"""
+    import audit as za
+    rep_dir = os.path.join(za._REPO_ROOT, "docs", "registry", "reports")
+    before = set(os.listdir(rep_dir))
+    try:
+        r = _run("probe")
+        assert r.returncode == 0
+        assert "探针成功" in r.stdout and "页面标题" in r.stdout
+        assert "探针报告已归档" in r.stdout
+    finally:
+        for n in set(os.listdir(rep_dir)) - before:
+            os.remove(os.path.join(rep_dir, n))
 
 
 def test_prescribe_stub():

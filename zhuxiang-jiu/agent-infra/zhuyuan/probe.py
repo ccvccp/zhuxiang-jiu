@@ -42,6 +42,14 @@ TRUST_TEXT_CHECKS = (
 TRUST_RATING_SELECTORS = (".rating", ".stars")
 _TRUST_P0 = ("icp", "license", "warning")
 
+# T2.1 基座演示选择器(详情页关键 UI 类; buy 未命中=真实结构反映非故障)
+_BASE_SELECTORS = ("[class*='price']", "[class*='buy']", "[class*='btn']")
+
+# 归档目录注入点(测试隔离用; None=默认 REPO_ROOT/docs/registry/reports, 同 comply)
+REPORTS_DIR = None
+
+_LEVEL_ORDER = {"P0": 0, "P1": 1, "P2": 2}
+
 
 def _new_context(browser):
     """微信 UA 移动视口(390x844, 整改截图实战同款)。"""
@@ -161,15 +169,104 @@ def probe_trust(url=DEFAULT_URL, timeout=40000, shot_name=None):
             "shot": shot}
 
 
+def generate_probe_report(base, conv, trust, out_dir=None):
+    """T2.4 探针报告(四节: 概况/通过率/失败明细+P0-P2 分级/处置建议) → 归档路径。
+
+    base/conv/trust 为三探针返回 dict(基座 probe_page/转化 probe_conversion/
+    信任 probe_trust); 基座未命中选择器记信息级 P2(真实结构反映, 非故障)。
+    """
+    import datetime
+    try:
+        from zhuyuan import audit as _a
+    except ImportError:
+        import audit as _a
+    out_dir = out_dir or REPORTS_DIR or os.path.join(
+        _a._REPO_ROOT, "docs", "registry", "reports")
+    os.makedirs(out_dir, exist_ok=True)
+    now = datetime.datetime.now(tz=datetime.timezone.utc).astimezone()
+    path = os.path.join(out_dir, now.strftime("探针报告-%Y%m%d-%H%M%S.md"))
+    # 聚合 findings: 基座未命中(信息级) + 转化 + 信任, 按 P0>P1>P2 排序
+    findings = list(conv["findings"]) + list(trust["findings"])
+    for sel, hit in base["found"].items():
+        if not hit:
+            findings.append({"level": "P2", "msg": (
+                f"信息级: 基座选择器未命中 {sel}——如实反映页面真实结构, 非故障")})
+    findings.sort(key=lambda f: _LEVEL_ORDER.get(f["level"], 9))
+    base_hits = sum(1 for h in base["found"].values() if h)
+    base_n = len(base["found"])
+    conv_hits = sum(1 for h in conv["elements"].values() if h)
+    conv_n = len(conv["elements"])
+    trust_hits = sum(1 for h in trust["elements"].values() if h)
+    trust_n = len(trust["elements"])
+
+    def _pct(a, b):
+        return f"{a}/{b} ({int(a / b * 100) if b else 100}%)"
+
+    lines = ["# 探针报告 · 竹园 zhuyuan probe（80号·性能探针）", ""]
+    lines.append(f"> 生成: {now.strftime('%Y-%m-%d %H:%M:%S')} · 目标: "
+                 f"{base['url']} · 视口 {VIEWPORT_W}x{VIEWPORT_H} 微信 UA"
+                 " · 三探针: 基座/转化/信任")
+    lines += ["", "## 一、探针概况", ""]
+    lines.append(f"- 基座探针: 渲染{'完成' if base['ok'] else '异常'} · "
+                 f"标题「{base['title']}」 · 选择器命中 {_pct(base_hits, base_n)}")
+    lines.append("- 转化探针: "
+                 + ("PASS——购物流程关键元素齐备" if conv["pass"]
+                    else f"FAIL——缺失 {', '.join(conv['missing'])}"))
+    lines.append("- 信任探针: "
+                 + ("PASS——资质三件套齐备(合规底线)" if trust["pass"]
+                    else "FAIL——资质三件套缺失"))
+    lines += ["", "## 二、各探针通过率", ""]
+    lines.append("- 基座(选择器命中): " + _pct(base_hits, base_n) + " —— "
+                 + " ".join(f"{'✓' if h else '✗'} {s}"
+                            for s, h in base["found"].items()))
+    _cname = {k: n for k, n, *_ in CONVERSION_ELEMENTS}
+    _tname = {k: n for k, n, *_ in TRUST_TEXT_CHECKS}
+    lines.append("- 转化(关键要素齐备): " + _pct(conv_hits, conv_n)
+                 + f" · 立即购买首屏可见: {'✓' if conv['buy_first_screen'] else '✗'}")
+    lines.append("  - " + " ".join(f"{'✓' if h else '✗'}{_cname[k]}"
+                                    for k, h in conv["elements"].items()))
+    lines.append("- 信任(要素通过): " + _pct(trust_hits, trust_n) + " —— "
+                 + " ".join(f"{'✓' if h else '✗'}{_tname[k]}"
+                            for k, h in trust["elements"].items()))
+    lines += ["", "## 三、失败明细+P0-P2 分级", ""]
+    if findings:
+        for f in findings:
+            lines.append(f"- [{f['level']}] {f['msg']}")
+    else:
+        lines.append("- 无缺失项——三探针全要素通过")
+    lines += ["", "## 四、处置建议(只出不施)", ""]
+    _SUGGEST = {"P0": "上线前必修——转化/合规断链",
+                "P1": "排期修复——信任信息补齐",
+                "P2": "人工裁量——体验/增强项"}
+    grouped = {}
+    for f in findings:
+        grouped.setdefault(f["level"], []).append(f["msg"])
+    for lv in ("P0", "P1", "P2"):
+        if lv in grouped:
+            lines.append(f"- {lv}({_SUGGEST[lv]}): {len(grouped[lv])} 项")
+    if not findings:
+        lines.append("- 无待处置项")
+    lines += ["", "> **只出不施**: 本报告仅输出处置建议, 不改代码不动资产。", ""]
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+    return path
+
+
 def run(args=None):
-    """zhuyuan probe CLI: 转化+信任双探针(T2.2/T2.3)。"""
+    """zhuyuan probe CLI: 基座+转化+信任三探针(T2.1-T2.3)+T2.4 报告归档。"""
     url = getattr(args, "url", None) or DEFAULT_URL
     try:
+        base = probe_page(url=url, selectors=_BASE_SELECTORS)
         conv = probe_conversion(url=url, shot_name="t22-conversion.png")
         trust = probe_trust(url=url, shot_name="t23-trust.png")
     except Exception as exc:  # noqa: BLE001 探针对环境故障如实报告
         print(f"[zhuyuan probe] 探针失败: {exc}")
         return 1
+    # ---- 基座探针段(T2.1) ----
+    print(f"[zhuyuan probe] 基座探针成功: {base['url']}")
+    print(f"  页面标题: {base['title']}")
+    for sel, hit in base["found"].items():
+        print(f"    {'✓' if hit else '✗'} {sel}")
     # ---- 转化探针段(T2.2) ----
     print(f"[zhuyuan probe] 转化探针成功: {conv['url']}")
     print(f"  页面标题: {conv['title']}")
@@ -203,9 +300,11 @@ def run(args=None):
     verdict = "PASS——资质三件套齐备(合规底线)" if trust["pass"] else \
         f"FAIL——资质三件套缺失: {', '.join(p0_missing)}"
     print(f"  信任结论: {verdict}")
-    # ---- 综合 ----
+    # ---- 综合+报告归档(T2.4) ----
+    report_path = generate_probe_report(base, conv, trust)
+    print(f"[zhuyuan probe] T2.4 探针报告已归档: {report_path}")
     ok = conv["pass"] and trust["pass"]
-    print(f"  综合结论: {'PASS——双探针通过' if ok else 'FAIL(见上明细)'}")
+    print(f"  综合结论: {'PASS——三探针齐跑通过' if ok else 'FAIL(见上明细)'}")
     return 0 if ok else 1
 
 

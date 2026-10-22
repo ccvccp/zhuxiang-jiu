@@ -13,6 +13,15 @@ NEG_URL = "https://zyjiu.com/service.html"
 # T2.3 首页: hero 警示语+页脚资质三件套; 商品卡无产地字段
 HOME_URL = "https://zyjiu.com/"
 
+# CLI 子进程归档自清理(T1.3 同款差集法): probe 子进程不走 conftest 注入
+_REPO = os.path.dirname(os.path.dirname(HERE))
+_REPORTS = os.path.join(_REPO, "docs", "registry", "reports")
+
+
+def _sweep_new_reports(before):
+    for n in set(os.listdir(_REPORTS)) - before:
+        os.remove(os.path.join(_REPORTS, n))
+
 
 def test_t21_probe_live_detail_page():
     """验收口径: 线上详情页探针跑通——渲染完成+标题+选择器定位"""
@@ -36,13 +45,19 @@ def test_t21_shot_written():
 
 
 def test_t21_cli_probe():
+    """CLI 三探针端到端+报告归档(子进程归档自清理)"""
     import subprocess
-    r = subprocess.run([sys.executable, os.path.join(HERE, "cli.py"), "probe"],
-                       check=False, capture_output=True, text=True, encoding="utf-8",
-                       timeout=120)
-    assert r.returncode == 0
-    assert "探针成功" in r.stdout and "zyjiu.com" in r.stdout
-    assert "✓" in r.stdout or "✗" in r.stdout
+    before = set(os.listdir(_REPORTS))
+    try:
+        r = subprocess.run([sys.executable, os.path.join(HERE, "cli.py"), "probe"],
+                           check=False, capture_output=True, text=True, encoding="utf-8",
+                           timeout=180)
+        assert r.returncode == 0
+        assert "探针成功" in r.stdout and "zyjiu.com" in r.stdout
+        assert "✓" in r.stdout or "✗" in r.stdout
+        assert "探针报告已归档" in r.stdout
+    finally:
+        _sweep_new_reports(before)
 
 
 def test_t22_conversion_positive_live():
@@ -66,12 +81,17 @@ def test_t22_conversion_negative_live():
 def test_t22_cli_conversion_negative():
     """CLI 反例: --url 指向无购物流程页面 → 退出码 1+FAIL 明细+P0 分级"""
     import subprocess
-    r = subprocess.run(
-        [sys.executable, os.path.join(HERE, "cli.py"), "probe", "--url", NEG_URL],
-        check=False, capture_output=True, text=True, encoding="utf-8", timeout=120)
-    assert r.returncode == 1
-    assert "转化结论: FAIL" in r.stdout
-    assert "P0" in r.stdout
+    before = set(os.listdir(_REPORTS))
+    try:
+        r = subprocess.run(
+            [sys.executable, os.path.join(HERE, "cli.py"), "probe", "--url", NEG_URL],
+            check=False, capture_output=True, text=True, encoding="utf-8", timeout=180)
+        assert r.returncode == 1
+        assert "转化结论: FAIL" in r.stdout
+        assert "P0" in r.stdout
+        assert "探针报告已归档" in r.stdout
+    finally:
+        _sweep_new_reports(before)
 
 
 def test_t23_trust_detail_page():
@@ -94,3 +114,46 @@ def test_t23_trust_homepage():
         assert r["elements"][k] is True
     assert r["elements"]["origin"] is False, "首页商品卡无产地字段——如实缺失"
     assert any(f["level"] == "P1" for f in r["findings"])
+
+
+def test_t24_report_synthetic(tmp_path):
+    """T2.4 报告生成(合成三探针数据, 离线): 四节齐+P0-P2 分级+通过率口径"""
+    base = {"url": "https://example.com/p", "ok": True, "title": "样例页",
+            "found": {"[class*='price']": True, "[class*='buy']": False},
+            "shot": None}
+    conv = {"url": "https://example.com/p", "ok": True, "pass": False,
+            "title": "样例页",
+            "elements": {"price_now": True, "spec_options": True,
+                         "qty_input": False, "add_cart": True, "buy_now": False},
+            "missing": ["qty_input", "buy_now"],
+            "findings": [{"level": "P1", "msg": "购物流程缺失数量选择(qty_input)"},
+                         {"level": "P0", "msg": "购物流程缺失立即购买按钮(buy_now)"}],
+            "buy_first_screen": False, "buy_box": None, "shot": None}
+    trust = {"url": "https://example.com/p", "ok": True, "pass": True,
+             "title": "样例页",
+             "elements": {"icp": True, "license": True, "warning": True,
+                          "origin": True, "rating": False},
+             "missing": ["rating"],
+             "findings": [{"level": "P2", "msg": "信任要素缺失评分展示(rating)"}],
+             "shot": None}
+    path = zp.generate_probe_report(base, conv, trust, out_dir=str(tmp_path))
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    # 四节齐
+    for sec in ("一、探针概况", "二、各探针通过率", "三、失败明细+P0-P2 分级",
+                "四、处置建议(只出不施)"):
+        assert sec in text
+    # 通过率口径: 基座 1/2 / 转化 3/5 / 信任 4/5
+    assert "1/2 (50%)" in text
+    assert "3/5 (60%)" in text
+    assert "4/5 (80%)" in text
+    # P0-P2 分级齐+排序(P0 在 P1 前)+基座未命中记信息级
+    assert "[P0]" in text and "[P1]" in text and "[P2]" in text
+    assert text.index("[P0]") < text.index("[P1]") < text.index("[P2]")
+    assert "信息级: 基座选择器未命中 [class*='buy']" in text
+    # 概况如实: 转化 FAIL 带缺失明细; 信任 PASS
+    assert "FAIL——缺失 qty_input, buy_now" in text
+    assert "PASS——资质三件套齐备" in text
+    # 处置建议按级聚合
+    assert "P0(上线前必修" in text and "P1(排期修复" in text and "P2(人工裁量" in text
+    assert "只出不施" in text
