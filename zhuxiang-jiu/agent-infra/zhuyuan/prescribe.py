@@ -15,8 +15,9 @@ _GAP_SUGGESTIONS = {
     "image_broken": "修复断链图(核对路径或补传资源)",
 }
 
-# 案例引用最低分: 3=关键词档(×3)起步; 纯模块/技术面 2 分不算相关
-_CASE_MIN_SCORE = 3
+# 案例引用最低分: 4=至少一档真实关键词命中(×3, P0 优先+1 可达 4);
+# 3=纯技术面 2 分+P0 加成 1 的擦线弱命中, 不算相关(T3.5 实跑暴露后收紧)
+_CASE_MIN_SCORE = 4
 
 
 def _zhuyi_cases():
@@ -70,8 +71,8 @@ def prescribe_gaps(gaps, top=1):
 
     案例引用含 build_prescription 的修正模板(源自案例四段正确写法)与预防规则;
     无命中→case_ref=None 且建议追加如实标注, 置信度低。
-    弱命中过滤: 得分<3(纯模块/技术面 ×2 档)不算相关——防 ".html" 资产缺口
-    靠技术面泛匹配拉进不相关案例(实跑暴露: seo 缺口误引移动筛选案例)。
+    弱命中过滤: 得分<_CASE_MIN_SCORE(4)不算相关——防 ".html" 资产缺口靠
+    技术面泛匹配(2 分)+P0 加成(1 分)=3 分擦线拉进不相关案例(两轮实跑暴露)。
     """
     cases_mod = _zhuyi_cases()
     all_cases = cases_mod.load_cases()

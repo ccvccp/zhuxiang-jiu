@@ -44,25 +44,59 @@ def test_t31_prescribe_case_hit():
 
 
 def test_t31_prescribe_no_case_honest():
-    """验收反例: 案例库无相关命中 → case_ref=None 如实标注+按词表口径处置"""
+    """验收反例: 案例库无相关命中 → case_ref=None 如实标注+按词表口径处置
+
+    注: 功效类缺口在 T3.5 微信案例入库后已可引用真实案例(见
+    test_t35_evolution), 本反例改用无案例类目(alt_missing)。
+    """
+    prescs = zpr.prescribe_gaps([{
+        "asset_id": "z.html", "asset_type": "page", "status": "missing",
+        "gap_type": "alt_missing", "priority": "P2",
+        "evidence": "img 无 alt: foo.png"}])
+    p = prescs[0]
+    assert p["case_ref"] is None
+    assert "案例库无相关命中" in p["suggestion"], "无命中如实标注"
+    assert p["level"] == "P2" and p["confidence"] == "低"
+
+
+def test_t31_weak_hit_filtered():
+    """弱命中过滤: 纯技术面 2 分不算相关——alt 缺口只沾 .html 技术面不误引"""
+    prescs = zpr.prescribe_gaps([{
+        "asset_id": "z.html", "asset_type": "page", "status": "missing",
+        "gap_type": "alt_missing", "priority": "P2",
+        "evidence": "img 无 alt: foo.png"}])
+    p = prescs[0]
+    assert p["case_ref"] is None, \
+        "技术面泛匹配(2分)不算相关——若无滤则误引 html 类案例"
+
+
+def test_t35_evolution_compliance_gap_cites_wechat_case():
+    """T3.5 自进化实证: 微信案例入库后, 功效类缺口处方可引用真实案例
+
+    T3.1 时该缺口为如实无命中(案例库 6 件皆后端/缓存类); 二批入库后
+    同一缺口命中 C-20261022-01——审查发现沉淀为案例, 反哺处方引用。
+    """
     prescs = zpr.prescribe_gaps([{
         "file": "js/x.js", "line": 3, "word": "醒酒", "rule_id": "ALC-FUNC",
         "category": "功效宣称", "risk": "high",
         "suggestion": "参照案例四段正确写法替换口感/工艺描述"}])
     p = prescs[0]
-    assert p["case_ref"] is None
-    assert "案例库无相关命中" in p["suggestion"], "无命中如实标注"
-    assert p["level"] == "P0" and p["confidence"] == "低"
+    assert p["case_ref"] is not None, "微信案例应被功效类缺口命中"
+    assert p["case_ref"]["id"] == "C-20261022-01"
+    assert "正确写法" in p["case_ref"]["patch_hint"]
+    assert "B1" in p["case_ref"]["prevention"]
 
 
-def test_t31_weak_hit_filtered():
-    """弱命中过滤: 纯技术面 2 分不算相关——.html 资产缺口不误引不相关案例"""
+def test_t35_evolution_seo_gap_cites_seo_case():
+    """T3.5 进化对比: SEO 缺口入库前无命中(T3.1 弱命中测试佐证), 入库后引用 SEO 案例"""
     prescs = zpr.prescribe_gaps([{
-        "asset_id": "x.html", "asset_type": "page", "status": "missing",
+        "asset_id": "y.html", "asset_type": "page", "status": "missing",
         "gap_type": "seo_missing", "priority": "P1",
         "evidence": "无 meta description"}])
     p = prescs[0]
-    assert p["case_ref"] is None, "技术面泛匹配(2分)不算相关——如实无命中"
+    assert p["case_ref"] is not None
+    assert p["case_ref"]["id"] == "C-20261022-02"
+    assert "description" in p["case_ref"]["patch_hint"]
 
 
 def test_t31_cli_prescribe_default():
