@@ -44,10 +44,22 @@ def test_score_t14_real():
             os.remove(os.path.join(rep_dir, n))
 
 
-def test_matrix_stub():
-    r = _run("matrix")
-    assert r.returncode == 0
-    assert "四象限" in r.stdout
+def test_matrix_t21_real():
+    """T2.1 实装: matrix 分发四象限+报告归档(子进程落盘真 reports, 差集自清理)"""
+    import os
+
+    rep_dir = os.path.join(os.path.dirname(HERE), "..", "docs", "registry",
+                           "reports")
+    rep_dir = os.path.abspath(rep_dir)
+    before = set(os.listdir(rep_dir)) if os.path.isdir(rep_dir) else set()
+    try:
+        r = _run("matrix")
+        assert r.returncode == 0
+        assert "痛点四象限" in r.stdout and "优先进化区" in r.stdout
+        assert "战略保护区" in r.stdout and "矩阵报告已归档" in r.stdout
+    finally:
+        for n in set(os.listdir(rep_dir)) - before:
+            os.remove(os.path.join(rep_dir, n))
 
 
 def test_analogize_stub():

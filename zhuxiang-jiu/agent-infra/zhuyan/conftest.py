@@ -17,3 +17,9 @@ def _isolated_fingerprints(tmp_path, monkeypatch):
 def _isolated_score_reports(tmp_path, monkeypatch):
     import score as zsc
     monkeypatch.setattr(zsc, "REPORTS_DIR", str(tmp_path))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_matrix_reports(tmp_path, monkeypatch):
+    import matrix as zm
+    monkeypatch.setattr(zm, "REPORTS_DIR", str(tmp_path))
