@@ -1,4 +1,5 @@
 """模块保护引擎(2026-10-06, 用户定案「语音学习进化保护引擎」)
+# zhuyan-exempt: AP-5 (部署预检 CLI 报告输出——竹演 81 号精审清单位置 4 人工裁量豁免)
 
 背景: 语音链(48号)经多轮真机调优趋于稳定后, 其他模块的变更
 (部署重启断 WS 连接/共享文件顺手改/参数漂移)反复冲击语音链
@@ -54,7 +55,7 @@ def _probe(params: list[str]) -> dict[str, str]:
             for part in attr_path.split("."):
                 val = getattr(val, part)
             out[spec] = repr(val)
-        except Exception as exc:   # noqa: BLE001 探针失败记录不阻断
+        except Exception as exc:   # 探针失败记录不阻断
             out[spec] = f"<probe_failed: {exc}>"
     return out
 

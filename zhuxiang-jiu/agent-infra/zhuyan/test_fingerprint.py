@@ -40,11 +40,14 @@ def test_t03_modules_and_pages():
 
 
 def test_t03_page_seo_evidence():
-    """已知低分样本取证: seo_missing 页面 has_description=False 如实入指纹"""
+    """SEO 契约证据联动: 23 页缺口已补齐(2026-10-22 挂账处置)——
+    原 activity-detail 系 B3 低分样本(has_description=False)已转 True;
+    缺口样本断言翻转为修复态验证(缺口清零=指纹如实反映)"""
     units = zf.enumerate_units()
     act = next(u for u in units if u["unit_id"] == "activity-detail.html")
-    assert act["contract"]["has_description"] is False, \
-        "竹园 audit 已证缺口——指纹如实呈现(B3 低分样本)"
+    assert act["contract"]["has_description"] is True, \
+        "23 页 seo_missing 已补齐——指纹应呈现修复态(原低分样本转 True)"
+    # B3 分档回放不依赖真实缺口页(已知答案回放自带样本)——此处无联动
 
 
 def test_t03_save_roundtrip(tmp_path):
