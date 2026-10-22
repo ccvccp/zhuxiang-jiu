@@ -25,10 +25,21 @@ def test_no_args_prints_help():
     assert "zhuyan" in r.stdout
 
 
-def test_score_stub():
-    r = _run("score")
-    assert r.returncode == 0
-    assert "三维成熟度评分" in r.stdout and "B3" in r.stdout
+def test_score_t03_real():
+    """T0.3 实装: score 分发指纹台账(子进程落盘真目录, 差集自清理)"""
+    import os
+
+    mat_dir = os.path.join(HERE, "..", "..", "docs", "registry", "maturity")
+    mat_dir = os.path.abspath(mat_dir)
+    before = set(os.listdir(mat_dir)) if os.path.isdir(mat_dir) else set()
+    try:
+        r = _run("score")
+        assert r.returncode == 0
+        assert "功能指纹台账" in r.stdout and "指纹基线已落盘" in r.stdout
+        assert "T1.1-T1.4" in r.stdout, "评分待实装指引保留"
+    finally:
+        for n in set(os.listdir(mat_dir)) - before:
+            os.remove(os.path.join(mat_dir, n))
 
 
 def test_matrix_stub():

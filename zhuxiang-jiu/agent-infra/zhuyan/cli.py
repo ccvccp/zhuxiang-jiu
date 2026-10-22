@@ -15,8 +15,6 @@ import sys
 __version__ = "0.1.0"
 
 STUBS = {
-    "score": "P1(T1.1-T1.4) 实现: 三维成熟度评分(S_b 业务链关联/调用面频次, "
-             "S_r 静态代理特征, S_e 测试/契约/低耦合/规范性+罚分项)→评分报告, B3 分档回放",
     "matrix": "P2(T2.1) 实现: 价值×质量四象限→优先进化区/战略保护区/观察等待区/维持现状区矩阵报告",
     "analogize": "P2(T2.2-T2.4+T3.1) 实现: 种子核查+反模式 FastFilter+cases 检索复用"
                  "→进化方案三策略(只出不施), B4 拦截回放",
@@ -49,6 +47,12 @@ def main(argv=None):
     if not args.command:
         parser.print_help()
         return 0
+    if args.command == "score":
+        pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if pkg_parent not in sys.path:
+            sys.path.insert(0, pkg_parent)
+        from zhuyan import fingerprint
+        return fingerprint.run(args)
     if args.command in STUBS:
         print(f"[zhuyan {args.command}] 骨架占位——{STUBS[args.command]}")
         return 0
