@@ -57,15 +57,16 @@ def test_t03_save_roundtrip(tmp_path):
     assert loaded[0]["unit_id"], "json 结构完整"
 
 
-def test_t03_cli_score(tmp_path):
-    """CLI score 分发: 指纹台账三类输出+落盘(子进程落盘真目录, 差集自清理)"""
+def test_t03_fingerprint_script(tmp_path):
+    """fingerprint 脚本直跑: 指纹台账三类输出+落盘(子进程落盘真目录, 差集自清理)"""
     import subprocess
     mat_dir = os.path.join(zf.REPO_ROOT, "docs", "registry", "maturity")
     before = set(os.listdir(mat_dir)) if os.path.isdir(mat_dir) else set()
     try:
-        r = subprocess.run([sys.executable, os.path.join(HERE, "cli.py"), "score"],
-                           check=False, capture_output=True, text=True,
-                           encoding="utf-8", timeout=180)
+        r = subprocess.run(
+            [sys.executable, os.path.join(HERE, "fingerprint.py")],
+            check=False, capture_output=True, text=True,
+            encoding="utf-8", timeout=180)
         assert r.returncode == 0
         assert "功能指纹台账" in r.stdout and "端点" in r.stdout
         assert "指纹基线已落盘" in r.stdout

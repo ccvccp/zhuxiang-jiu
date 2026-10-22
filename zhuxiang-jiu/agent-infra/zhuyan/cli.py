@@ -51,8 +51,8 @@ def main(argv=None):
         pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if pkg_parent not in sys.path:
             sys.path.insert(0, pkg_parent)
-        from zhuyan import fingerprint
-        return fingerprint.run(args)
+        from zhuyan import score
+        return score.run(args)
     if args.command in STUBS:
         print(f"[zhuyan {args.command}] 骨架占位——{STUBS[args.command]}")
         return 0
