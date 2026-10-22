@@ -162,6 +162,14 @@ def run(args=None):
     print(f"[zhuyan score] T0.3 指纹基线已落盘: {out}")
     print("[zhuyan score] S_b/S_r/S_e 三维评分在 T1.1-T1.4 逐维实装, "
           "口径见 docs/registry/maturity/成熟度评分标准.md")
+    try:
+        from zhuyan import stats as stats_mod
+    except ImportError:
+        import stats as stats_mod
+    ok = stats_mod.report_stats(metrics={
+        "endpoints": by_type["endpoint"], "modules": by_type["module"],
+        "pages": by_type["page"]})
+    print(f"[zhuyan score] 度量上报 zhuyan:stats {'成功' if ok else '降级(仅打印)'}")
     return 0
 
 
