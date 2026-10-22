@@ -73,3 +73,80 @@ def test_t11_real_smoke():
     s, ev = zs.sb_unit(_QR_SCAN, ctx)
     assert s > 0, "链命中即 S_b>0"
     assert ev["hit_chains"]
+
+
+# ---------- T1.2 S_r 运行稳健(静态代理) ----------
+
+_SR_SAMPLE = '''\
+def a(x):
+    try:
+        return retry_call(x)
+    except ValueError:
+        raise
+
+def b(y):
+    return y
+
+def c(z):
+    assert isinstance(z, int), "校验"
+    return z
+
+def lock_guard(w):
+    with threading.Lock():
+        return w
+'''
+
+
+def test_t12_sr_synthetic_evidence():
+    """合成取证: 四子指标归一正确(异常 1/4+容错 retry+校验 1/4+并发 Lock)"""
+    ctx = {"backend/core/sample.py": _SR_SAMPLE}
+    unit = {"unit_id": "core/sample.py", "unit_type": "module",
+            "file": "backend/core/sample.py"}
+    s, ev = zs.sr_unit(unit, ctx)
+    assert ev["exception_rate"] == 0.25, "4 块中仅 a 块含 try/raise"
+    assert ev["fault_features"] == ["retry"], "1 类容错特征=0.5 档"
+    assert ev["validation_rate"] == 0.25, "4 块中 1 块含校验特征"
+    assert ev["concurrency"] == 1.0, "threading.Lock 文件级命中"
+    expect = round(0.35 * 0.25 + 0.30 * 0.5 + 0.20 * 0.25 + 0.15 * 1.0, 2)
+    assert s == expect, f"权重合成 {expect}"
+    assert "APM 缺位" in ev["static_proxy"], "静态代理如实标注"
+
+
+def test_t12_sr_real_core_evidence():
+    """验收口径: 特征正则对 core 真实代码取证——locks.py 并发特征天然命中"""
+    units = [u for u in __import__("fingerprint").enumerate_units()
+             if u["unit_type"] == "module"]
+    ctx = zs.build_sr_context(units)
+    locks = next(u for u in units if u["unit_id"] == "core/locks.py")
+    s, ev = zs.sr_unit(locks, ctx)
+    assert ev["concurrency"] == 1.0, "locks.py 锁模块并发特征必命中"
+    assert s >= 0.15
+    assert 0.0 <= ev["exception_rate"] <= 1.0, "真实取证比率界内"
+
+
+def test_t12_sr_page_and_missing_file():
+    """页面无 Python 运行面如实 0; 源文件缺失如实 0"""
+    page = {"unit_id": "index.html", "unit_type": "page", "file": "index.html"}
+    s, ev = zs.sr_unit(page, {})
+    assert s == 0.0 and ev["note"]
+    gone = {"unit_id": "X /api/none", "unit_type": "endpoint",
+            "file": "backend/routes/none.py"}
+    s, ev = zs.sr_unit(gone, {"backend/routes/none.py": ""})
+    assert s == 0.0 and "缺失" in ev["note"]
+
+
+def test_t12_sr_fault_kinds_normalization():
+    """容错特征档位: 0 类=0 / 1 类=0.5 / ≥2 类=1.0"""
+    cases = [
+        (_SR_SAMPLE, 0.5),  # retry 一类
+        ("def f():\n    return timeout_call()\n", 0.5),  # timeout 一类
+        ("def f():\n    retry\n    超时\n", 1.0),  # 两类
+        ("def f():\n    return 1\n", 0.0),  # 无
+    ]
+    for text, expect in cases:
+        ctx = {"m.py": text}
+        unit = {"unit_id": "core/m.py", "unit_type": "module", "file": "m.py"}
+        _s, ev = zs.sr_unit(unit, ctx)
+        n = len(ev["fault_features"])
+        fault_v = 0.0 if n == 0 else (0.5 if n == 1 else 1.0)
+        assert abs(fault_v - expect) < 0.01, f"特征 {ev['fault_features']} 档位"

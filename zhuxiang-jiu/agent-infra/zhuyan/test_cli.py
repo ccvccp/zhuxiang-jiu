@@ -25,13 +25,14 @@ def test_no_args_prints_help():
     assert "zhuyan" in r.stdout
 
 
-def test_score_t11_real():
-    """T1.1 实装: score 分发 S_b 评分视图(链命中分布+Top 样例)"""
+def test_score_t12_real():
+    """T1.2 实装: score 分发 S_b+S_r 双维度视图(静态代理标注+Top 样例)"""
     r = _run("score")
     assert r.returncode == 0
     assert "S_b 业务价值" in r.stdout and "链命中分布" in r.stdout
-    assert "[S_b=" in r.stdout, "Top 样例评分行"
-    assert "T1.2" in r.stdout, "后续维度待实装指引"
+    assert "S_r 运行稳健" in r.stdout and "静态代理" in r.stdout
+    assert "[S_b=" in r.stdout and "[S_r=" in r.stdout, "双维度 Top 样例行"
+    assert "T1.3" in r.stdout, "后续维度待实装指引"
 
 
 def test_matrix_stub():
