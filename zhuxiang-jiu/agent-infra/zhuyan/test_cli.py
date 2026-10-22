@@ -62,10 +62,23 @@ def test_matrix_t21_real():
             os.remove(os.path.join(rep_dir, n))
 
 
-def test_analogize_stub():
-    r = _run("analogize")
-    assert r.returncode == 0
-    assert "只出不施" in r.stdout and "B4" in r.stdout
+def test_analogize_t24_real():
+    """T2.4 实装: analogize 分发单目标深度方案(--target 快路径, 差集自清理)"""
+    import os
+
+    rep_dir = os.path.join(os.path.dirname(HERE), "..", "docs", "registry",
+                           "reports")
+    rep_dir = os.path.abspath(rep_dir)
+    before = set(os.listdir(rep_dir)) if os.path.isdir(rep_dir) else set()
+    try:
+        r = _run("analogize", "--target", "activity-detail.html")
+        assert r.returncode == 0
+        assert "类比推荐" in r.stdout and "痛点" in r.stdout
+        assert "策略A" in r.stdout and "策略B" in r.stdout and "策略C" in r.stdout
+        assert "只出不施" in r.stdout and "类比推荐报告已归档" in r.stdout
+    finally:
+        for n in set(os.listdir(rep_dir)) - before:
+            os.remove(os.path.join(rep_dir, n))
 
 
 def test_evolve_stub():

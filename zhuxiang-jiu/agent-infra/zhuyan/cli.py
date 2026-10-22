@@ -15,8 +15,6 @@ import sys
 __version__ = "0.1.0"
 
 STUBS = {
-    "analogize": "P2(T2.2-T2.4+T3.1) 实现: 种子核查+反模式 FastFilter+cases 检索复用"
-                 "→进化方案三策略(只出不施), B4 拦截回放",
     "evolve": "P3(T3.2) 实现: 进化案例 EVO 编号五段式/六要素 schema→草稿人工确认门入 cases",
 }
 
@@ -58,6 +56,12 @@ def main(argv=None):
             sys.path.insert(0, pkg_parent)
         from zhuyan import matrix
         return matrix.run(args)
+    if args.command == "analogize":
+        pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if pkg_parent not in sys.path:
+            sys.path.insert(0, pkg_parent)
+        from zhuyan import analogize
+        return analogize.run(args)
     if args.command in STUBS:
         print(f"[zhuyan {args.command}] 骨架占位——{STUBS[args.command]}")
         return 0
