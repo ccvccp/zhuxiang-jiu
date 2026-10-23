@@ -1,0 +1,3649 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
+<title>小竹智能语音精灵 · 竹香网</title>
+<style>
+:root{--green:#2f7d52;--green-deep:#1d5a39;--green-soft:#e8f4ec;
+      --gold:#c98a2d;--tx:#1f2d3d;--tx2:#6b7a8d;--bd:#dfe7e2;
+      --card:#fff;--bg:#f4f7f5;--red:#b5453c}
+*{margin:0;padding:0;box-sizing:border-box}
+html{height:100%;overflow-y:auto}
+body{height:100%}
+body{font-family:"PingFang SC","Microsoft YaHei",sans-serif;background:
+     var(--bg);color:var(--tx);display:flex;flex-direction:column;
+     align-items:center;transition:background .6s ease;
+     min-height:100vh;min-height:100dvh;padding:12px 12px 0}
+body[data-bg="sunny"]{background:linear-gradient(165deg,#fdf6e3,#eaf4ec)}
+body[data-bg="rainy"]{background:linear-gradient(165deg,#dfe7ef,#c9d6e2)}
+body[data-bg="snowy"]{background:linear-gradient(165deg,#eef4fa,#dbe7f0)}
+body[data-bg="foggy"]{background:linear-gradient(165deg,#eceff1,#dfe4e8)}
+body[data-bg="cloudy"]{background:linear-gradient(165deg,#eef1f2,#e2e8ea)}
+body[data-bg="festival"]{background:linear-gradient(165deg,#f9e8dc,#f3d9c4)}
+body[data-bg="night"]{background:linear-gradient(165deg,#1c2b3b,#16222f)}
+body[data-bg="night"] .footer,body[data-bg="night"] .hint{color:#8fa3b8}
+.wrap{width:100%;max-width:680px;display:flex;flex-direction:column;
+      flex:1;min-height:0}
+h1{font-size:16px;text-align:center;color:var(--green-deep);margin-bottom:8px}
+.iphead{text-align:center;margin:2px 0 4px}
+.iphead img{width:64px;height:64px;object-fit:contain}
+body.talking .iphead{display:none}
+h1 small{display:block;font-size:11px;color:var(--tx2);font-weight:400;margin-top:2px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;
+      padding:18px 20px;margin-bottom:12px}
+.hidden{display:none!important}
+/* ---- 登录卡 ---- */
+.card input{width:100%;height:44px;padding:0 12px;border:1px solid var(--bd);
+      border-radius:8px;font-size:14px;margin-bottom:10px;
+      -webkit-appearance:none;appearance:none}
+.btn{display:inline-block;padding:10px 18px;border:none;border-radius:8px;
+      background:var(--green);color:#fff;font-size:14px;cursor:pointer;
+      transition:transform .08s ease}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.ghost{background:var(--green-soft);color:var(--green-deep)}
+.btn.gold{background:var(--gold)}
+.hint{font-size:12px;color:var(--tx2);line-height:1.8}
+/* ---- 情景条(紧凑) ---- */
+.scene{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+      background:var(--card);border:1px solid var(--bd);border-radius:12px;
+      padding:9px 14px;margin-bottom:8px;font-size:12px;color:var(--tx2)}
+.scene .greet{font-size:13.5px;font-weight:600;color:var(--green-deep);
+      flex-basis:100%;line-height:1.45;white-space:nowrap;overflow:hidden;
+      text-overflow:ellipsis}
+.scene .w-ico{display:inline-block;width:20px;height:20px;border-radius:6px;
+      background:var(--green-soft);text-align:center;line-height:20px;flex-shrink:0}
+.pill{display:inline-block;padding:1px 10px;border-radius:10px;
+      font-size:11px;font-weight:600;background:var(--green-soft);
+      color:var(--green-deep)}
+.pill.gray{background:#eef1f4;color:var(--tx2)}
+.pill.gold{background:#f7ecd9;color:var(--gold)}
+/* v82-D 状态机指示灯配色(五态可视) */
+.pill.green{background:#e2f2e8;color:#2c6e49}
+.pill.yellow{background:#f9efd6;color:#8a6d1a}
+.pill.blue{background:#e2ecf7;color:#2c5a8f}
+.pill.wake-on{animation:wakep 2.4s ease-in-out infinite}
+@keyframes wakep{0%,100%{box-shadow:0 0 0 0 rgba(47,125,82,.25)}
+      50%{box-shadow:0 0 0 5px rgba(47,125,82,0)}}
+/* ---- 会话条(紧凑) ---- */
+.sbar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;
+      background:var(--card);border:1px solid var(--bd);border-radius:12px;
+      padding:8px 14px;margin-bottom:8px;font-size:12px;color:var(--tx2)}
+.sbar b{color:var(--green-deep)}
+.sbar .sp{flex:1}
+.sbtn{padding:4px 12px;border-radius:6px;border:1px solid var(--bd);
+      background:#fff;color:var(--tx);font-size:12px;cursor:pointer;
+      transition:border-color .15s}
+.sbtn:hover{border-color:var(--green);color:var(--green-deep)}
+/* ---- 主区: 全屏聊天布局 ---- */
+#main{display:flex;flex-direction:column;flex:1;min-height:0}
+/* ---- 消息流 ---- */
+.chat{flex:1;min-height:120px;background:var(--card);border:1px solid var(--bd);
+      border-radius:12px;padding:16px;overflow-y:auto;overscroll-behavior:contain;
+      margin-bottom:8px;scroll-behavior:smooth}
+.chat::-webkit-scrollbar{width:5px}
+.chat::-webkit-scrollbar-thumb{background:#c8d4cd;border-radius:3px}
+.chat::-webkit-scrollbar-track{background:transparent}
+@keyframes msgin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.msg{display:flex;margin-bottom:14px;animation:msgin .25s ease}
+.msg.user{justify-content:flex-end}
+.avatar{width:34px;height:34px;border-radius:50%;flex-shrink:0;
+      background:linear-gradient(135deg,#3a9664,#1d5a39);color:#fff;
+      display:flex;align-items:center;justify-content:center;
+      font-size:15px;font-weight:600;box-shadow:0 2px 6px rgba(29,90,57,.25)}
+.bubble{max-width:78%;padding:10px 14px;border-radius:12px;
+      font-size:14px;line-height:1.7;word-break:break-word}
+.msg.user .bubble{background:var(--green);color:#fff;border-top-right-radius:4px}
+.msg.bot .bubble{background:var(--green-soft);color:var(--tx);
+      border-top-left-radius:4px;margin-left:8px;position:relative}
+.msg.err .bubble{background:#fbeeec;color:var(--red)}
+/* TTS 播报中指示(点击气泡可停止播报) */
+.bubble.speaking{box-shadow:0 0 0 2px rgba(201,138,45,.55);cursor:pointer}
+.bubble.speaking::after{content:"🔊 播报中";position:absolute;top:-9px;
+      right:10px;font-size:10px;background:var(--gold);color:#fff;
+      padding:1px 8px;border-radius:8px;animation:blink 1.2s infinite}
+@keyframes blink{50%{opacity:.5}}
+.badges{margin-top:6px;font-size:10.5px;color:var(--tx2);display:flex;
+      align-items:center;gap:4px;flex-wrap:wrap}
+.badges .pill{margin:0}
+.badges .t{margin-left:auto;letter-spacing:.5px}
+.msg.user .badges .t{color:rgba(255,255,255,.75)}
+.wakewarn{margin-top:6px;font-size:12px;color:var(--gold)}
+/* 思考中指示 */
+.typing{display:inline-flex;gap:4px;align-items:center;height:16px}
+.typing i{width:6px;height:6px;border-radius:50%;background:var(--green);
+      animation:tp 1.2s infinite}
+.typing i:nth-child(2){animation-delay:.2s}
+.typing i:nth-child(3){animation-delay:.4s}
+@keyframes tp{0%,60%,100%{transform:translateY(0);opacity:.35}
+      30%{transform:translateY(-5px);opacity:1}}
+/* ---- 引导卡(空态) ---- */
+.guide{margin:6px 0 12px 42px;padding:14px;border:1.5px dashed #bcd4c5;
+      border-radius:12px;text-align:center;animation:msgin .25s ease}
+.guide .gt{font-size:12.5px;color:var(--tx2);margin-bottom:10px}
+.guide .grow{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.gbtn{padding:8px 14px;border-radius:8px;background:var(--green-soft);
+      color:var(--green-deep);font-size:13px;cursor:pointer;border:none;
+      transition:background .15s}
+.gbtn:hover{background:#d5eadf}
+.gbtn:active{background:#c8e3d2}
+/* ---- 卡片 ---- */
+.kcard{margin-top:10px;background:#fff;border:1px solid var(--bd);
+      border-radius:10px;padding:10px 12px;font-size:13px}
+.kcard .ttl{font-weight:600;color:var(--green-deep);margin-bottom:6px}
+.prow{display:flex;align-items:center;gap:8px;padding:7px 4px;
+      border-bottom:1px dashed var(--bd);font-size:13px}
+.prow:last-child{border-bottom:none}
+.prow .nm{flex:1}
+.prow .pr{color:var(--red);font-weight:600}
+.prow .pr small{color:var(--tx2);font-weight:400}
+.jumpline{margin:2px 0 14px 42px}
+.jumpbtn{display:inline-block;padding:5px 14px;
+      border-radius:6px;background:var(--gold);color:#fff;
+      font-size:12.5px;cursor:pointer;text-decoration:none;
+      box-shadow:0 2px 6px rgba(201,138,45,.3)}
+.jumpbtn:hover{filter:brightness(1.08)}
+/* ---- 确认码分格 ---- */
+.confirmbox{margin-top:10px;background:#fff;border:1px solid var(--gold);
+      border-radius:10px;padding:12px}
+.confirmbox .ct{font-weight:600;color:var(--gold);margin-bottom:4px}
+.confirmbox .cs{font-size:12.5px;color:var(--tx2);margin-bottom:10px;line-height:1.7}
+.ccells{display:flex;gap:8px;margin-bottom:10px}
+.ccell{width:46px;height:52px;border:1.5px solid var(--bd);border-radius:8px;
+      text-align:center;font-size:22px;font-weight:700;color:var(--green-deep);
+      background:#fff;caret-color:var(--gold)}
+.ccell:focus{border-color:var(--gold);outline:none;
+      box-shadow:0 0 0 3px rgba(201,138,45,.15)}
+.ccell.filled{border-color:var(--green);background:var(--green-soft)}
+/* ---- 快捷指令(单行横滑) ---- */
+.chips{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;
+      margin-bottom:8px;padding:2px 2px 6px;scrollbar-width:none;
+      -webkit-overflow-scrolling:touch;mask-image:linear-gradient(90deg,#000 92%,transparent);
+      -webkit-mask-image:linear-gradient(90deg,#000 92%,transparent)}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex-shrink:0;padding:5px 12px;border-radius:14px;background:var(--card);
+      border:1px solid var(--bd);font-size:12px;color:var(--green-deep);
+      cursor:pointer;white-space:nowrap;transition:all .15s}
+.chip:hover{border-color:var(--green);background:var(--green-soft)}
+.chip:active{transform:scale(.96)}
+/* ---- 78号·悦声灵犀: 兜底轮选项引导 chips(P2 容错"点哪发哪") ---- */
+.srow{display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 14px 42px;
+      animation:msgin .25s ease}
+.srow .chip{border-color:#bcd4c5;background:var(--green-soft)}
+/* ---- 输入区(常驻底部) ---- */
+.composer{position:relative;background:var(--card);border:1px solid var(--bd);
+      border-radius:12px;padding:12px 16px;
+      padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+/* 回到最新(消息流离底时浮现) */
+.downbtn{position:absolute;top:-46px;right:14px;width:36px;height:36px;
+      border-radius:50%;border:1px solid var(--bd);background:var(--card);
+      color:var(--green-deep);font-size:15px;cursor:pointer;display:none;
+      box-shadow:0 2px 8px rgba(0,0,0,.14);z-index:5}
+.downbtn.show{display:block;animation:msgin .2s ease}
+.modes{display:flex;gap:6px;margin-bottom:10px;align-items:center}
+.seg{display:flex;border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+.seg button{padding:5px 12px;border:none;background:#fff;font-size:12px;
+      color:var(--tx2);cursor:pointer;transition:all .15s}
+.seg button.on{background:var(--green);color:#fff}
+.modes .sp{flex:1}
+/* X5 窄屏(<368px 溢出阈值)顶栏换行防溢出; 胶囊允许收缩防
+   select 原生控件渲染更宽出框(荣耀 360px 临界实证) */
+.modes{flex-wrap:wrap}
+.tts{font-size:12px;color:var(--tx2);cursor:pointer;user-select:none;
+      padding:4px 8px;border-radius:6px;min-width:0;max-width:44vw;
+      overflow:hidden}
+.tts:hover{background:var(--green-soft)}
+.microw{display:flex;align-items:center;gap:14px}
+.mic{width:60px;height:60px;border-radius:50%;border:none;cursor:pointer;
+      background:var(--green);color:#fff;font-size:24px;flex-shrink:0;
+      box-shadow:0 4px 12px rgba(47,125,82,.35);position:relative;
+      display:flex;align-items:center;justify-content:center;
+      transition:background .2s;touch-action:none;user-select:none;
+      -webkit-user-select:none;-webkit-tap-highlight-color:transparent}
+.mic.on{background:var(--red);animation:pulse 1.2s infinite}
+.mic.off{background:#b8c4bd;box-shadow:none;pointer-events:none}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(181,69,60,.45)}
+      70%{box-shadow:0 0 0 16px rgba(181,69,60,0)}
+      100%{box-shadow:0 0 0 0 rgba(181,69,60,0)}}
+.mic:active{transform:scale(.95)}
+.micside{flex:1;min-width:0}
+.wave{display:none;align-items:center;gap:3px;height:24px}
+.wave.show{display:flex}
+.wave i{width:3px;background:var(--green);border-radius:2px;
+      animation:wv 1s ease-in-out infinite}
+.wave i:nth-child(1){height:7px;animation-delay:0s}
+.wave i:nth-child(2){height:15px;animation-delay:.12s}
+.wave i:nth-child(3){height:22px;animation-delay:.24s}
+.wave i:nth-child(4){height:12px;animation-delay:.36s}
+.wave i:nth-child(5){height:20px;animation-delay:.48s}
+.wave i:nth-child(6){height:9px;animation-delay:.6s}
+.wave i:nth-child(7){height:17px;animation-delay:.72s}
+.wave i:nth-child(8){height:11px;animation-delay:.84s}
+.wave.red i{background:var(--red)}
+/* 真实音量驱动态(云端录音 AnalyserNode RMS → --amp) */
+.wave.live i{animation:none;transform:scaleY(var(--amp,.3))}
+@keyframes wv{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
+.status{font-size:12px;color:var(--tx2);line-height:1.6;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.status b{color:var(--green-deep)}
+.status .rec{color:var(--red);font-variant-numeric:tabular-nums}
+.interim{margin-top:4px;font-size:13.5px;color:var(--tx);min-height:20px;
+      line-height:1.5}
+.interim b{color:var(--gold)}
+.trow{display:flex;gap:10px;margin-top:10px}
+.trow input{flex:1;height:44px;padding:0 12px;border:1px solid var(--bd);
+      border-radius:8px;font-size:14px;transition:border-color .15s;
+      -webkit-appearance:none;appearance:none}
+.trow input:focus{border-color:var(--green);outline:none}
+/* ===== 唤醒词设置浮层(embed 态) ===== */
+.ww-mask{position:fixed;inset:0;background:rgba(15,25,20,.45);z-index:70;
+  display:flex;align-items:center;justify-content:center;padding:20px}
+.ww-card{background:var(--card);border:1px solid var(--bd);border-radius:14px;
+  padding:16px 18px;max-width:420px;width:100%;font-size:13px;color:var(--tx);
+  box-shadow:0 12px 40px rgba(0,0,0,.25);display:flex;flex-direction:column;gap:10px}
+.ww-card b{font-size:15px;color:var(--green-deep)}
+.ww-cur{color:var(--tx2)}
+.ww-cur span{color:var(--green-deep);font-weight:600}
+.ww-presets{display:flex;gap:8px;flex-wrap:wrap}
+.ww-presets button{flex:1;min-width:130px;border:1px solid var(--bd);background:var(--green-soft);
+  color:var(--green-deep);border-radius:10px;padding:8px 10px;font-size:13px;
+  cursor:pointer;display:flex;flex-direction:column;gap:2px;align-items:center}
+.ww-presets button span{font-size:11px;color:var(--tx2);font-weight:400}
+.ww-presets button:active{background:var(--green);color:#fff}
+.ww-custom{display:flex;gap:8px}
+.ww-custom input{flex:1;border:1px solid var(--bd);border-radius:10px;
+  padding:8px 12px;font-size:13px;outline:none}
+.ww-custom input:focus{border-color:var(--green)}
+.ww-custom button{border:none;border-radius:10px;background:var(--green);
+  color:#fff;padding:8px 18px;font-size:13px;cursor:pointer}
+.ww-preview{font-size:12px;color:var(--green-deep);background:var(--green-soft);
+  border-radius:8px;padding:7px 10px;display:none}
+.ww-preview.show{display:block}
+.ww-note{font-size:11px;color:var(--tx2);line-height:1.6}
+
+.toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);
+      background:rgba(31,45,61,.92);color:#fff;padding:9px 20px;
+      border-radius:8px;font-size:13px;display:none;z-index:99;
+      box-shadow:0 4px 16px rgba(0,0,0,.25)}
+.footer{font-size:10.5px;color:var(--tx2);text-align:center;
+      line-height:1.7;margin:6px 0 8px;padding:0 10px;flex-shrink:0}
+@media (max-width:480px){
+  .mic{width:54px;height:54px;font-size:21px}
+  .bubble{max-width:84%;font-size:13.5px}
+  .scene .greet{font-size:13px}
+  .guide .grow{flex-direction:column}
+  .ccell{width:42px;height:48px}
+}
+/* 矮视口兜底(横屏/小窗): 收缩非关键区防溢出 */
+@media (max-height:560px){
+  .guide{display:none}
+  .footer{display:none}
+  h1 small{display:none}
+  .scene{padding:6px 12px}
+  .chat{min-height:80px}
+  .mic{width:46px;height:46px;font-size:18px}
+  .composer{padding:8px 14px}
+}
+/* embed 模式(全站浮层iframe): 隐藏页脚声明省空间 */
+body.embed .footer{display:none}
+/* iOS 触屏输入修复: 字号≥16px 防 Safari 聚焦自动缩放(输入框视觉"异常变大"根因) */
+@media (hover:none) and (pointer:coarse){
+  .trow input,.card input{font-size:16px}
+  .ccell{font-size:22px}
+}
+/* 软键盘弹起态(VV 适配 JS 加 .kb): 释放 safe-area 底部增量防 composer 异常增高 */
+body.kb .composer{padding-bottom:12px}
+/* ===== 商品面板(当前推荐款常驻——图+价+购买按钮) ===== */
+.ppanel{display:flex;gap:10px;align-items:center;background:#fff;
+  border:1px solid var(--bd);border-radius:12px;padding:10px;
+  margin:4px 10px 6px;box-shadow:0 2px 8px rgba(15,76,129,.07);flex-shrink:0}
+.ppanel.hidden{display:none}
+.ppanel .pimg{width:62px;height:62px;border-radius:8px;object-fit:cover;
+  flex-shrink:0;background:#f0f5ef}
+.ppanel .pimg-ph{display:flex;align-items:center;justify-content:center;
+  font-size:26px;color:#9db89d}
+.ppanel .pinfo{flex:1;min-width:0}
+.ppanel .pname{font-weight:600;font-size:13px;color:var(--tx, #333);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ppanel .ptags{margin:3px 0 2px;white-space:nowrap;overflow:hidden}
+.ppanel .ptag{font-size:10px;background:#eef5ee;color:#2d6a2d;
+  border-radius:4px;padding:1px 5px;margin-right:4px;display:inline-block}
+.ppanel .ptag.graytag{background:#f2f2f2;color:#888}
+.ppanel .pprice{color:#b5453c;font-weight:700;font-size:15px}
+.ppanel .pbtns{display:flex;flex-direction:column;gap:5px;flex-shrink:0}
+.ppanel .pbtns .btn{white-space:nowrap;padding:5px 10px;font-size:12px;margin:0}
+@media (max-width:480px){
+  .ppanel .pimg{width:54px;height:54px}
+  .ppanel .pbtns .btn{padding:4px 8px;font-size:11px}
+}
+@media (max-height:560px){ .ppanel{display:none} }
+/* v2 A: 气泡反馈条 */
+.fbbar{display:flex;gap:6px;margin-top:8px;padding-top:6px;
+  border-top:1px dashed rgba(53,92,68,.18)}
+.fb{border:1px solid rgba(53,92,68,.25);background:#fff;
+  border-radius:14px;padding:1px 10px;font-size:13px;
+  cursor:pointer;line-height:1.5;color:#555}
+.fb:hover{border-color:#355c44}
+.fb.on{background:#355c44;color:#fff;border-color:#355c44}
+/* v2 折叠模式: 对话时收起气泡以上区域, 放大观测面
+   (.wrap flex 列布局, .chat flex:1 自然吃掉释放的高度) */
+body.talking .wrap>h1{font-size:14px;padding:4px 0;margin:0 0 4px}
+body.talking .wrap>h1 small{display:none}
+body.talking .scene{display:none}
+body.talking .sbar{padding:3px 10px;font-size:11px;gap:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<!-- IP形象·竹香酒IP(金鹿瑞兽)与小竹人格合一 -->
+<div class="iphead"><img src="/images/ip/ip-transparent.png" alt="小竹·竹香酒IP形象"></div>
+<h1>小竹智能语音精灵<small>说一句话 · 完成所有操作</small></h1>
+
+<!-- 登录卡 -->
+<div class="card" id="loginCard">
+  <div style="font-size:14px;font-weight:600;color:var(--green-deep);margin-bottom:12px">登录后开启语音会话</div>
+  <input id="phone" placeholder="手机号" maxlength="11" inputmode="numeric">
+  <input id="pwd" type="password" placeholder="密码">
+  <button class="btn" id="loginBtn" onclick="doLogin()" style="width:100%">登录</button>
+  <button class="btn ghost" onclick="quickFill()" style="width:100%;margin-top:8px">体验账号快捷填充</button>
+  <div class="hint" style="margin-top:10px">语音会话需登录（生产 strict 鉴权）；未登录可浏览页面框架与情景问候。</div>
+</div>
+
+<!-- 主区 -->
+<div id="main" class="hidden">
+  <div class="scene">
+    <div class="greet" id="greet">正在感知您的时空情景…</div>
+    <span class="w-ico" id="wico">🌡</span><span id="weather">…</span>
+    <span class="pill gray" id="ctxLevel">—</span>
+    <span class="pill gray" id="ctxBind">—</span>
+  </div>
+
+  <div class="sbar">
+    <span>会话 <b id="sid">…</b></span>
+    <span>轮次 <b id="tcount">0</b></span>
+    <span class="pill gray" id="wakePill">待唤醒</span>
+    <span class="pill gray" id="modePill">assist</span>
+    <!-- v82-D 状态机指示灯: 五态实时可视(全双工范式
+         "状态机可视化调试"——转换 console [SM] 留痕同出) -->
+    <span class="pill gray" id="smBadge"
+          title="语音状态机">待机</span>
+    <span class="sp"></span>
+    <button class="sbtn" onclick="newSession()">新会话</button>
+    <button class="sbtn" onclick="clearSession()">清除记录</button>
+    <button class="sbtn" id="foldBtn" onclick="setFold()">折叠 ▼</button>
+  </div>
+
+  <div class="chat" id="chat"></div>
+
+  <div class="chips" id="chips"></div>
+
+  <!-- 商品面板: 当前推荐款常驻展示(图+价+购买按钮)——
+       购物氛围入口, 不埋进聊天气泡 -->
+  <div class="ppanel hidden" id="ppanel"></div>
+
+  <div class="composer">
+    <button class="downbtn" id="downBtn" title="回到最新" onclick="scrollChat()">↓</button>
+    <div class="modes">
+      <span class="tts" id="wakeBtn" onclick="toggleWake()" style="cursor:pointer;display:none">📣 唤醒开</span>
+      <span class="sp" id="wakeSp" style="display:none"></span>
+      <span class="tts" id="wakeWordBtn" onclick="showWakeWordSet()" style="cursor:pointer" title="唤醒词设置">⚙️ 唤醒词</span>
+      <span class="sp" id="wakeWordSp"></span>
+      <span class="tts" id="hfBtn" onclick="toggleHandfree()" style="cursor:pointer">🎧 免提开</span>
+      <span class="sp"></span>
+      <span class="tts" id="ttsBtn" onclick="toggleTts()" style="cursor:pointer">🔊 播报开</span>
+      <span class="sp"></span>
+      <span class="tts" style="cursor:default" title="播报语速">语速
+        <select id="speedSel" onchange="setTtsSpeed(this.value)" style="border:none;background:transparent;color:inherit;font-size:12px;cursor:pointer;padding:0">
+          <option value="0.8">慢</option><option value="1" selected>标准</option><option value="1.2">快</option>
+        </select></span>
+      <span class="sp"></span>
+      <span class="tts" style="cursor:default" title="播报音色（悦声灵犀·多音色人格）">音色
+        <select id="voiceSel" onchange="setVoice(this.value)" style="border:none;background:transparent;color:inherit;font-size:12px;cursor:pointer;padding:0;max-width:72px"></select></span>
+    </div>
+    <div class="microw">
+      <button class="mic" id="mic" onclick="micClick()">🎤</button>
+      <div class="micside">
+        <div class="wave" id="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="status" id="micStatus">点击麦克风开始说话（需 HTTPS + 麦克风授权）</div>
+        <div class="interim" id="interim"></div>
+      </div>
+    </div>
+    <div class="trow">
+      <input id="tinput" placeholder="或打字输入：小竹，看新品" onkeydown="if(event.key==='Enter')sendFromInput()">
+      <button class="btn" id="sendBtn" onclick="sendFromInput()">发送</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- 唤醒词设置浮层(embed 面板与独立页通用): 预设 + 自定义 -->
+<div class="ww-mask hidden" id="wwMask" onclick="hideWakeWordSet()">
+  <div class="ww-card" onclick="event.stopPropagation()">
+    <b>⚙️ 唤醒词设置</b>
+    <div class="ww-cur">当前：<span id="wwCur">小竹、小竹 / 你好小竹（双词并存 · 默认）</span></div>
+    <div class="ww-presets">
+      <button type="button" onclick="applyWakeWordPreset('')">小竹、小竹 + 你好小竹<span>双词并存 · 默认 · 同音容错</span></button>
+    </div>
+    <div class="ww-custom">
+      <input id="wwInput" maxlength="8" placeholder="自定义核心词（自动补全「小竹」前缀）"
+             oninput="renderWwPreview()">
+      <button type="button" onclick="saveWakeWordCustom()">保存</button>
+    </div>
+    <div class="ww-preview" id="wwPreview"></div>
+    <div class="ww-note">自定义词自动补全「小竹」前缀（输入「精灵」= 呼唤「小竹精灵」），并支持同音容错（按普通话拼音匹配，「精灵」被听成「京玲」也能唤醒）；清空输入保存即恢复默认。面板内修改即时生效（「小竹球」唤醒监听无需重启）；独立页修改保存后，下次打开主站任意页生效。</div>
+  </div>
+</div>
+<div class="footer">唤醒词「小竹、小竹」/「你好小竹」· 免唤醒窗口 5 分钟 · 音频即转即删不落库 · 身份证/手机号/卡号自动脱敏<br>
+高敏操作双因子：语音确认 + 屏幕 4 位确认码（语音念码不算）</div>
+</div>
+
+<script>
+/* ===== 精简 JWT 链(login → localStorage → apiFetch 401 自愈) ===== */
+var AUTH_KEY = "zhuxiang.auth";
+function getAuth() {
+  try {
+    var s = JSON.parse(localStorage.getItem(AUTH_KEY) || "null");
+    if (s && s.token) { return s; }
+  } catch (e) { return null; }
+  /* 商城(Taro H5) auth_session 兜底: 全站浮层 iframe 内
+     商城用户免二次登录(唤醒/点球直达会话) */
+  try {
+    var w = JSON.parse(localStorage.getItem("auth_session") || "null");
+    var d = (w && w.data) ? w.data : w;
+    if (d && d.accessToken) {
+      return {
+        token: d.accessToken,
+        refreshToken: d.refreshToken || null,
+        memberId: d.memberId != null ? d.memberId : null,
+        name: d.nickname || null,
+        phone: d.phone || null,
+        savedAt: Date.now(),
+      };
+    }
+  } catch (e) { /* 忽略解析失败 */ }
+  return null;
+}
+function setAuth(a) { localStorage.setItem(AUTH_KEY, JSON.stringify(a)); }
+function clearAuth() { localStorage.removeItem(AUTH_KEY); }
+/* WS 轨 token 自愈(对齐 apiFetch 401→refresh 链): HTTP 轨有
+   自愈, 但 WS auth 发送时刻 token 空/过期只有静默失败
+   (13:12:24 recv=empty→13:18:42 才被 HTTP 轮触发刷新——
+   6 分钟"唤醒不了"); streamConnect 空发前先单飞刷新一次,
+   下段连接即用新 token; 失败不阻断(按原 token 发, 服务端
+   报错由 onmessage error 分支再触发) */
+var panelRefBusy = false;
+function tryPanelRefreshToken() {
+  if (panelRefBusy) { return Promise.reject(new Error("busy")); }
+  /* 跨 iframe 竞态锁(与 widget tryRefreshToken 共享 xz.refAt
+     ——13:33:24 "Token 已被吊销"根因: 双方并发刷新互相吊销);
+     20s 内有人刷过直接跳过 */
+  try {
+    var sharedAt = parseInt(localStorage.getItem("xz.refAt") || "0", 10);
+    if (Date.now() - sharedAt < 20000) {
+      return Promise.reject(new Error("recently-refreshed"));
+    }
+  } catch (e) { /* 忽略 */ }
+  var auth = getAuth();
+  if (!auth || !auth.refreshToken) {
+    return Promise.reject(new Error("no-refresh-token"));
+  }
+  panelRefBusy = true;
+  try { localStorage.setItem("xz.refAt", String(Date.now())); }
+  catch (e) { /* 忽略 */ }
+  return fetch("/api/auth/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken: auth.refreshToken })
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    panelRefBusy = false;
+    var nt = j && (j.accessToken || (j.data && j.data.accessToken));
+    if (!nt) { return Promise.reject(new Error("refresh-empty")); }
+    setAuth(Object.assign(auth, { token: nt,
+      refreshToken: j.refreshToken || (j.data && j.data.refreshToken)
+      || auth.refreshToken }));
+    return nt;
+  }).catch(function (e) {
+    panelRefBusy = false;
+    return Promise.reject(e);
+  });
+}
+
+function showToast(msg) {
+  var t = document.getElementById("toast");
+  t.textContent = msg; t.style.display = "block";
+  setTimeout(function () { t.style.display = "none"; }, 2400);
+}
+
+function doLogin() {
+  var phone = document.getElementById("phone").value.trim();
+  var pwd = document.getElementById("pwd").value;
+  if (!phone || !pwd) { showToast("请输入手机号和密码"); return; }
+  var btn = document.getElementById("loginBtn");
+  btn.disabled = true; btn.textContent = "登录中…";
+  fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone: phone, password: pwd })
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    btn.disabled = false; btn.textContent = "登录";
+    var token = j && (j.accessToken || (j.data && j.data.accessToken));
+    if (token) {
+      setAuth({ token: token, refreshToken: j.refreshToken || (j.data && j.data.refreshToken) || "", uid: j.memberId || (j.data && j.data.memberId) || 0 });
+      enterMain();
+    } else {
+      showToast((j && (j.error || j.detail)) || "登录失败");
+    }
+  }).catch(function () {
+    btn.disabled = false; btn.textContent = "登录";
+    showToast("网络异常, 请重试");
+  });
+}
+function quickFill() {
+  document.getElementById("phone").value = "13800000001";
+  document.getElementById("pwd").value = "test123456";
+}
+
+/* apiFetch: 401 → refresh → retry 一次 */
+function apiFetch(path, opts) {
+  opts = opts || {};
+  var auth = getAuth();
+  var headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+  if (auth && auth.token) headers["Authorization"] = "Bearer " + auth.token;
+  return fetch(path, Object.assign({}, opts, { headers: headers })).then(function (r) {
+    if (r.status === 401 && auth && auth.refreshToken && !opts.__retried) {
+      return fetch("/api/auth/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: auth.refreshToken })
+      }).then(function (r2) { return r2.json(); }).then(function (j2) {
+        var nt = j2 && (j2.accessToken || (j2.data && j2.accessToken));
+        if (nt) {
+          setAuth(Object.assign(auth, { token: nt }));
+          return apiFetch(path, Object.assign({}, opts, { __retried: true }));
+        }
+        clearAuth(); showLogin();
+        throw new Error("登录已过期");
+      });
+    }
+    return r.json();
+  });
+}
+
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]; }); }
+function nowHM() {
+  var d = new Date();
+  return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+}
+
+/* ===== 全局状态 ===== */
+var S = { sid: null, turnCount: 0, woken: false, pending: false,
+          mode: "cloud", micState: "idle", tts: true,
+          handfree: true, ttsPlaying: false, vadSpoke: false,
+          /* 82号P3: 下发静默完判(0=未下发, 走内置 1200 基线;
+             shadow 态后端恒发 1200 同现行——零行为变化) */
+          vadSilenceMs: 0,
+          /* 82号P3.1: 画像节奏语速档(ttsSpeedVal 消费——仅当
+             用户未手动设置时生效, 显式偏好恒优先) */
+          ttsPace: "normal",
+          hidden: false, lastSpoken: "",
+          ttsCtx: null, ttsSrc: null, packTTS: null,
+          /* 78号P1: 预取缓存音色归属(切音色作废旧缓存);
+             P1·竹语: ttsStream 流式灰度(/voices 下发);
+             P2·O3: decoded 旁路缓存(播过的块零 decode) */
+          packVoice: null, voiceList: null,
+          packDec: null, packDecVoice: null,
+          ttsStream: "off",
+          /* P2·H2 观察期: [LAT] 上报开关 + 协议探测 */
+          latReport: "off", proto: "", lastMood: "",
+          /* v3 TTS 分句流水线: chunks 按序号存已解码块,
+             nextIdx 队首接力; gapSrc 首包过渡音(正文到即让位);
+             ctl 为本轮身份——旧轮回调一律身份比对作废 */
+          ttsCtl: null, ttsChunks: null, ttsNextIdx: 0,
+          ttsCur: null, ttsGapSrc: null,
+          streamPartial: "", latMarks: null };
+
+/* ===== 主流程 ===== */
+function showLogin() {
+  document.getElementById("loginCard").classList.remove("hidden");
+  document.getElementById("main").classList.add("hidden");
+}
+function enterMain() {
+  document.getElementById("loginCard").classList.add("hidden");
+  document.getElementById("main").classList.remove("hidden");
+  loadScene(); loadContext(); loadCommands(); loadVoices();
+  /* TTS 缓存预热: 唤醒应答/常用短句预合成(微信服务端 TTS
+     首次合成 2-4s——预取后唤醒"在呢!"秒回) */
+  setTimeout(preheatTTS, 2500);
+  /* 跳转返回恢复: 有未关闭会话存档(跳转前保存)则恢复,
+     免每次跳转回来都开新会话丢上下文 */
+  if (!tryRestoreChat()) openSession();
+}
+function preheatTTS() {
+  try {
+    var a = getAuth() || {};
+    var h = { "X-Member-Id": String(a.uid || "") };
+    if (a.token) h["Authorization"] = "Bearer " + a.token;
+    /* 音色归属标记(78号P1: 切音色即作废旧缓存防串音) */
+    S.packVoice = voiceVal();
+    /* 高频固定句全预取(真机实证: 兜底/引导句每轮重复出现
+       ——冷合成 2-4s + 网络往返; 预取后零等待零网络);
+       78号P1.5·竹语: 预取项=分句后的"实际块"(块化后整句
+       永不被请求, 预取整句=白烧额度)——"好的——"为推荐轮
+       恒定首块, "我在——"为未唤醒轮恒定首块; care 语速轮
+       (0.92)键不匹配不预取(60s 节流非关键路径) */
+    ["在呢！", "好的", "好的——", "我在——"]
+      .forEach(function (t) {
+      var fv = voiceVal(); /* 在途切音色: 存储时校验防串音 */
+      fetch(ttsUrl(t), { headers: h })
+        .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
+        .then(function (b) {
+          if (b && voiceVal() === fv) {
+            S.packVoice = fv;
+            (S.packTTS = S.packTTS || {})[t] = b;
+          }
+        })
+        .catch(function () {});
+    });
+  } catch (e) { /* 预热失败无碍 */ }
+}
+
+/* ===== 时空情景问候(公开 GET /api/scene/context) ===== */
+function weatherIcon(w) {
+  w = w || "";
+  if (w.indexOf("雪") >= 0) return "❄";
+  if (w.indexOf("雨") >= 0) return "🌧";
+  if (w.indexOf("雾") >= 0 || w.indexOf("霾") >= 0) return "🌫";
+  if (w.indexOf("阴") >= 0) return "☁";
+  if (w.indexOf("云") >= 0) return "⛅";
+  if (w.indexOf("晴") >= 0) return "☀";
+  return "🌡";
+}
+function loadScene() {
+  fetch("/api/scene/context").then(function (r) { return r.json(); }).then(function (j) {
+    if (!j || j.success === false) return;
+    renderScene(j.data || j);
+    refineSceneByGeo();   /* CGNAT 池修正: H5 坐标→高德逆地理刷新 */
+  }).catch(function () { /* 问候非关键路径 */ });
+}
+/* 坐标修正(2026-10-09 成都显示辽宁实证: ip2region 上游库对部分
+   运营商段标错省, 离线修不动——前端 H5 坐标走 /api/scene/geo
+   高德逆地理覆盖; 坐标 localStorage 缓存 30min; 拒绝授权保持现状 */
+var GEO_CACHE_KEY = "scene.geo.coord", GEO_TTL = 30 * 60 * 1000;
+function refineSceneByGeo() {
+  try {
+    var c = JSON.parse(localStorage.getItem(GEO_CACHE_KEY) || "null");
+    if (c && c.at && Date.now() - c.at < GEO_TTL && isFinite(c.lng)) {
+      fetchSceneGeo(c.lng, c.lat);
+      return;
+    }
+  } catch (e) { /* 忽略缓存解析 */ }
+  if (!navigator.geolocation || !window.isSecureContext) return;
+  navigator.geolocation.getCurrentPosition(function (pos) {
+    if (!isFinite(pos.coords.longitude)
+        || !isFinite(pos.coords.latitude)) return;
+    fetchSceneGeo(pos.coords.longitude, pos.coords.latitude);
+  }, function () { /* 拒绝授权/超时: 保持 IP 归属 */ },
+    { timeout: 8000, maximumAge: GEO_TTL });
+}
+function fetchSceneGeo(lng, lat) {
+  fetch("/api/scene/geo?lng=" + encodeURIComponent(lng)
+        + "&lat=" + encodeURIComponent(lat))
+    .then(function (r) { return r.json(); }).then(function (j) {
+      var d = j && j.success && j.data;
+      if (!d || !d.located) return;
+      try {
+        localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(
+          { lng: lng, lat: lat, at: Date.now() }));
+      } catch (e) { /* 忽略 */ }
+      renderScene(d);
+    }).catch(function () { /* 静默 */ });
+}
+function renderScene(d) {
+    var g = d.greeting || {}, w = d.weather || {}, loc = d.location || {};
+    document.getElementById("greet").textContent = g.greeting || "您好，欢迎来到竹香网！";
+    document.getElementById("greet").title = g.greeting || "";
+    document.getElementById("wico").textContent = weatherIcon(w.weather);
+    var wtxt = w.available ? esc(w.city) + " · " + esc(w.weather) + " " + esc(w.temperature) + "°C" : "天气未配置";
+    document.getElementById("weather").innerHTML = wtxt +
+      ' <span style="font-size:11px">(' + esc((loc.province || "") + (loc.city || "")) + ')</span>';
+    if (g.weatherTip) showToast(g.weatherTip);
+    document.body.setAttribute("data-bg", g.background || "day");
+}
+
+/* ===== 角色上下文(等级/信值绑定) ===== */
+function loadContext() {
+  apiFetch("/api/xiaozhu/context").then(function (j) {
+    if (!j || j.success === false) return;
+    var lv = document.getElementById("ctxLevel");
+    lv.textContent = (j.levelTitle || "普通会员") + " · L" + (j.level || 1);
+    var bd = document.getElementById("ctxBind");
+    bd.textContent = j.bound ? "信值已绑定 #" + j.trustId : "信值未绑定";
+    bd.className = j.bound ? "pill" : "pill gray";
+  }).catch(function () { /* fail-soft */ });
+}
+
+/* ===== 会话生命周期 ===== */
+function openSession() {
+  document.getElementById("mic").classList.add("off");
+  apiFetch("/api/xiaozhu/sessions", {
+    method: "POST", body: JSON.stringify({ channel: "voice" })
+  }).then(function (j) {
+    if (!j || j.success === false) { showToast((j && (j.error || j.detail)) || "会话开启失败"); return; }
+    S.sid = j.sessionId; S.turnCount = 0; S.woken = false;
+    document.getElementById("sid").textContent = "#" + j.sessionId;
+    document.getElementById("tcount").textContent = "0";
+    document.getElementById("mic").classList.remove("off");
+    updateWakePill();
+    appendBot("您好，我是小竹 🎋 说「小竹，看新品」试试——5 分钟内免唤醒可连续对话。",
+              null, "会话已开启 #" + j.sessionId + (j.xiaoMode ? " · " + j.xiaoMode : ""));
+    appendGuide();
+    if (j.xiaoMode) document.getElementById("modePill").textContent = j.xiaoMode;
+    /* 会话就绪 → 自动进入免提聆听(直接说话即可; iOS 首次无手势被拒时引导点击) */
+    setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，说完自动发送");
+    scheduleHandfree(800);
+    /* v80 member 窗意图直入: 弹面板时无会话的待发文本,
+       会话就绪即提交(免用户重说) */
+    if (S.pendingWakeText) {
+      var _pw = S.pendingWakeText;
+      S.pendingWakeText = null;
+      S.woken = true;
+      sendText(_pw);
+    }
+  }).catch(function (e) { showToast(e.message || "会话开启失败"); });
+}
+function newSession() {
+  if (!S.sid) return;
+  apiFetch("/api/xiaozhu/sessions", {
+    method: "POST", body: JSON.stringify({ channel: "voice" })
+  }).then(function (j) {
+    if (!j || j.success === false) { showToast((j && (j.error || j.detail)) || "失败"); return; }
+    S.sid = j.sessionId; S.turnCount = 0; S.woken = false;
+    document.getElementById("sid").textContent = "#" + j.sessionId;
+    document.getElementById("tcount").textContent = "0";
+    document.getElementById("chat").innerHTML = "";
+    updateWakePill();
+    appendBot("新会话已开启，请以「小竹」开头唤我。", null, "new session #" + j.sessionId);
+    appendGuide();
+  }).catch(function (e) { showToast(e.message || "失败"); });
+}
+function clearSession() {
+  if (!S.sid) return;
+  apiFetch("/api/xiaozhu/sessions/" + S.sid, { method: "DELETE" }).then(function (j) {
+    if (!j || j.success === false) { showToast((j && (j.error || j.detail)) || "失败"); return; }
+    showToast("已清除 " + (j.removedRecords || 0) + " 条会话记录（隐私红线：级联删除）");
+    S.turnCount = 0; S.woken = false;
+    document.getElementById("chat").innerHTML = "";
+    updateWakePill();
+    openSession();
+  }).catch(function (e) { showToast(e.message || "失败"); });
+}
+function updateWakePill() {
+  var p = document.getElementById("wakePill");
+  if (S.woken) { p.textContent = "✓ 已唤醒 · 免唤醒中"; p.className = "pill wake-on"; }
+  else { p.textContent = "待唤醒"; p.className = "pill gray"; }
+}
+
+/* ===== 快捷指令 chips(单行横滑·带语义图标) ===== */
+var CHIP_ICONS = {
+  "product.new": "🆕", "product.price": "💰", "trust.balance": "🎖",
+  "trust.score": "🏅", "explanation.report": "📋", "nav.page": "🧭",
+  "promo.query": "🎁", "chat.human": "🧑‍💼", "trust.exchange": "🔁",
+  "trust.repair": "🛠", "xiaozhu.help": "❓", "privacy.budget": "🛡",
+  "voice.score": "📶", "cart.submit": "🧺", "trust.convert": "🔄"
+};
+function loadCommands() {
+  apiFetch("/api/xiaozhu/commands").then(function (j) {
+    if (!j || j.success === false) return;
+    var box = document.getElementById("chips");
+    box.innerHTML = "";
+    (j.commands || []).slice(0, 10).forEach(function (c) {
+      if (!c.examples || !c.examples.length) return;
+      var chip = document.createElement("button");
+      chip.className = "chip";
+      chip.textContent = (CHIP_ICONS[c.action] || "🎋") + " " + c.examples[0];
+      chip.onclick = (function (t) { return function () { sendText(t); }; })(c.examples[0]);
+      box.appendChild(chip);
+    });
+  }).catch(function () { /* chips 非关键路径 */ });
+}
+
+/* ===== 消息渲染 ===== */
+function scrollChat() {
+  var c = document.getElementById("chat");
+  c.scrollTop = c.scrollHeight;
+}
+/* v2 折叠: 对话时收起气泡以上区域(标题/情景条压缩, 会话条
+   紧凑)——chat flex:1 自然吃掉释放高度; 首条用户消息自动折,
+   手动切换后不再自动改(尊重用户选择) */
+function setFold(force) {
+  var on = (typeof force === "boolean") ? force
+    : !document.body.classList.contains("talking");
+  document.body.classList.toggle("talking", on);
+  var b = document.getElementById("foldBtn");
+  if (b) b.textContent = on ? "展开 ▲" : "折叠 ▼";
+  S.foldTouched = true;
+  scrollChat();
+}
+function appendUser(text, channel) {
+  if (!S.foldTouched) setFold(true); /* 首条消息自动折叠 */
+  var c = document.getElementById("chat");
+  var d = document.createElement("div");
+  d.className = "msg user";
+  d.innerHTML = '<div class="bubble">' + esc(text) +
+    '<div class="badges"><span class="pill" style="background:rgba(255,255,255,.22);color:#fff">' +
+    (channel === "voice" ? "🎤 语音" : "⌨ 文字") +
+    '</span><span class="t">' + nowHM() + "</span></div></div>";
+  c.appendChild(d); scrollChat();
+}
+function appendBot(reply, card, badgesHtml, extra, jump) {
+  var c = document.getElementById("chat");
+  var d = document.createElement("div");
+  d.className = "msg bot" + (extra === "__err__" ? " err" : "");
+  var h = '<div class="avatar">竹</div><div class="bubble">' + esc(reply || "");
+  if (card) h += renderCard(card);
+  /* 附加提示(唤醒引导/降级说明); 调试徽章与时间戳不渲染
+     ——用户反馈: 技术字段不上界面 */
+  if (badgesHtml) h += '<div class="badges">' + badgesHtml + "</div>";
+  h += "</div>";
+  d.innerHTML = h;
+  c.appendChild(d);
+  /* jump 独立消息行(气泡外——彻底脱离 bubble/kcard 布局,
+     规避 X5 内核行盒重叠与 fit-content 兼容问题) */
+  if (jump) {
+    var jhref = esc(jump);
+    var jl = document.createElement("div");
+    jl.className = "jumpline";
+    jl.innerHTML = (document.body.classList.contains("embed"))
+      ? '<a class="jumpbtn" href="' + jhref
+        + '" onclick="event.preventDefault();'
+        + "window.parent.postMessage({type:'xz-jump',href:'"
+        + jhref + "'},\'*\')\">前往查看 →</a>"
+      : '<a class="jumpbtn" href="' + jhref
+        + '">前往查看 →</a>';
+    c.appendChild(jl);
+  }
+  scrollChat();
+  return d.querySelector(".bubble");
+}
+/* 空态引导卡: 三条示例指令大按钮 */
+function appendGuide() {
+  var c = document.getElementById("chat");
+  var d = document.createElement("div");
+  d.className = "guide";
+  d.innerHTML = '<div class="gt">🎋 试试对小竹说（点击直接发送）</div>';
+  var row = document.createElement("div");
+  row.className = "grow";
+  ["小竹，看看有什么新品", "小竹，今天有什么优惠", "小竹，你能干什么"].forEach(function (t) {
+    var b = document.createElement("button");
+    b.className = "gbtn";
+    b.textContent = "「" + t + "」";
+    b.onclick = (function (tx) { return function () { sendText(tx); }; })(t);
+    row.appendChild(b);
+  });
+  d.appendChild(row);
+  c.appendChild(d); scrollChat();
+}
+/* 思考中指示: 发出请求后立即显示, 回复到达移除 */
+function showTyping() {
+  removeTyping();
+  var c = document.getElementById("chat");
+  var d = document.createElement("div");
+  d.className = "msg bot";
+  d.id = "xzTyping";
+  d.innerHTML = '<div class="avatar">竹</div><div class="bubble">' +
+    '<span class="typing"><i></i><i></i><i></i></span></div>';
+  c.appendChild(d); scrollChat();
+}
+function removeTyping() {
+  var t = document.getElementById("xzTyping");
+  if (t) t.parentNode.removeChild(t);
+}
+
+/* 卡片渲染: product_list/product_detail/cart_added/confirm/confirm_voice/通用 */
+function renderCard(card) {
+  var t = card.type || "";
+  /* 商品卡不在气泡渲染(用户反馈: 查询/加购信息埋在气泡里弱,
+     购买者看不到操作信息丧失购买欲)——当前款常驻商品面板
+     (ppanel) 展示, 气泡只留语音文字反馈 */
+  if (t === "product_list" || t === "product_detail") {
+    return "";
+  }
+  /* 加购结果同样上面板(清单态)——气泡只留语音文字 */
+  if (t === "cart_added" || t === "cart_setqty") {
+    return "";
+  }
+  if (t === "confirm") {
+    var cells = '<div class="ccells">';
+    for (var i = 0; i < 4; i++) {
+      cells += '<input class="ccell" maxlength="1" inputmode="numeric" autocomplete="off" aria-label="确认码第' + (i + 1) + '位">';
+    }
+    cells += "</div>";
+    return '<div class="confirmbox"><div class="ct">🔐 高敏操作确认</div>' +
+      '<div class="cs">' + esc(card.subject || "") + "<br>" + esc(card.codeHint || "请输入屏幕显示的 4 位确认码") +
+      (card.consentPhrase ? '<br>语音确认短语：' + esc(card.consentPhrase) : "") +
+      "</div>" + cells +
+      '<button class="btn gold" data-cftoken="' + esc(card.confirmToken || "") + '">确认执行</button></div>';
+  }
+  if (t === "confirm_voice") {
+    return '<div class="confirmbox"><div class="ct">🎙 语音确认已记录</div>' +
+      '<div class="cs">' + esc(card.subject || "语音意图凭证已收到") + '——请在屏幕输入 4 位确认码完成双因子核验。</div></div>';
+  }
+  /* 订单完成卡: 简洁用户视图(orderId 收进小字, 不做键值对 dump) */
+  if (t === "order_done") {
+    return '<div class="kcard"><div class="ttl">✅ ' + esc(card.subject || "订单已提交") + "</div>" +
+      (card.totalPrice != null ? '<div class="prow"><span class="nm">实付金额</span><span class="pr">¥' +
+        esc(card.totalPrice) + "</span></div>" : "") +
+      (card.orderId ? '<div class="prow"><span class="nm"><small>单号 ' + esc(card.orderId) +
+        "</small></span></div>" : "") + "</div>";
+  }
+  /* 通用卡片: 键值对 */
+  var h = '<div class="kcard">';
+  var n = 0;
+  Object.keys(card).forEach(function (k) {
+    if (k === "type") return;
+    var v = card[k];
+    if (v == null || typeof v === "object") return;
+    h += '<div class="prow"><span class="nm">' + esc(k) + '</span><span class="pr"><small>' + esc(v) + "</small></span></div>";
+    n++;
+  });
+  h += "</div>";
+  return n ? h : "";
+}
+/* ===== 商品面板: 当前推荐款常驻展示(图+价+购买按钮) =====
+   购物氛围入口——推荐/规格/属性轮同步刷新; 购买操作不埋
+   聊天气泡, 点击按钮等同语音指令(同链执行) */
+function renderPanel(card) {
+  var el = document.getElementById("ppanel");
+  if (!el || !card) { if (el) el.classList.add("hidden"); return; }
+  var t = card.type || "";
+  if (t === "product_list" || t === "product_detail") {
+    /* 当前款: subject 优先(游标推进同步), 无则首件 */
+    var cur = null, items = card.items || [], subj = card.subject || "";
+    for (var i = 0; i < items.length; i++) {
+      if (subj && items[i].name === subj) { cur = items[i]; break; }
+    }
+    if (!cur && items.length) cur = items[0];
+    /* product_detail 卡: 本体即当前款(属性问答卡) */
+    if (!cur && (card.subject || card.price != null)) {
+      cur = { name: card.subject, price: card.price,
+              image: (card.attributes || {}).image };
+    }
+    if (!cur) { el.classList.add("hidden"); return; }
+    var img = cur.image
+      ? '<img class="pimg" src="' + esc(cur.image) + '" alt="" onerror="this.outerHTML=\'<div class=&quot;pimg pimg-ph&quot;>🎋</div>\'">'
+      : '<div class="pimg pimg-ph">🎋</div>';
+    el.innerHTML = img +
+      '<div class="pinfo"><div class="pname">' + esc(cur.name || "商品") + "</div>" +
+      '<div class="ptags">' +
+      /* 规格去重: 商品名常已含度数/容量(如"竹香便携 42°
+         250ml")——名称已有则不再重复拼标签(真机实证面板
+         显示"42° 250ml 42° 250ml") */
+      (cur.alcohol && String(cur.name || "").indexOf(String(cur.alcohol)) < 0
+        ? '<span class="ptag">' + esc(cur.alcohol) + "°</span>" : "") +
+      (cur.volume && String(cur.name || "").indexOf(String(cur.volume)) < 0
+        ? '<span class="ptag">' + esc(cur.volume) + "</span>" : "") +
+      (cur.subtitle ? '<span class="ptag graytag">' + esc(cur.subtitle) + "</span>" : "") +
+      "</div>" +
+      (cur.price != null ? '<div class="pprice">¥' + esc(cur.price) + "</div>" : "") +
+      "</div>" +
+      '<div class="pbtns">' +
+      '<button class="btn gold" onclick="sendText(\'需要\')">加入清单</button>' +
+      '<button class="btn" onclick="sendText(\'换一款\')">换一款</button>' +
+      (cur.price != null ? '<button class="btn gold" onclick="sendText(\'结算\')">立即购买</button>' : "") +
+      "</div>";
+    el.classList.remove("hidden");
+    return;
+  }
+  if (t === "cart_added" || t === "cart_setqty") {
+    /* 清单态: 已加/已改款+构成明细+结算入口(真机反馈:
+       "清单4件"不知道怎么来的——明细每款几件) */
+    el.innerHTML =
+      (card.quantity && card.price
+        ? '<div class="pimg pimg-ph">🛒</div>' +
+          '<div class="pinfo"><div class="pname">' + esc(card.subject || "已加入") +
+          (t === "cart_setqty" ? " " : " ×") + esc(card.quantity || 1) + "</div>" +
+          '<div class="ptags"><span class="ptag">清单' + esc(card.cartCount || 1) + "件" +
+          (card.cartDetail ? "：" + esc(card.cartDetail) : "") + "</span></div>" +
+          (card.price != null ? '<div class="pprice">¥' + esc(card.price) + "</div>" : "") +
+          "</div>"
+        : '<div class="pinfo"><div class="pname">清单共 ' + esc(card.cartCount || 1) + " 件</div></div>") +
+      '<div class="pbtns">' +
+      (t === "cart_setqty" || card.quantity > 1
+        ? '<button class="btn" onclick="sendText(\'少一件\')">− 一件</button>' : "") +
+      '<button class="btn" onclick="sendText(\'再来一件\')">+ 一件</button>' +
+      '<button class="btn gold" onclick="sendText(\'结算\')">去结算</button>' +
+      "</div>";
+    el.classList.remove("hidden");
+    return;
+  }
+  /* confirm/order_done 等流程卡: 面板不动(保持上一态) */
+}
+
+/* ===== v2 工具: 触觉/反馈条/语速 ===== */
+/* v2 D: 触觉反馈(navigator.vibrate——安卓 Chrome 生效,
+   iOS/X5 无此 API 静默跳过, 纯增强零风险) */
+function buzz(ms) {
+  try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* 静默 */ }
+}
+/* v2 G: 语速(本地偏好——慢 0.8/标准 1/快 1.2, cogtts spike
+   实证服务端 speed 生效; 桌面 speechSynthesis 同步缩放) */
+function ttsSpeedVal() {
+  var raw = localStorage.getItem("xz.ttsSpeed");
+  if (raw !== null) {   /* 显式设置过(含选回标准 1)恒优先 */
+    var v = parseFloat(raw);
+    return (v === 0.8 || v === 1.2) ? v : 1;
+  }
+  /* 82号P3.1: 从未手动设置 → 画像节奏档(shadow 恒 normal=1
+     零行为变化; assist+promote 后 brisk 会员 1.2) */
+  return { slow: 0.8, normal: 1, brisk: 1.2 }[S.ttsPace] || 1;
+}
+function setTtsSpeed(v) {
+  localStorage.setItem("xz.ttsSpeed", String(v));
+  setMicStatus("语速已设为 " + ({0.8: "慢", 1: "标准", 1.2: "快"}[v] || v)
+    + "（下一条播报生效）");
+}
+/* ===== 78号·悦声灵犀 P1: 音色档案(多音色人格) ===== */
+/* 档案与后端 /api/xiaozhu/voices 同源; 拉取失败回退内置
+   (fail-soft 不阻塞); id 即 cogtts 实证音色名透传合成 */
+var VOICE_FALLBACK = [
+  { id: "tongtong", name: "悦悦", desc: "亲切甜暖 · 默认", tag: "邻家好友" },
+  { id: "xiaochen", name: "小陈", desc: "干练清晰", tag: "专业顾问" },
+  { id: "chuichui", name: "锤锤", desc: "低沉温和", tag: "沉稳暖男" },
+  { id: "female", name: "小灵", desc: "知性柔美", tag: "温柔女声" },
+  { id: "male", name: "竹君", desc: "沉稳大气", tag: "稳重男声" },
+  { id: "luodo", name: "乐乐", desc: "活泼灵动", tag: "活力达人" }];
+function voiceVal() {
+  return localStorage.getItem("xz.voice") || "tongtong";
+}
+function setVoice(v) {
+  v = v || "tongtong";
+  if (v === voiceVal()) return;
+  localStorage.setItem("xz.voice", v);
+  /* 音色切换: 旧预取缓存全部作废(防串音)+立即重预热;
+     O3 decoded 旁路缓存一并作废 */
+  S.packTTS = {}; S.packVoice = v;
+  S.packDec = {}; S.packDecVoice = v;
+  var prof = (S.voiceList || []).filter(function (p) { return p.id === v; })[0];
+  var nm = prof ? prof.name : "小竹";
+  /* toast 独立浮层: setMicStatus 会被紧随的 TTS 合成状态
+     同步覆盖(验收实证用户不可见) */
+  showToast("音色已切换为「" + nm + "」——听一句");
+  preheatTTS();
+  speakCloud("您好，我是" + nm + "，很高兴为您服务", null);
+}
+function loadVoices() {
+  var fill = function (list) {
+    S.voiceList = list;
+    var sel = document.getElementById("voiceSel");
+    if (!sel) return;
+    sel.innerHTML = "";
+    list.forEach(function (p) {
+      var o = document.createElement("option");
+      o.value = p.id; o.textContent = p.name;
+      o.title = p.desc + " · " + p.tag;
+      if (p.id === voiceVal()) o.selected = true;
+      sel.appendChild(o);
+    });
+  };
+  /* apiFetch 同 loadCommands 口径(JWT + 401 自愈——
+     strict 模式 /api/xiaozhu/* 全鉴权); P1·竹语:
+     ttsStream 流式灰度开关随档案下发, 前端据此走
+     流式首声或整句双轨 */
+  apiFetch("/api/xiaozhu/voices").then(function (j) {
+    S.ttsStream = (j && j.ttsStream) || "off";
+    S.latReport = (j && j.latReport) || "off";
+    try {
+      var ne = performance.getEntriesByType("navigation")[0];
+      S.proto = (ne && ne.nextHopProtocol) || "";
+    } catch (e) { S.proto = ""; }
+    fill((j && j.success && Array.isArray(j.voices)
+          && j.voices.length) ? j.voices : VOICE_FALLBACK);
+  }).catch(function () { S.ttsStream = "off";
+    S.latReport = "off"; fill(VOICE_FALLBACK); });
+}
+/* 预取缓存命中(音色归属校验——切音色后旧缓存不可见) */
+function packedGet(text) {
+  return (S.packVoice === voiceVal() && S.packTTS)
+    ? S.packTTS[text] : null;
+}
+/* P2·O3: decoded AudioBuffer 旁路缓存(重复句零 decode 30~80ms)
+   ——播过一次的块(过渡音"好的"/高频句/预合成首块二播)再播
+   直接取已解码缓冲; 音色归属校验同 packedGet 口径(切音色作废) */
+function decGet(text) {
+  return (S.packDecVoice === voiceVal() && S.packDec)
+    ? S.packDec[text] : null;
+}
+function decPut(text, d) {
+  if (!d) return;
+  S.packDecVoice = voiceVal();
+  (S.packDec = S.packDec || {})[text] = d;
+}
+/* 78号P1/P3: 情绪语调系数(care 柔慢/steady 稳/cheerful 明快
+   ——与用户语速偏好叠乘, 服务端 clamp 0.5-2.0) */
+function moodSpeed(mood) {
+  var f = { care: 0.92, steady: 0.95, cheerful: 1.02 }[mood] || 1;
+  var v = ttsSpeedVal() * f;
+  return Math.max(0.5, Math.min(2.0,
+    Math.round(v * 100) / 100));
+}
+function ttsUrl(text, mood) {
+  return "/api/xiaozhu/tts?text=" + encodeURIComponent(
+    String(text).slice(0, 200))
+    + "&speed=" + (mood ? moodSpeed(mood) : ttsSpeedVal())
+    + "&voice=" + encodeURIComponent(voiceVal());
+}
+/* 78号P1: 思考微音效(提交语音后等待云端识别/响应时的
+   悦耳两音上行——替代无声等待; TTS 关闭不响, WebAudio
+   不可用静默跳过, 1.2s 防抖免连续对话叮叮连环) */
+var chimeAt = 0;
+/* ===== P1·竹语: 流式 TTS 首声(首子句分片直灌, 首声 60~110ms) =====
+   开关由 /voices 下发(S.ttsStream); 能力检测(X5 老内核无
+   ReadableStream 自动降级整句); 采样率 24000(G3 spike 推算,
+   AudioBuffer 按此构造, ctx 播放自动重采样) */
+var STREAM_OK = false;
+try {
+  STREAM_OK = typeof window.ReadableStream === "function"
+    && typeof TextDecoder === "function";
+} catch (e) { STREAM_OK = false; }
+var PCM_SR = 24000;
+function ttsStreamUrl(text, mood) {
+  return "/api/xiaozhu/tts/stream?text=" + encodeURIComponent(
+    String(text).slice(0, 200))
+    + "&speed=" + moodSpeed(mood)
+    + "&voice=" + encodeURIComponent(voiceVal());
+}
+function b64ToBytes(b64) {
+  var bin = atob(b64), n = bin.length, u = new Uint8Array(n);
+  for (var i = 0; i < n; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+function pcmToF32(u) {
+  /* s16le mono → f32(除以 32768 归一) */
+  var n = u.byteLength >> 1;
+  var v = new DataView(u.buffer, u.byteOffset, u.byteLength);
+  var f = new Float32Array(n);
+  for (var i = 0; i < n; i++) f[i] = v.getInt16(i * 2, true) / 32768;
+  return f;
+}
+function playChime() {
+  if (!S.tts) return;
+  try {
+    if (Date.now() - chimeAt < 1200) return;
+    var ctx = S.ttsPlayCtx || ttsPlayCtx();
+    if (!ctx) return;
+    chimeAt = Date.now();
+    var t0 = ctx.currentTime;
+    [[523.25, 0], [784, 0.13]].forEach(function (p) {
+      var o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "sine"; o.frequency.value = p[0];
+      g.gain.setValueAtTime(0, t0 + p[1]);
+      g.gain.linearRampToValueAtTime(0.05, t0 + p[1] + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + p[1] + 0.26);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(t0 + p[1]); o.stop(t0 + p[1] + 0.3);
+    });
+  } catch (e) { /* 微音效非关键路径 */ }
+}
+/* v2 A: 气泡反馈条(👍/👎——POST 落 turn hash, 覆盖式可切换;
+   失败本地回弹; 仅登录态真实轮) */
+function attachFeedback(bubble, turnId) {
+  if (!bubble || !turnId || !S.sid) return;
+  if (bubble.querySelector(".fbbar")) return;
+  var auth = getAuth() || {};
+  if (!auth.uid) return;
+  var bar = document.createElement("div");
+  bar.className = "fbbar";
+  bar.innerHTML = '<button class="fb up" aria-label="这条回复有帮助">👍</button>'
+    + '<button class="fb down" aria-label="这条回复没帮助">👎</button>';
+  var setLock = function (rating) {
+    bar.querySelectorAll(".fb").forEach(function (b) {
+      b.classList.toggle("on",
+        (rating === "up" && b.classList.contains("up"))
+        || (rating === "down" && b.classList.contains("down")));
+    });
+  };
+  bar.querySelectorAll(".fb").forEach(function (b) {
+    b.onclick = function (ev) {
+      ev.stopPropagation();
+      var rating = b.classList.contains("up") ? "up" : "down";
+      setLock(rating); /* 本地即时锁定, 失败回弹 */
+      var hh = { "Content-Type": "application/json",
+                 "X-Member-Id": String(auth.uid || "") };
+      if (auth.token) hh["Authorization"] = "Bearer " + auth.token;
+      fetch("/api/xiaozhu/sessions/" + S.sid
+            + "/turns/" + encodeURIComponent(turnId)
+            + "/feedback",
+            { method: "POST", headers: hh,
+              body: JSON.stringify({ rating: rating }) })
+        .then(function (r) {
+          if (!r.ok) throw new Error("fb " + r.status);
+        })
+        .catch(function () {
+          setLock(null); /* 失败回弹 */
+          setMicStatus("反馈没送出去——网络问题，不影响使用");
+        });
+    };
+  });
+  bubble.appendChild(bar);
+}
+
+/* ===== 78号P2: 兜底轮选项引导 chips(点哪发哪——sendText 同链) ===== */
+function renderSuggest(bubble, arr) {
+  try {
+    arr = (Array.isArray(arr) ? arr : []).filter(Boolean).slice(0, 4);
+    if (!arr.length) return;
+    var row = document.createElement("div");
+    row.className = "srow";
+    arr.forEach(function (x) {
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "chip"; b.textContent = x;
+      b.onclick = function () { sendText(x); };
+      row.appendChild(b);
+    });
+    var msg = bubble && bubble.closest ? bubble.closest(".msg") : null;
+    if (msg && msg.parentNode) {
+      msg.parentNode.insertBefore(row, msg.nextSibling);
+    } else {
+      document.getElementById("chat").appendChild(row);
+    }
+    scrollChat();
+  } catch (e) { /* chips fail-soft */ }
+}
+
+/* ===== 轮次响应处理(语音/文本同链) ===== */
+function handleTurn(j, channel) {
+  /* v3 延迟埋点: 响应到达时刻 */
+  if (S.latMarks) S.latMarks.resp = Date.now();
+  S.turnCount++;
+  document.getElementById("tcount").textContent = S.turnCount;
+  /* 调试徽章(intent/track/latency/mode)不再进气泡——
+     用户反馈: 技术字段不展示(顶部 modePill 保留模式态) */
+  var tr = j.turn || {};
+  /* 82号P3: 节奏参数应用(VAD 完判; ttsPace/probeDepth 等
+     管道已下发, 执行位 P3.1 按行为机制逐个接) */
+  if (j.voice82 && j.voice82.vadSilenceMs) {
+    S.vadSilenceMs = j.voice82.vadSilenceMs;
+  }
+  if (j.voice82 && j.voice82.ttsPace) {
+    S.ttsPace = j.voice82.ttsPace;
+  }
+  if (j.xiaoMode) document.getElementById("modePill").textContent = j.xiaoMode;
+  var wakeWarn = "";
+  if (j.wakeHint) {
+    wakeWarn = '<div class="wakewarn">💡 我在——请以「小竹」开头唤我（或先唤醒一次，5 分钟内可免唤醒连续对话）</div>';
+    S.woken = false;
+  } else if (tr.wake) {
+    S.woken = true;
+  }
+  var bubble = appendBot(j.reply || "(无应答)", j.card || null, wakeWarn || null,
+                         null, j.autoJump ? null : (j.jump || null));
+  /* 自录回环检测用: 小竹播报集合(最近 3 条)——单值 lastBot
+     会被恢复会话/welcome 轮覆盖(wake-hit 应答被收音成轮
+     09:06 实证), 集合任一命中即判自录; 平行记时间戳——
+     比对仅限 12s 窗内条目(窗外是用户真实话语, 防误杀) */
+  S.selfUtter = S.selfUtter || [];
+  S.selfUtterAt = S.selfUtterAt || [];
+  S.selfUtter.push(String(j.reply || ""));
+  S.selfUtterAt.push(Date.now());
+  if (S.selfUtter.length > 3) { S.selfUtter.shift(); S.selfUtterAt.shift(); }
+  /* 78号P1/P3: 播报情绪标签(care 柔慢/steady 稳/cheerful
+     明快——TTS 语调路由); P2: 选项引导 chips */
+  var mood = j.mood || "";
+  renderSuggest(bubble, j.suggest);
+  /* 商品面板同步: 推荐款/清单态常驻展示(购物氛围入口) */
+  try { renderPanel(j.card || null); } catch (e) { /* 面板 fail-soft */ }
+  /* v2 A: 轮次反馈条(👍/👎——落 turn hash, 可切换; 仅真实轮) */
+  if (tr.turnId) attachFeedback(bubble, tr.turnId);
+  /* v2 D: 触觉反馈(安卓 Chrome 尽力而为, iOS/X5 静默跳过);
+     高敏确认重震感, 普通回复轻触 */
+  buzz((j.confirmRequired || ((j.card || {}).type === "confirm")) ? 80 : 15);
+  if (j.fallbackHint === "keyboard") {
+    appendBot("语音转写未成功——可用下方文字输入继续（同一条链路）。", null, '<span class="pill gray">ASR 降级</span>');
+  }
+  if (j.clarify) {
+    appendBot("（需要补充信息：请直接回复补全后重试）", null, '<span class="pill gray">clarify</span>');
+  }
+  updateWakePill();
+  /* 兜底轮播报节流(真机实证会话 140: 免提录进旁人对话
+     "微信哦,这个在微信上直接弄…"——每段旁话都播"这个我还
+     不会"轰炸; general 兜底 60s 内只播一次, 其余静默入流) */
+  var isGeneral = ((j.turn || {}).intent) === "general";
+  /* 静默轮(免提无语境闲聊门控——服务端 silent 标记):
+     环境人声被收音成轮不播报(防自言自语), 入流留痕
+     续听——结构对齐 general 60s 节流三行 */
+  if (j.silent) {
+    if (bubble) bubble.classList.remove("speaking");
+    S.ttsPlaying = false;
+    scheduleHandfree(300);
+  } else if (isGeneral) {
+    if (Date.now() - (S.lastGeneralAt || 0) < 60000) {
+      if (bubble) bubble.classList.remove("speaking");
+      S.ttsPlaying = false;
+      scheduleHandfree(300);
+      /* 跳过播报但继续后续处理(jump/交易弹层) */
+    } else {
+      S.lastGeneralAt = Date.now();
+      speak(j.reply || "", bubble, mood);
+    }
+  } else {
+    speak(j.reply || "", bubble, mood);
+  }
+  /* TTS 分支预合成(推荐轮"需要/不要这款"两分支——与实际
+     应答逐字一致, 用户应答时 packTTS 命中零合成秒播;
+     小程序端已接, H5 同链补齐) */
+  if (Array.isArray(j.ttsPreheat) && j.ttsPreheat.length) {
+    try {
+      var a = getAuth() || {};
+      var hh = { "X-Member-Id": String(a.uid || "") };
+      if (a.token) hh["Authorization"] = "Bearer " + a.token;
+      /* v2 让道: 预热与当前播报合成争 cogtts 上游队列是真机
+         "播报滞后"根因之一——错峰发起 + 播报中顺延, 优先保
+         当前轮秒播; 预热只服务未来轮, 晚 1-2s 无感 */
+      j.ttsPreheat.forEach(function (t, idx) {
+        if (!t || packedGet(t)) return;
+        var tryFetch = function (deferred) {
+          if (packedGet(t)) return; /* 已到手 */
+          if (S.ttsPlaying && !deferred) {
+            setTimeout(function () { tryFetch(true); }, 1600);
+            return;
+          }
+          var fv = voiceVal(); /* 在途切音色: 存储时校验防串音 */
+          fetch(ttsUrl(t), { headers: hh })
+            .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
+            .then(function (b) {
+              if (b && voiceVal() === fv) {
+                S.packVoice = fv;
+                (S.packTTS = S.packTTS || {})[t] = b;
+              }
+            }).catch(function () {});
+        };
+        setTimeout(function () { tryFetch(false); },
+                   900 + idx * 900);
+      });
+    } catch (e) { /* 预取失败无碍 */ }
+  }
+  /* 语音跟随跳转(page.goto): 播报"正在打开"后自动导航
+     ——浮层 postMessage 请求父窗口跳, 独立页直接跳
+     跳转前保存聊天状态(sessionStorage 同 tab 存活,
+     主窗口导航后浮层重载可恢复会话与消息) */
+  if (j.autoJump && j.jump) {
+    var gotoHref = j.jump;
+    saveChatState();
+    setTimeout(function () {
+      if (document.body.classList.contains("embed")) {
+        window.parent.postMessage(
+          { type: "xz-jump", href: gotoHref }, "*");
+      } else {
+        window.location.href = gotoHref;
+      }
+    }, 1600);
+  }
+  /* 交易类回复自动弹回全屏(mini 小条看不清加购了什么——
+     用户不敢下单; 看清卡片再决定结算) */
+  if (document.body.classList.contains("embed")
+      && { "cart.add": 1, "cart.submit": 1,
+           "order.pay": 1 }[(j.turn || {}).intent]) {
+    try {
+      window.parent.postMessage(
+        { type: "xz-panel-maximize" }, "*");
+    } catch (e) { /* 跨域兜底(理论不达) */ }
+  }
+}
+/* 聊天状态保存/恢复(跨页面跳转——浮层 iframe 随主窗口
+   导航销毁重建, sessionStorage 同 tab 存活用于恢复) */
+function saveChatState() {
+  try {
+    sessionStorage.setItem("xz.chat",
+      document.getElementById("chat").innerHTML);
+    sessionStorage.setItem("xz.sid", S.sid || "");
+    /* 商品面板态同步保存(跳转返回恢复当前款+购买按钮) */
+    var pp = document.getElementById("ppanel");
+    if (pp && !pp.classList.contains("hidden")) {
+      sessionStorage.setItem("xz.ppanel", pp.innerHTML);
+    } else {
+      sessionStorage.removeItem("xz.ppanel");
+    }
+  } catch (e) { /* 隐私模式等存储失败——跳过恢复 */ }
+}
+function tryRestoreChat() {
+  try {
+    var sid = sessionStorage.getItem("xz.sid");
+    var html = sessionStorage.getItem("xz.chat");
+    if (sid && html) {
+      S.sid = sid;
+      /* 面板态恢复(当前款+购买按钮——返回不丢购物上下文) */
+      var phtml = sessionStorage.getItem("xz.ppanel");
+      if (phtml) {
+        var pp = document.getElementById("ppanel");
+        pp.innerHTML = phtml;
+        pp.classList.remove("hidden");
+      }
+      document.getElementById("sid").textContent = "#" + sid;
+      document.getElementById("chat").innerHTML = html;
+      document.getElementById("mic").classList.remove("off");
+      /* v80 member 窗意图直入: 恢复会话后提交待发文本 */
+      if (S.pendingWakeText) {
+        var _pwr = S.pendingWakeText;
+        S.pendingWakeText = null;
+        S.woken = true;
+        setTimeout(function () { sendText(_pwr); }, 200);
+      }
+      appendBot("已恢复对话——继续说即可（语音球全程在线）",
+                null, "会话恢复 #" + sid);
+      /* 恢复后滚到底部(最新消息含前往查看按钮) */
+      scrollChat();
+      setTimeout(scrollChat, 350);
+      return true;
+    }
+  } catch (e) { /* 恢复失败走新会话 */ }
+  return false;
+}
+function turnError(e) {
+  appendBot("⚠️ 请求失败：" + (e && e.message ? e.message : "网络/服务异常"), null, null, "__err__");
+}
+
+/* ===== 发送: 文本/云端音频 ===== */
+/* ===== v82 显式状态机(全双工范式原子化——渐进影子模式) =====
+   五态: idle 待机|listening 聆听|processing 处理|speaking 播报
+   渐进落地: 本期只镜像现有标志位不替换逻辑(零回归风险),
+   非法转换拦截仅留痕(宽恕放行)——[SM] 日志积累一轮后下期
+   收紧为硬守卫; 02:35:14 实证竞态丢指令类问题由此可观测 */
+var SM = { state: "idle", lastAt: 0, hist: [] };
+var SM_LEGAL = {
+  idle: ["listening"],
+  listening: ["processing", "idle"],
+  processing: ["speaking", "idle", "listening"],
+  speaking: ["listening", "idle"],
+};
+var SM_BADGE = {
+  idle: ["待机", "gray"],
+  listening: ["聆听", "green"],
+  processing: ["处理", "yellow"],
+  speaking: ["播报", "blue"],
+};
+function smT(to, evt) {
+  var from = SM.state;
+  if (from === to) { return true; }
+  var legal = (SM_LEGAL[from] || [])
+    .indexOf(to) >= 0;
+  if (!legal) {
+    /* 非法转换留痕(竞态可观测——收紧前的观察期数据) */
+    try { console.info("[SM] ILLEGAL " + from
+      + "->" + to + " evt=" + evt); } catch (e) {}
+  }
+  SM.state = to;
+  SM.lastAt = Date.now();
+  SM.hist.push(from + ">" + to + ":" + evt);
+  if (SM.hist.length > 24) { SM.hist.shift(); }
+  try {
+    var b = document.getElementById("smBadge");
+    if (b) {
+      var cfg = SM_BADGE[to] || ["?", "gray"];
+      b.textContent = cfg[0];
+      b.className = "pill " + cfg[1];
+    }
+    if (!legal) {
+      window.parent.postMessage(
+        { type: "xz-lat",
+          text: "[SM] illegal " + from + "->" + to
+          + " " + evt }, "*");
+    }
+  } catch (e) { /* 嵌入态 console 采集不可用忽略 */ }
+  return true;
+}
+function setPending(on) {
+  S.pending = on;
+  if (on) {
+    S.pendingAt = Date.now(); /* 看门狗驻留计时 */
+    smT("processing", "pending");  /* v82 影子镜像 */
+    /* v88 ACK 抢占(流式并发范式"高优先级即时反馈"): 所有
+       轮次提交立即播预缓存「好的」(单块/文本轨全覆盖——
+       此前仅多块流水线 gap 音覆盖), 提交→首声体感 ~100ms;
+       复用 ttsGapSrc 挂载——播报首片让位逻辑现成,
+       speakCloud 的 gap 播放已有 S.ttsGapSrc 防重 */
+    try {
+      if (!S.ttsPlaying) {
+        var ctx = S.ttsPlayCtx || ttsPlayCtx();
+        var playAck = function (d) {
+          if (!d || !S.pending || S.ttsPlaying
+              || S.ttsGapSrc) { return; }
+          var g = ctx.createBufferSource();
+          g.buffer = d;
+          g.connect(ctx.destination);
+          S.ttsGapSrc = g;
+          g.onended = function () {
+            if (S.ttsGapSrc === g) { S.ttsGapSrc = null; }
+          };
+          g.start();
+        };
+        var g0 = decGet("好的");
+        if (g0) { playAck(g0); }
+        else {
+          var gb = packedGet("好的");
+          if (gb) { ttsDecode(ctx, gb).then(playAck); }
+        }
+      }
+    } catch (e) { /* ACK 失败静默不阻断 */ }
+  }
+  /* v82-C PROCESSING 看门狗(全双工范式"每态超时回退"):
+     网络黑洞卡 pending → 15s 回退聆听+可感知提示
+     (免提被卡死=状态机死锁, 用户无提示只能干等) */
+  clearTimeout(setPending._wd);
+  setPending._wd = null;
+  if (on) {
+    setPending._wd = setTimeout(function () {
+      if (S.pending && S.pendingAt
+          && Date.now() - S.pendingAt >= 15000) {
+        setPending(false);
+        removeTyping();
+        appendBot("网络慢了半拍——请再说一遍刚才的指令",
+                  null, null, "__err__");
+        smT("listening", "pending_wd");
+        scheduleHandfree(600);
+      }
+    }, 15000);
+  }
+  var b = document.getElementById("sendBtn");
+  b.disabled = on;
+  b.textContent = on ? "…" : "发送";
+  document.getElementById("mic").classList.toggle("off", on || !S.sid);
+}
+function sendFromInput() {
+  var inp = document.getElementById("tinput");
+  var text = inp.value.trim();
+  if (!text) return;
+  inp.value = "";
+  sendText(text);
+}
+/* G3 商品图理解: 从父页面路由提取页面语境(iframe 与主站
+   同源, hash/browser 路由双兼容)——产品页
+   #/pages/product-detail/index?id=xx → {page:'product-detail',
+   productId:xx}; 非产品页/读不到返回 undefined(JSON.stringify
+   自动忽略, 零开销) */
+function pageCtx() {
+  try {
+    var href = (window.parent && window.parent.location
+                && window.parent.location.href) || "";
+    var m = href.match(/product-detail\/index\?([^#]*)/);
+    if (!m) return undefined;
+    var pid = "";
+    var pairs = m[1].split("&");
+    for (var i = 0; i < pairs.length; i++) {
+      var kv = pairs[i].split("=");
+      if (kv[0] === "id" || kv[0] === "productId") {
+        pid = decodeURIComponent(kv[1] || "");
+        break;
+      }
+    }
+    if (!pid) return undefined;
+    return { page: "product-detail", productId: pid };
+  } catch (e) { return undefined; }
+}
+function sendText(text) {
+  if (!S.sid || S.pending) { showToast(S.pending ? "上一轮处理中…" : "会话未开启"); return; }
+  appendUser(text, "text");
+  setPending(true);
+  showTyping();
+  apiFetch("/api/xiaozhu/sessions/" + S.sid + "/text", {
+    method: "POST", body: JSON.stringify({ text: wakePrefix(ctxInject(text)), pageContext: pageCtx() })
+  }).then(function (j) {
+    setPending(false); removeTyping();
+    if (!j || j.success === false) { appendBot((j && (j.error || j.detail)) || "指令失败", null, null, "__err__"); return; }
+    handleTurn(j, "text");
+  }).catch(function (e) { setPending(false); removeTyping(); turnError(e); });
+}
+function sendVoice(b64, durationSec) {
+  /* v3 延迟埋点: 提交时刻(整段上传轨) */
+  if (S.latMarks) S.latMarks.submit = Date.now();
+  if (!S.sid) { showToast("会话未开启"); return; }
+  setPending(true);
+  playChime(); /* 78号P1: 思考微音效(等待不再无声) */
+  setMicStatus("☁ 云端识别中…（音频即转即删）");
+  apiFetch("/api/xiaozhu/sessions/" + S.sid + "/voice", {
+    method: "POST",
+    body: JSON.stringify({ audioBase64: b64, filename: "audio.wav", durationSec: Math.round(durationSec * 10) / 10,
+      /* 手动录音(长按/点击麦克风)=tap 语义: 按下即明确交互,
+         免唤醒直接执行("给我买42度500ml的酒"不再要求叫小竹);
+         免提后台聆听不传——反语音霸权红线不变 */
+      mode: S.handfree ? undefined : "tap", pageContext: pageCtx() })
+  }).then(handleVoiceResp).catch(function (e) { setPending(false); removeTyping(); setMicStatus("云端识别失败"); turnError(e); scheduleHandfree(1200); });
+}
+/* P1 流式轨提交: 转写已在流式会话完成(说完了就出字),
+   只 POST 最终文本+流式统计——跳过重复转写与音频上传 */
+function postVoiceTranscript(text, durationSec, skipSelfCheck) {
+  /* 唤醒尾音静默窗: 开面板瞬间免提把唤醒词尾音录成一轮
+     (06:59 实证); 应答「我在，请吩咐」外放回环同理——
+     窗口内免提轮持续丢弃(不清窗), 窗口过后自然放行 */
+  if (S.handfree && S.wakeGrace) {
+    if (Date.now() < S.wakeGrace) {
+      scheduleHandfree(400); return;
+    }
+    S.wakeGrace = 0;
+  }
+  /* TTS 自录回环: 转写是最近小竹播报(集合, 最多 3 条——
+     welcome/widget 应答/回复轮)的子串=小竹自己的声音外放
+     被麦克风收回成轮(07:02「好的。」/09:06「我在，请吩咐。」
+     实证)——静默丢弃续听, 不进会话; 比对去标点。
+     12s 时间窗: 回环只发生在播报外放后 ~10s 内(应答播放
+     2s+收段 6.5s), 窗外短句是用户真实话语(「下一个」类
+     撞历史回复子串的误杀风险)——窗外条目跳过不比对;
+     skipSelfCheck: 双轨 barge-in v2 切断路径专用——
+     bargeIsEcho 已含更强判定(无长度上限+selfUtter 全遍
+     历), 二次检测会误静默 ≤10 字短新指令("换一款") */
+  if (!skipSelfCheck && S.handfree && text && S.selfUtter) {
+    var _nz = function (s) {
+      return String(s).replace(/[，。？！、,.?! ]/g, "");
+    };
+    var _t2 = _nz(text);
+    if (String(text).length <= 10) {
+      var _now = Date.now();
+      for (var i = 0; i < S.selfUtter.length; i++) {
+        if (S.selfUtterAt && _now - (S.selfUtterAt[i] || 0) > 12000) { continue; }
+        if (_nz(S.selfUtter[i]).indexOf(_t2) !== -1) {
+          scheduleHandfree(400); return;
+        }
+      }
+    }
+  }
+  /* 应答前缀剥离(13:11/13:17/13:18 三实证混合段): 唤醒应答
+     「我在，请吩咐」外放被收音与用户新指令拼成一段——前缀
+     占位污染意图("看一款"被 LLM 误判加购); 剥离后纯指令
+     提交; 剥离后空=整段全回声(走上方静默防线) */
+  var _stripped = String(text)
+    .replace(/^[我在请吩咐，。、\s]+/, "").trim();
+  if (_stripped && _stripped !== text) {
+    text = _stripped;
+  }
+  /* v3 延迟埋点: 提交时刻 */
+  if (S.latMarks) S.latMarks.submit = Date.now();
+  setPending(true);
+  playChime(); /* 78号P1: 思考微音效(流式轨同链) */
+  showTyping();
+  apiFetch("/api/xiaozhu/sessions/" + S.sid + "/voice", {
+    method: "POST",
+    body: JSON.stringify({ textTranscript: wakePrefix(ctxInject(text)), filename: "audio.wav",
+      durationSec: Math.round(durationSec * 10) / 10,
+      streamBytes: stBytes, mode: S.handfree ? undefined : "tap",
+      pageContext: pageCtx(),
+      /* 唤醒标志(21:00:35 实证: 唤醒撞 WS 断连时 member 窗
+         点不亮→真指令 not_woken; 窗开/已唤醒=唤醒后轮次,
+         服务端据此点亮窗, 不依赖 WS 连接健康) */
+      wake: (S.woken || !S.listenClosed) ? 1 : undefined })
+  }).then(handleVoiceResp).catch(function (e) { setPending(false); removeTyping(); setMicStatus("提交失败"); turnError(e); scheduleHandfree(1200); });
+}
+/* 语音轮次响应处理(整段轨/流式轨共用) */
+function handleVoiceResp(j) {
+    setPending(false); removeTyping();
+    setMicStatus("云端识别完成");
+    if (!j || j.success === false) { appendBot((j && (j.error || j.detail)) || "语音链路失败", null, null, "__err__"); return; }
+    var rt = (j.turn || {}).rawText || "";
+    if (isEchoOfTTS(rt)) {
+      /* TTS 回声(免提麦克风录到自己播报——微信真机 AEC
+         不覆盖 speechSynthesis, 留痕实证"还不会"6连回环):
+         静默丢弃防"播报→录回→再回复"无限循环 */
+      appendUser("(自己播报的回声，已忽略)", "voice");
+      scheduleHandfree(400);
+      return;
+    }
+    /* 连续"#"断路器(真机实证: 免提外放残响触发麦克风自循环
+       9 轮空转"#"——识别失败连发): 连续 2 轮自动暂停免提,
+       明确引导(防自播自录无限循环+误执行) */
+    if (rt === "#") {
+      S.hashStreak = (S.hashStreak || 0) + 1;
+      if (S.hashStreak >= 2 && S.handfree) {
+        S.handfree = false;
+        document.getElementById("hfBtn").textContent = "🎧 免提关";
+        S.hashStreak = 0;
+        showToast("连续识别失败——已暂停免提，请长按麦克风靠近说话");
+        setMicStatus("⌨ 识别不稳——<b>长按麦克风</b>靠近说话，或打字输入");
+        handleTurn(j, "voice");
+        return;
+      }
+    } else {
+      S.hashStreak = 0;
+    }
+    /* 语气词碎片静默(真机实证: "呃"0.7s 断句碎片——用户开口
+       填充词被切; 服务端已引导, 播报反而盖住用户下一句:
+       不入聊天流不播报, 快速续听让用户把整句说完) */
+    if (rt && rt.length <= 2
+        && /^[呃嗯啊哦呀哈唉诶欸噢唔哇\s]+$/.test(rt)
+        && (j.turn || {}).intent === "chat") {
+      scheduleHandfree(400);
+      return;
+    }
+    appendUser(rt || "(语音)", "voice");
+    handleTurn(j, "voice");
+}
+/* ===== P1 流式识别轨(PCM→WS→百炼实时识别→partial 实时显示) ===== */
+var stWS = null, stOn = true, stAccum = new Float32Array(0),
+    stBytes = 0, stPhase = 0, stFinalCb = null, stSent = 0;
+function streamConnect() {
+  /* 每轮新建(简单可靠); 失败一次本轮+后续自动回退整段上传轨 */
+  stAccum = new Float32Array(0); stBytes = 0; stPhase = 0; stSent = 0;
+  stFinalCb = null;
+  /* 兜底清理上一条未收尾连接(快速开合面板/免提短轮重连时,
+     旧 WS 可能仍在 CONNECTING——不清理则旧实例迟到的
+     onopen/onclose 与新轮交叉; 竞态根修见下方实例守卫) */
+  streamTeardown();
+  var ws;
+  try {
+    var proto = location.protocol === "https:" ? "wss://" : "ws://";
+    ws = new WebSocket(proto + location.host + "/api/xiaozhu/ws/asr");
+    ws.binaryType = "arraybuffer";
+  } catch (e) { stWS = null; return; }
+  stWS = ws;
+  var failTimer = setTimeout(function () {
+    if (stWS === ws && ws.readyState !== 1) { stOn = false; streamTeardown(); }
+  }, 5000);
+  /* 实例绑定守卫: 事件处理器只信事件所属实例(不读全局 stWS)——
+     teardown 置 null/新轮覆盖后, 迟到事件按孤儿处理:
+     onopen 孤儿→直接关闭; onclose 孤儿→不动本轮 stFinalCb
+     (原实现读全局 stWS, 面板快速开合时产生 null.send TypeError) */
+  ws.onopen = function () {
+    if (stWS !== ws) { try { ws.close(); } catch (e) {} return; }
+    var sendAuth = function () {
+      try {
+        ws.send(JSON.stringify({ type: "auth",
+          token: (getAuth() || {}).token || "" }));
+      } catch (e) { /* CONNECTING 发送等异常由 onclose 兜底 */ }
+    };
+    if (!(getAuth() || {}).token) {
+      /* 空 token 先单飞刷新(WS 轨自愈——HTTP 401 链管不到
+         这里, 13:12 空窗 6 分钟实证); 刷新失败仍发(服务端
+         error 分支再触发) */
+      tryPanelRefreshToken().then(sendAuth, sendAuth);
+      return;
+    }
+    sendAuth();
+  };
+  ws.onmessage = function (e) {
+    if (stWS !== ws) return; /* 孤儿连接消息忽略 */
+    if (typeof e.data !== "string") return;
+    var m;
+    try { m = JSON.parse(e.data); } catch (ex) { return; }
+    if (m.type === "partial" && m.text) {
+      /* 边说边出字: 麦克风状态区实时显示中间结果(自纠错) */
+      S.streamPartial = m.text; /* 语义感知 VAD 读最新转写尾字 */
+      setMicStatus('🗣 <b class="rec">' + m.text + "</b>");
+      /* 双轨 barge-in v2(文本确认版, 用户设计"问话切断合成
+         ——新任务已下达"): 段后 re-arm 使播报期间服务端持续
+         识别推入帧, partial 实时回流。文本层区分取代能量层
+         (X5 无 AEC 下外放直达 rms 0.15+ 与人声能量不可分,
+         v54 能量版实证每播自掐)。切断后发 finish 收段等
+         完整 final——不吞半句(用户可能还没说完), 提交走
+         正常流; 判定规则见 bargeShouldCut */
+      if (bargeShouldCut(m.text)) {
+        /* v82-B 打断延迟埋点(SLA"智能感核心指标"可测):
+           打断发生于播报开始后 Xms——观察期收集基线后
+           定 SLA 阈值(全双工范式 <200ms 口径受百炼 partial
+           回流延迟约束, 实测数据先行) */
+        if (S.ttsStartAt) {
+          var _barMs = Date.now() - S.ttsStartAt;
+          try { console.info("[LAT-BAR] cut_after_ms="
+            + _barMs); } catch (e) {}
+          try { window.parent.postMessage(
+            { type: "xz-lat",
+              text: "barge cut_after_ms=" + _barMs },
+            "*"); } catch (e) {}
+          /* 83号P1: 打断事件入服务端通道(LINK-08 尾巴——
+             console/postMessage 不落库不可聚合) */
+          voice83Event("barge_cut", { afterMs: _barMs });
+        }
+        smT("listening", "barge_cut");  /* v82 影子镜像 */
+        stopTtsNow();
+        setMicStatus("🎙 已暂停播报——新任务收到，请讲完");
+        streamFinish(function (finalText) {
+          if (finalText && finalText.trim()) {
+            /* skipSelfCheck: bargeIsEcho 已含 selfUtter 全
+               遍历+宽松子串(强于 postVoiceTranscript 首段
+               检测)——二次检测会误静默 ≤10 字短新指令 */
+            postVoiceTranscript(finalText.trim(), 1, true);
+            return;
+          }
+          streamTeardown();
+          scheduleHandfree(400);
+        });
+      }
+    } else if (m.type === "final") {
+      var cb = stFinalCb; stFinalCb = null;
+      /* v90 面板残化流自愈(09:29 实证: 用户反复喊
+         「小竹小竹」识别为「啊我」「我」「妈妈妈妈」——
+         面板流几轮后残化, v70 widget「旧流不自愈」的面
+         板版; v84 哑流自愈只治纯零能量, 治不了 rms 健康
+         但识别碎的残化流): 连续 3 轮 final 空或 ≤2 字
+         碎片(用户在反复说话但识别崩)→硬重置采集链
+         (listenClose+cloudStart 释放重取), 60s 退避 */
+      var _ft = String(m.text || "").trim();
+      if (!_ft || _ft.length <= 2) {
+        S.asrFragStreak = (S.asrFragStreak || 0) + 1;
+        if (S.asrFragStreak >= 3
+            && Date.now() - (S.asrResetAt || 0) > 60000) {
+          S.asrResetAt = Date.now();
+          S.asrFragStreak = 0;
+          try { console.info("[P-ASR-RESET] fragmented"
+            + " stream reset"); } catch (e) {}
+          setMicStatus("🎙 重新校准麦克风…请再讲一遍");
+          setTimeout(function () {
+            if (S.handfree) {
+              listenClose(); cloudStart();
+            }
+          }, 200);
+        }
+      } else { S.asrFragStreak = 0; }
+      if (cb) cb(m.text || "");
+    } else if (m.type === "error") {
+      stOn = false; streamTeardown();
+      if (m.fallback === "upload" && stFinalCb) {
+        var cb2 = stFinalCb; stFinalCb = null; cb2("");
+      }
+    }
+  };
+  ws.onclose = function () {
+    clearTimeout(failTimer);
+    if (stWS === ws) {
+      stWS = null;
+      if (stFinalCb) { var cb = stFinalCb; stFinalCb = null; cb(""); }
+    }
+    /* 孤儿 close: 本轮另有连接, 不触碰本轮状态 */
+  };
+  ws.onerror = function () { /* onclose 兜底处理 */ };
+}
+function streamTeardown() {
+  if (stWS) { try { stWS.close(); } catch (e) {} stWS = null; }
+}
+/* 采集块(源采样率)→线性重采样 16k→攒 200ms 帧→Int16 发送
+   v3.1 低能量自适应软增益(X5 路由增益档不稳, 实测同会话帧 rms
+   差 20 倍, 低能量轮百炼识别崩 None/#): 段内 rms<目标(0.10)线性
+   放大, 限幅 12x 只升不降, cloudStart 重置, 静音帧不调——
+   与 widget segFeed 同款策略(治"没听清"与唤醒不中的音频层根因) */
+function streamFeed(f32) {
+  if (!stWS || stWS.readyState !== 1) return; /* 建连期帧丢弃
+     (v63 句首保护攒帧已回退: ready 后突发推流破坏百炼实时
+     时间轴——建连期攒 0.5~1s 帧 ready 后瞬间涌入, 百炼
+     收帧速率 N 倍于实时, 识别崩(11:46 起全空与 v63 部署
+     时间精确吻合); 丢帧窗口仅连接 0.2~0.5s, "叮咚"后
+     1s 内开口的头帧损失可接受) */
+  var sq = 0;
+  for (var i = 0; i < f32.length; i++) { sq += f32[i] * f32[i]; }
+  var rms = Math.sqrt(sq / f32.length);
+  if (rms > 0.004) {
+    var want = 0.10 / rms;
+    if (want > (S.gain || 1)) {
+      S.gain = Math.min(12, want);
+    }
+  } else if (rms < 0.002 && (S.gain || 1) > 1) {
+    /* 纯底噪段增益缓收 0.85/帧——只升不降时 12x 挂死,
+       静音期底噪/电子干扰被放大淹没人声(09:34 dump 实证
+       1.5kHz 干扰主导); 语音内波动带(0.004~)不动, 弱人声
+       快升保帧不变 */
+    S.gain = Math.max(1, (S.gain || 1) * 0.85);
+  }
+  if ((S.gain || 1) !== 1) {
+    for (i = 0; i < f32.length; i++) {
+      f32[i] = Math.max(-1, Math.min(1, f32[i] * S.gain));
+    }
+  }
+  var srcRate = audioCtx.sampleRate, dstRate = 16000;
+  var ratio = srcRate / dstRate;
+  var out = [];
+  for (var i = stPhase; i < f32.length; i += ratio) {
+    var i0 = Math.floor(i), frac = i - i0;
+    var v = f32[i0] * (1 - frac);
+    if (i0 + 1 < f32.length) v += f32[i0 + 1] * frac;
+    out.push(v);
+  }
+  stPhase = i - f32.length;
+  var merged = new Float32Array(stAccum.length + out.length);
+  merged.set(stAccum); merged.set(out, stAccum.length);
+  stAccum = merged;
+  stBytes += out.length * 2;
+  /* 3200 样本 = 200ms@16k(6.4KB/帧——百炼 ≤16KB 约束内) */
+  while (stAccum.length >= 3200) {
+    var i16 = new Int16Array(3200);
+    for (var k = 0; k < 3200; k++) {
+      var s = Math.max(-1, Math.min(1, stAccum[k]));
+      i16[k] = s < 0 ? s * 32768 : s * 32767;
+    }
+    try { stWS.send(i16.buffer); stSent++; } catch (e) { return; }
+    stAccum = stAccum.slice(3200);
+  }
+}
+/* cloudStop 流式优先收尾: finish→final→直接提交文本;
+   final 空/超时(4s)→cb("") 回退整段 WAV 上传轨 */
+function streamFinish(cb) {
+  if (!stWS || stWS.readyState !== 1 || !stSent) { cb(""); return; }
+  setMicStatus("整理语音…");
+  var to = setTimeout(function () {
+    if (stFinalCb) { var f = stFinalCb; stFinalCb = null; f(""); }
+  }, 4000);
+  stFinalCb = function (final) {
+    clearTimeout(to);
+    if (stWS) { try { stWS.close(); } catch (e) {} stWS = null; }
+    cb(final);
+  };
+  try { stWS.send(JSON.stringify({ type: "finish" })); }
+  catch (e) { clearTimeout(to); stFinalCb = null; cb(""); }
+}
+/* TTS 回声判定: 转写为最近播报文本的子串(归一化去标点;
+   限 2-12 字——长转写几乎不可能是纯回声, 防误杀) */
+function isEchoOfTTS(t) {
+  var last = S.lastSpoken || "";
+  if (!last || !t) return false;
+  var norm = function (s) {
+    return String(s).replace(
+      /[\s，。？！、,.?!:：；;「」『』（）()\-—…·]/g, "");
+  };
+  var a = norm(t), b = norm(last);
+  return a.length >= 2 && a.length <= 12 && b.indexOf(a) >= 0;
+}
+/* 双轨 barge-in v2 回声判定(播报中切断专用)——三级防御的
+   第一级(LCS 比率, 借鉴语义-时序联合校验文档):
+   ①归一化: 去标点+语气词(啊呢吧嘛哦嗯——ASR 插语气词
+     "竹奕啊24690"不再断链);
+   ②切句判定: 按句读拆分逐句回声判定, 所有完整句(≥3 字)
+     皆命中才是回声——混合拼接段(回声A+widget 应答B)逐句
+     才能全拦(11:05 实证);
+   ③LCS 比率 ≥0.75(以 ASR 句长为分母): 一个判定同时容忍
+     丢字(竹奕24690 ⊂ 竹奕竹香尊享24690)/插字(语气词)/
+     同音替换(珠海24690 LCS≈0.83 vs 竹海至尊24690)——
+     子串(11:05 失效)与子序列(插字/同音失效)的超集;
+   ④selfUtter 集合 12s 窗全遍历(wake 应答等);
+   保守方向: 宁漏切断(播报继续续听补位)不误切断(自言自语);
+   纠正词/「小竹」开头由 bargeShouldCut 强制放行 */
+function bargeIsEcho(t) {
+  function cn2num(seg) { /* 中文数字段→阿拉伯: 四十二→42,
+    二千四百六十→2460(万级简化); TTS 读"42"文本为阿拉伯,
+    ASR 收音识回"四十二"——数字形态差异致 LCS 骤降是
+    11:16 误切断根因, 两边统一阿拉伯 */
+    var d = {零:0,〇:0,一:1,二:2,两:2,三:3,四:4,五:5,
+             六:6,七:7,八:8,九:9};
+    var u = {十:10,百:100,千:1000};
+    var total = 0, num = 0;
+    for (var i = 0; i < seg.length; i++) {
+      var c = seg.charAt(i);
+      if (c === "万") { total = (total + num) * 10000; num = 0; continue; }
+      if (c in u) {
+        if (num === 0 && c === "十") num = 1; /* 十二=12 */
+        total += num * u[c]; num = 0; continue;
+      }
+      num = num * 10 + (d[c] || 0);
+    }
+    return String(total + num);
+  }
+  function norm(s) {
+    var x = String(s).replace(
+      /[\s，。？！、,.?!:：；;「」『』（）()\-—…·啊呢吧嘛哦嗯呀啦]/g,
+      "");
+    /* 数字归一化: 连续中文数字段转阿拉伯(与 TTS 文本统一) */
+    var out = "", seg = "";
+    for (var i = 0; i <= x.length; i++) {
+      var c = i < x.length ? x.charAt(i) : "";
+      if ("零〇一二两三四五六七八九十百千万".indexOf(c) >= 0 && c) {
+        seg += c; continue;
+      }
+      if (seg) { out += cn2num(seg); seg = ""; }
+      if (c) out += c;
+    }
+    return out;
+  }
+  function lcsRatio(a, b) { /* LCS 长度 / a.length */
+    if (!a || !b) return 0;
+    var m = a.length, n = b.length;
+    if (m > 60) m = 60; /* 句级短文本, 上界防御 */
+    var prev = [], cur = [];
+    for (var j = 0; j <= n; j++) { prev[j] = 0; cur[j] = 0; }
+    for (var i = 1; i <= m; i++) {
+      for (var k = 1; k <= n; k++) {
+        cur[k] = (a.charAt(i - 1) === b.charAt(k - 1))
+          ? prev[k - 1] + 1
+          : Math.max(prev[k], cur[k - 1]);
+      }
+      var tmp = prev; prev = cur; cur = tmp;
+    }
+    return prev[n] / m;
+  }
+  function echoOne(s) { /* 单句回声判定 */
+    var a = norm(s);
+    if (a.length < 2) return true; /* 碎片句视为回声 */
+    if (lcsRatio(a, norm(S.lastSpoken || "")) >= 0.75) {
+      return true;
+    }
+    var us = S.selfUtter || [], ts = S.selfUtterAt || [];
+    var now = Date.now();
+    for (var i = 0; i < us.length; i++) {
+      if (ts[i] && now - ts[i] > 12000) continue;
+      if (lcsRatio(a, norm(us[i])) >= 0.75) return true;
+    }
+    return false;
+  }
+  var parts = String(t || "").split(/[，。？！、,.?!；;]+/);
+  var meaningful = [];
+  for (var j = 0; j < parts.length; j++) {
+    if (norm(parts[j]).length >= 3) meaningful.push(parts[j]);
+  }
+  if (!meaningful.length) return true; /* 无完整句=碎片回声 */
+  for (var m = 0; m < meaningful.length; m++) {
+    if (!echoOne(meaningful[m])) return false; /* 新词句=新指令 */
+  }
+  return true;
+}
+/* 双轨 barge-in v2 切断判定(播报中 partial 回流):
+   播报中(非收段中) + partial 非回声且达最小长度 → 用户
+   新任务已下达, 切断合成; 「小竹」开头 ≥2 字即明确新指令
+   (即使撞回声词也放行), 其余 ≥3 字; stFinalCb 挂起期间
+   (已切断收段中)不重复判定。
+   纠正元词强制放行(三级防御第二级): "不对/别说了/停"等
+   是用户纠错强意图, 无论与播报相似度多高一律切断——
+   纠正词几乎不出现在商品播报中(误触率极低); 不含"取消/
+   继续"类操作词——引导语播报"您可以说取消"会含操作词,
+   收窄到纠正元词防误触 */
+function bargeShouldCut(t) {
+  if (!S.ttsPlaying || stFinalCb) return false;
+  var _pt = String(t || "").trim();
+  var _isWakeHead = /^(小竹|你好小竹)/.test(_pt);
+  if (_isWakeHead
+      || /^(不对|不是|别说了|闭嘴|停|等等)/.test(_pt)) {
+    return true;
+  }
+  if (_pt.replace(/[，。？！、,.?! ]/g, "").length < 3) {
+    return false;
+  }
+  return !bargeIsEcho(_pt);
+}
+
+/* ===== 确认码分格输入 + 核销(POST /api/xiaozhu/confirm/{token}) ===== */
+document.addEventListener("input", function (ev) {
+  var t = ev.target;
+  if (!t.classList || !t.classList.contains("ccell")) return;
+  t.value = t.value.replace(/\D/g, "").slice(-1);
+  t.classList.toggle("filled", !!t.value);
+  if (t.value) {
+    var n = t.nextElementSibling;
+    if (n && n.classList.contains("ccell")) n.focus();
+  }
+});
+document.addEventListener("keydown", function (ev) {
+  var t = ev.target;
+  if (!t.classList || !t.classList.contains("ccell")) return;
+  if (ev.key === "Backspace" && !t.value) {
+    var p = t.previousElementSibling;
+    if (p && p.classList.contains("ccell")) {
+      p.focus(); p.value = ""; p.classList.remove("filled");
+      ev.preventDefault();
+    }
+  }
+});
+document.addEventListener("click", function (ev) {
+  var b = ev.target && ev.target.closest ? ev.target.closest("[data-cftoken]") : null;
+  if (b) doConfirm(b);
+});
+/* TTS 播报中: 点击气泡立即停止播报 */
+document.addEventListener("click", function (ev) {
+  var b = ev.target && ev.target.closest ? ev.target.closest(".bubble.speaking") : null;
+  if (b && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+    b.classList.remove("speaking");
+    showToast("已停止播报");
+  }
+});
+/* 消息流离底浮现"回到最新" */
+document.getElementById("chat").addEventListener("scroll", function () {
+  var away = this.scrollHeight - this.scrollTop - this.clientHeight > 100;
+  document.getElementById("downBtn").classList.toggle("show", away && S.turnCount > 2);
+});
+function doConfirm(btn) {
+  var box = btn.closest(".confirmbox");
+  var cells = box ? box.querySelectorAll(".ccell") : [];
+  var code = "";
+  for (var i = 0; i < cells.length; i++) code += cells[i].value || "";
+  if (!/^\d{4}$/.test(code)) {
+    showToast("请输入完整 4 位数字确认码");
+    if (cells.length) cells[0].focus();
+    return;
+  }
+  box.querySelectorAll("input,button").forEach(function (el) { el.disabled = true; });
+  var token = btn.getAttribute("data-cftoken");
+  showTyping();
+  apiFetch("/api/xiaozhu/confirm/" + token, {
+    method: "POST", body: JSON.stringify({ code: code })
+  }).then(function (j) {
+    removeTyping();
+    if (!j || j.success === false) {
+      box.querySelectorAll("input,button").forEach(function (el) { el.disabled = false; });
+      appendBot("⚠️ 确认未通过：" + ((j && (j.error || j.detail)) || "码错或已过期"), null, null, "__err__");
+      return;
+    }
+    appendUser("确认码 " + code, "text");
+    handleTurn(j, "text");
+  }).catch(function (e) { removeTyping(); turnError(e); });
+}
+
+/* ===== 语音播报 TTS 双轨 =====
+   电脑: speechSynthesis(免费即时);
+   手机(触屏/微信 X5): 浏览器 TTS 引擎普遍缺失(入队无声)——
+   一律服务端 cogtts 合成经 Web Audio 播放(UA+pointer 确定性分流;
+   真机实证国内手机浏览器 speechSynthesis 无声, 云端为可靠主轨) */
+var IS_WX = /MicroMessenger/i.test(
+  navigator.userAgent || "");
+function speak(text, bubbleEl, mood) {
+  S.lastMood = mood || ""; /* P2: latReport 上报随行 */
+  if (!S.tts || !text) {
+    /* TTS 关闭时直接恢复免提聆听(无播报间隔) */
+    S.ttsPlaying = false; scheduleHandfree(300);
+    return;
+  }
+  if (IS_WX || IS_TOUCH) return speakCloud(text, bubbleEl, mood);
+  if (!window.speechSynthesis) {
+    S.ttsPlaying = false; scheduleHandfree(300);
+    return;
+  }
+  try {
+    var u = new SpeechSynthesisUtterance(String(text).slice(0, 200));
+    u.lang = "zh-CN"; u.rate = 1.05 * ttsSpeedVal(); /* v2 G: 语速偏好同步缩放 */
+    /* 78号P1/P3: 情绪语调(care 柔慢轻/care steady 沉稳/
+       cheerful 明快亮——本地 TTS 同步情绪路由) */
+    if (mood === "care") { u.rate *= 0.92; u.pitch = 0.95; }
+    else if (mood === "steady") { u.rate *= 0.95; u.pitch = 0.97; }
+    else if (mood === "cheerful") { u.rate *= 1.02; u.pitch = 1.05; }
+    var done = function () {
+      if (bubbleEl) bubbleEl.classList.remove("speaking");
+      S.ttsPlaying = false;
+      scheduleHandfree(1200); /* 播报完 1.2s 恢复免提聆听(回声尾音衰减) */
+    };
+    S.ttsPlaying = true;
+    S.lastSpoken = String(text); /* 回声判定基准(isEchoOfTTS) */
+    u.onstart = function () {
+      if (bubbleEl) bubbleEl.classList.add("speaking");
+      /* 78号P1.5: 本地 TTS 同打 play 点(桌面 [LAT] 断链
+         修复——此前打点只在云端 pumpTts 首块分支) */
+      if (S.latMarks) { S.latMarks.play = Date.now(); latReport(); }
+    };
+    u.onend = done;
+    u.onerror = done;
+    window.speechSynthesis.cancel();
+    /* X5 队列缓冲: cancel 后紧接 speak 偶发丢失(引擎竞态),
+       60ms 后入队稳定 */
+    setTimeout(function () {
+      if (S.ttsPlaying) window.speechSynthesis.speak(u);
+    }, 60);
+    /* TTS 无事件兜底: 估算时长+3s 强制恢复(防 onend 不触发卡死免提) */
+    var estMs = Math.min(20000, 800 + String(text).length * 260);
+    setTimeout(function () { if (S.ttsPlaying) done(); }, estMs);
+  } catch (e) { /* TTS 非关键路径 */
+    S.ttsPlaying = false; scheduleHandfree(300);
+  }
+}
+function toggleTts() {
+  S.tts = !S.tts;
+  document.getElementById("ttsBtn").textContent = S.tts ? "🔊 播报开" : "🔇 播报关";
+  if (!S.tts) {
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    try { if (S.ttsSrc) { S.ttsSrc.stop(); } } catch (e) {}
+    document.querySelectorAll(".bubble.speaking").forEach(function (b) {
+      b.classList.remove("speaking");
+    });
+  }
+}
+/* v2 打断策略: 新轮到来/开麦即终止旧轮 TTS——合成请求
+   abort + 播放停止(真机实证连续对话旧轮 TTS 滞后到达,
+   播报商品与当前面板错位; fetch 挂起时也要废弃不能只靠
+   lastSpoken 事后守卫) */
+function stopTtsNow() {
+  try { if (S.ttsAbort) S.ttsAbort.abort(); } catch (e) {}
+  S.ttsAbort = null;
+  smT("listening", "stop_tts");  /* v82 影子镜像 */
+  try {
+    if (S.ttsSrc) { S.ttsSrc.onended = null; S.ttsSrc.stop(); }
+  } catch (e) {}
+  S.ttsSrc = null;
+  /* v3 流水线清理: 在途块合成被 abort 打断, 当前块停播,
+     待播队列与过渡音一并清空(旧轮任何回调不再推进队列) */
+  try {
+    if (S.ttsCur) { S.ttsCur.onended = null; S.ttsCur.stop(); }
+  } catch (e) {}
+  S.ttsCur = null;
+  try {
+    if (S.ttsGapSrc) { S.ttsGapSrc.onended = null; S.ttsGapSrc.stop(); }
+  } catch (e) {}
+  S.ttsGapSrc = null;
+  S.ttsChunks = null; S.ttsCtl = null; S.ttsNextIdx = 0;
+  if (window.speechSynthesis) {
+    try { window.speechSynthesis.cancel(); } catch (e) {}
+  }
+  document.querySelectorAll(".bubble.speaking").forEach(function (b) {
+    b.classList.remove("speaking");
+  });
+  S.ttsPlaying = false;
+}
+/* 服务端 TTS(微信 X5 无系统 TTS——cogtts 合成 WAV,
+   Web Audio 播放: X5 拒绝非手势 Audio.play() 且 Audio 元素
+   onended 偶发不触发卡死免提——BufferSource 双可靠)
+   v3 分句流水线(低延迟对话): 整句合成 2-3s 是"说完到听到"
+   最大头——长回复按句切分错峰并行合成, 首子句到达即播,
+   其余播放中合成排队接力, 体感等待从"全文合成完"压到
+   "首子句合成完"(约砍一半); 队列按序号接力(乱序不串句),
+   失败块占位跳过(不播但推进防卡死), 旧轮回调一律 ctl
+   身份比对作废, 短句/缓存命中走单块路径零回归 */
+function splitSpeech(text) {
+  var t = String(text || "").trim();
+  if (!t) return [];
+  if (t.length <= 24) return [t]; /* 短回复整句更快(大多数轮) */
+  var parts = [], cur = "";
+  for (var i = 0; i < t.length; i++) {
+    var ch = t.charAt(i);
+    cur += ch;
+    if ("。！？；;，,—".indexOf(ch) >= 0) {
+      /* 78号P1.5·竹语: 破折号入切分集 + 最小块 6→4 字
+         (spike 实证"好的——"4字合成稳定 ~0.7s, 耗时随字数
+         近线性)——首块恒为"好的——"前缀, preheat 预取一次
+         全网零合成秒播; 需与后端 split_speech 逐字一致 */
+      if (cur.trim().length >= 4) {
+        parts.push(cur.trim()); cur = "";
+      }
+    } else if (cur.length >= 14) {
+      /* 无标点长串硬切(22→14: 首块调小); 硬切回退——切点
+         回退越过尾部 ASCII 数字/字母段及紧贴符号(°×¥),
+         "52度"不在"5|2"处断裂数字读音; 空格是自然词边界
+         (与后端 split_speech 逐字一致) */
+      var cut = cur, last = cut.slice(-1);
+      while (cut.length > 4
+             && ((last.charCodeAt(0) < 128
+                  && "。！？；;，,".indexOf(last) < 0
+                  && last !== " ")
+                 || "°×¥".indexOf(last) >= 0)) {
+        cut = cut.slice(0, -1); last = cut.slice(-1);
+      }
+      if (cut.trim().length >= 4) {
+        parts.push(cut); cur = cur.slice(cut.length);
+      } else {
+        parts.push(cur); cur = "";
+      }
+    }
+  }
+  if (cur.trim()) parts.push(cur.trim());
+  if (!parts.length) return [t];
+  /* v77 短块合并(21:31 日志实证 bad_response 30%): 切分产出的
+     ≤6 字短块(理性饮酒，/满, 醇厚…)百炼 TTS 高频拒答(98 字节
+     JSON 错误体)且块数多加剧并发限流——非首块一律并入前块;
+     首块保护不并("好的——"前缀 preheat 秒播链依赖恒定键);
+     与后端 split_speech 逐字一致 */
+  var merged = [parts[0]];
+  for (var pi = 1; pi < parts.length; pi++) {
+    if (parts[pi].trim().length <= 6) {
+      merged[merged.length - 1] += parts[pi];
+    } else { merged.push(parts[pi]); }
+  }
+  return merged;
+}
+function ttsPlayCtx() {
+  var AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  /* 播放 ctx 优先复用录音 audioCtx(用户手势+麦克风授权
+     后创建, 免提流复用常驻 running——X5 无手势新建 ctx
+     会 suspended 且 resume 被拒, 与 Audio.play() 同困) */
+  var ctx = (typeof audioCtx !== "undefined" && audioCtx
+             && audioCtx.state !== "closed")
+    ? audioCtx
+    : (S.ttsCtx && S.ttsCtx.state !== "closed"
+       ? S.ttsCtx : null);
+  if (!ctx) { S.ttsCtx = new AC(); ctx = S.ttsCtx; }
+  S.ttsPlayCtx = ctx;
+  return ctx;
+}
+function ttsDecode(ctx, buf) {
+  var go = function () {
+    return new Promise(function (res, rej) {
+      ctx.decodeAudioData(buf, res, rej);
+    });
+  };
+  return (ctx.state === "suspended"
+    ? ctx.resume().then(go, go) : go())
+    .catch(function () { return null; });
+}
+/* 块入队: 序号保序; 失败块传 null 占位(跳过不播不卡队列) */
+function ttsEnqueue(decoded, idx, finalDone, ctl) {
+  if (S.ttsAbort !== ctl || !S.ttsChunks) return;
+  S.ttsChunks[idx] = { d: decoded, done: finalDone };
+  pumpTts(ctl);
+}
+/* 队首接力: 只播 nextIdx 连续就绪块; 当前块 onended 推进,
+   下一块未到则空转退出, 到达时再泵 */
+function pumpTts(ctl) {
+  try {
+    if (S.ttsAbort !== ctl || !S.ttsChunks || S.ttsCur) return;
+    var item = S.ttsChunks[S.ttsNextIdx];
+    /* 失败块连跳(某句合成失败对话继续) */
+    while (item && !item.d) {
+      var wasLast = !!item.done;
+      delete S.ttsChunks[S.ttsNextIdx];
+      S.ttsNextIdx++;
+      if (wasLast) { S.ttsChunks = null; return item.done(); }
+      item = S.ttsChunks[S.ttsNextIdx];
+    }
+    if (!item) return;
+    var ctx = S.ttsPlayCtx || ttsPlayCtx();
+    if (!ctx) return;
+    var src = ctx.createBufferSource();
+    src.buffer = item.d;
+    src.connect(ctx.destination);
+    S.ttsSrc = src; S.ttsCur = src;
+    /* 首块出声: 气泡高亮 + 延迟报告 + 过渡音让位 */
+    if (S.ttsNextIdx === 0) {
+      if (S.ttsBubble) S.ttsBubble.classList.add("speaking");
+      if (S.latMarks) S.latMarks.play = Date.now();
+      latReport();
+      if (S.ttsGapSrc) {
+        try {
+          S.ttsGapSrc.onended = null; S.ttsGapSrc.stop();
+        } catch (e) {}
+        S.ttsGapSrc = null;
+      }
+    }
+    src.onended = function () {
+      if (S.ttsCur !== src) return;
+      S.ttsCur = null;
+      delete S.ttsChunks[S.ttsNextIdx];
+      S.ttsNextIdx++;
+      if (item.done) { S.ttsChunks = null; item.done(); }
+      else pumpTts(ctl);
+    };
+    src.onerror = src.onended;
+    src.start();
+    /* 兜底: 块时长+3s 强制推进(防 onended 丢失卡死队列) */
+    setTimeout(function () {
+      if (S.ttsCur === src) { try { src.stop(); } catch (e) {} }
+    }, item.d.duration * 1000 + 3000);
+  } catch (e) { /* ctx 失效等: 对齐旧版失败恢复 */
+    S.ttsCur = null; S.ttsPlaying = false;
+    scheduleHandfree(600);
+  }
+}
+/* v3 全链路延迟埋点: vad断句→提交→响应→首块出声 四段
+   [LAT] 结构化输出(PC 调试/真机远程指导)——卡在哪段
+   一目了然(VAD等待/识别+规则/TTS合成) */
+/* 83号P1: 语音事件通道(唤醒/打断——fire-and-forget 同 /lat
+   口径, 失败静默; 服务端 voice83:events 日键收集) */
+function voice83Event(type, meta) {
+  try {
+    var _a = getAuth() || {};
+    var _hh = { "Content-Type": "application/json",
+                "X-Member-Id": String(_a.uid || "") };
+    if (_a.token) _hh["Authorization"] = "Bearer " + _a.token;
+    fetch("/api/voice83/events", { method: "POST",
+      headers: _hh,
+      body: JSON.stringify({ type: type, meta: meta || {} })
+    }).catch(function () {});
+  } catch (e) {}
+}
+function latReport() {
+  var m = S.latMarks || {};
+  var seg = function (a, b) {
+    return (m[a] && m[b]) ? String(m[b] - m[a]) : "?";
+  };
+  try {
+    var line = "vad→submit " + seg("vad", "submit")
+      + "ms | submit→resp " + seg("submit", "resp")
+      + "ms | resp→play " + seg("resp", "play")
+      + "ms | total " + seg("vad", "play") + "ms";
+    console.info("[LAT] " + line);
+    /* 78号P1.5: embed 面板内 console.info 不被部分采集
+       工具捕获——postMessage 抛给主页面转发, 修观测断链 */
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage(
+        { type: "xz-lat", text: line }, "*");
+    }
+    /* P2·H2 观察期: 四段轻量上报(开关 /voices 下发;
+       fire-and-forget 失败静默; vad 缺失轮不上报) */
+    if (S.latReport === "on") {
+      var _n = function (a, b) {
+        return (m[a] && m[b]) ? (m[b] - m[a]) : null;
+      };
+      var _tt = _n("vad", "play");
+      if (_tt != null) {
+        var _a = getAuth() || {};
+        var _hh = { "Content-Type": "application/json",
+                    "X-Member-Id": String(_a.uid || "") };
+        if (_a.token) {
+          _hh["Authorization"] = "Bearer " + _a.token;
+        }
+        fetch("/api/xiaozhu/lat", { method: "POST",
+          headers: _hh,
+          body: JSON.stringify({
+            s1: _n("vad", "submit") || 0,
+            s2: _n("submit", "resp") || 0,
+            s3: _n("resp", "play") || 0,
+            tt: _tt, proto: S.proto || "",
+            mood: S.lastMood || "" })
+        }).catch(function () {});
+      }
+    }
+  } catch (e) { /* 静默环境忽略 */ }
+}
+/* P1·竹语: 首子句流式分片播放(SSE chat delta → PCM16 直灌
+   AudioBuffer 顺序接力播)。衔接: 首片起播即推进现有队列
+   nextIdx=1(余句整句并行合成中); 流读完+片播完 → pumpTts
+   接管余句(空窗期 S.ttsCur 保留占位防抢播)。失败三级回退:
+   流式失败→首块整句 fetch; 整句失败→null 占位(既有兜底) */
+function streamFirstChunk(ctl, ctx, text, mood,
+                          totalChunks, done) {
+  var auth = getAuth() || {};
+  var h = { "X-Member-Id": String(auth.uid || "") };
+  if (auth.token) h["Authorization"] = "Bearer " + auth.token;
+  var firstPlayed = false, streamDone = false;
+  var sq = [], playing = false;
+  var dec = new TextDecoder("utf-8");
+  var buf = "";
+  function takeOver() {
+    S.ttsCur = null;
+    if (totalChunks > 1) pumpTts(ctl); else done();
+  }
+  function playNext() {
+    if (S.ttsAbort !== ctl) return;
+    if (!sq.length) { playing = false; return; }
+    playing = true;
+    var b = sq.shift();
+    var src = ctx.createBufferSource();
+    src.buffer = b;
+    src.connect(ctx.destination);
+    S.ttsSrc = src; S.ttsCur = src;
+    if (!firstPlayed) {
+      firstPlayed = true;
+      if (totalChunks > 1) S.ttsNextIdx = 1; /* 余句让位 */
+      if (S.ttsBubble) S.ttsBubble.classList.add("speaking");
+      if (S.latMarks) S.latMarks.play = Date.now();
+      latReport();
+      if (S.ttsGapSrc) {
+        try { S.ttsGapSrc.onended = null; S.ttsGapSrc.stop(); } catch (e) {}
+        S.ttsGapSrc = null;
+      }
+    }
+    src.onended = function () {
+      if (S.ttsCur !== src) return;
+      if (sq.length) { playNext(); return; }
+      playing = false;
+      if (streamDone) takeOver();
+      /* 流未完: S.ttsCur 保留占位, 下一片 push 唤醒 */
+    };
+    src.onerror = src.onended;
+    src.start();
+    setTimeout(function () {
+      if (S.ttsCur === src) { try { src.stop(); } catch (e) {} }
+    }, b.duration * 1000 + 3000);
+  }
+  function onPiece(b64) {
+    try {
+      var u = b64ToBytes(b64);
+      if (u.byteLength < 2) return;
+      var f = pcmToF32(u);
+      var b = ctx.createBuffer(1, f.length, PCM_SR);
+      b.getChannelData(0).set(f);
+      sq.push(b);
+      if (!playing) playNext();
+    } catch (e) { /* 坏片跳过不卡流 */ }
+  }
+  function fallback() {
+    /* 流式失败 → 首块整句回退(nextIdx 未推进, 队列 0 起接管);
+       P2·O3: decGet 旁路命中零 decode */
+    var _d0 = decGet(text);
+    if (_d0) {
+      ttsEnqueue(_d0, 0,
+                 totalChunks === 1 ? done : null, ctl);
+      return;
+    }
+    var _tryFetch = function (attempt) {
+      fetch(ttsUrl(text, mood), { headers: h,
+        signal: ctl ? ctl.signal : undefined })
+        .then(function (r) {
+          if (!r.ok) throw new Error("tts " + r.status);
+          return r.arrayBuffer();
+        })
+        .then(function (bb) { return ttsDecode(ctx, bb); })
+        .then(function (d) {
+          if (S.ttsAbort === ctl) {
+            decPut(text, d);
+            ttsEnqueue(d, 0,
+                       totalChunks === 1 ? done : null, ctl);
+          }
+        })
+        .catch(function () {
+          /* 整句断连单次重试(19:15:58 实证: 流断与整句
+             回退同秒撞同一坏连接→无声卡顿期环境声成轮) */
+          if (attempt === 0 && S.ttsAbort === ctl) {
+            setTimeout(function () {
+              if (S.ttsAbort === ctl) _tryFetch(1);
+            }, 400);
+            return;
+          }
+          if (S.ttsAbort === ctl) ttsEnqueue(
+            null, 0, totalChunks === 1 ? done : null, ctl);
+        });
+    };
+    _tryFetch(0);
+  }
+  function finishStream() {
+    streamDone = true;
+    if (playing) return; /* 在播: onended 接管 */
+    if (sq.length) { playNext(); return; }
+    if (firstPlayed) takeOver();
+    else fallback(); /* 一个音频片都没有 */
+  }
+  /* P2·O4: 慢档垫场——300ms 无首片起播「好的」过渡音买体感
+     (智谱首块日内双档波动, 慢档 750~980ms 时首声垫场提前),
+     首片到达即让位(playNext 首片分支已有 gap 让位) */
+  setTimeout(function () {
+    if (S.ttsAbort !== ctl || firstPlayed) return;
+    var play = function (d) {
+      if (!d || S.ttsAbort !== ctl || firstPlayed) return;
+      var g = ctx.createBufferSource();
+      g.buffer = d; g.connect(ctx.destination);
+      S.ttsGapSrc = g;
+      g.onended = function () {
+        if (S.ttsGapSrc === g) S.ttsGapSrc = null;
+      };
+      g.start();
+    };
+    var gd = decGet("好的");
+    if (gd) { play(gd); return; }
+    var gb = packedGet("好的");
+    if (gb) ttsDecode(ctx, gb).then(function (d) {
+      decPut("好的", d); play(d);
+    });
+  }, 300);
+  fetch(ttsStreamUrl(text, mood), { headers: h,
+    signal: ctl ? ctl.signal : undefined })
+    .then(function (r) {
+      if (!r.ok || !r.body
+          || typeof r.body.getReader !== "function")
+        throw new Error("stream " + r.status);
+      var rd = r.body.getReader();
+      var pump = function () {
+        return rd.read().then(function (m) {
+          if (S.ttsAbort !== ctl) return;
+          if (m.done) { finishStream(); return; }
+          buf += dec.decode(m.value, { stream: true });
+          var lines = buf.split("\n");
+          buf = lines.pop();
+          for (var i = 0; i < lines.length; i++) {
+            var ln = lines[i];
+            if (ln.indexOf("data: ") !== 0) continue;
+            var s = ln.slice(6).trim();
+            if (!s) continue;
+            var hitErr = false;
+            try {
+              var obj = JSON.parse(s);
+              if (obj.error) { hitErr = true; }
+              else {
+                /* G3 遗留定案: 智谱流式块自带 return_sample_rate
+                   自描述(官方实证 24000)——动态跟随防未来变化 */
+                if (obj.return_sample_rate) {
+                  PCM_SR = obj.return_sample_rate;
+                }
+                var ch = (obj.choices || [{}])[0] || {};
+                var d = ch.delta || {};
+                if (d.content) onPiece(d.content);
+              }
+            } catch (e) { /* 忽略半行/坏行 */ }
+            if (hitErr) {
+              try { rd.cancel(); } catch (e) {}
+              if (firstPlayed) finishStream();
+              else fallback();
+              return;
+            }
+          }
+          return pump();
+        });
+      };
+      return pump();
+    })
+    .catch(function () {
+      if (S.ttsAbort !== ctl) return;
+      if (firstPlayed) finishStream();
+      else fallback();
+    });
+}
+function speakCloud(text, bubbleEl, mood) {
+  stopTtsNow(); /* 先打断旧轮(合成中/播放中一律终止) */
+  var ctl = (typeof AbortController !== "undefined")
+    ? new AbortController() : null;
+  S.ttsAbort = ctl; S.ttsCtl = ctl;
+  S.ttsPlaying = true;
+  S.ttsStartAt = Date.now(); /* 看门狗驻留计时 */
+  smT("speaking", "speak_start");  /* v82 影子镜像 */
+  S.lastSpoken = String(text);
+  S.ttsBubble = bubbleEl || null;
+  S.ttsChunks = {}; S.ttsNextIdx = 0;
+  /* barge-in 播报期识别供能(用户逻辑"语音对话可再次切断
+     播报"): 回复开始即 re-arm——播报期间服务端持续识别,
+     partial 回流走 onmessage 双轨判定(bargeShouldCut: 非回
+     声≥3字/「小竹」≥2字/纠正元词→切断+finish 收段提交);
+     执行期(提交→回复到达)无拾音不 arm——识别仅在播报期
+     (回声判定链 B8~B22 已验证拦回声); 播报完 done→关段,
+     窗口制正常接力 */
+  if (stWS && stWS.readyState === 1) {
+    try { stWS.send(JSON.stringify({ type: "arm" })); }
+    catch (e) { /* 连接死由续听重建 */ }
+  }
+  var all = String(text);
+  /* 78号P1/P3: 情绪语调系数(cogtts speed 叠乘——缓存键
+     随 speed 自动分维不串台; mood 空则用户默认语速) */
+  var el = bubbleEl;
+  var done = function () {
+    if (el) el.classList.remove("speaking");
+    S.ttsPlaying = false;
+    smT("listening", "tts_done");  /* v82 影子镜像 */
+    /* 手机外放 TTS 无 AEC 串扰麦克风(残响)——短句播报
+       残响短, 1.5s 恢复聆听(对话节奏提速) */
+    scheduleHandfree(1500);
+  };
+  var auth = getAuth() || {};
+  var hdrs = { "X-Member-Id": String(auth.uid || "") };
+  if (auth.token) hdrs["Authorization"] = "Bearer " + auth.token;
+  /* 高频短句内存直播(preheatTTS 预取——"在呢!"零网络
+     零合成, 唤醒应答只剩 ASR 延迟); 命中或 ≤24 字短句
+     走单块路径(整句, 大多数轮零回归) */
+  var packed = packedGet(all);
+  var chunks = packed ? [all] : splitSpeech(all);
+  if (!packed) {
+    setMicStatus("🎙 语音合成中…（首次约 1 秒，同句即时）");
+  }
+  var ctx = ttsPlayCtx();
+  if (!ctx) { /* 无 WebAudio: 文字已展示, 恢复聆听兜底 */
+    S.ttsPlaying = false; scheduleHandfree(300); return;
+  }
+  if (chunks.length > 1) {
+    /* 首包过渡音: 多块流水线才播预缓存「好的」抢跑, 为
+       首子句合成买 ~0.5s 体感; 正文首块出声即让位;
+       P2·O3: decGet 旁路命中零 decode, 未命中解码后回填;
+       v88 防重: ACK 抢占(setPending)已在播则不双播 */
+    var gapPlay = function (d) {
+      if (!d || S.ttsAbort !== ctl || S.ttsCur
+          || S.ttsGapSrc) return;
+      var g = ctx.createBufferSource();
+      g.buffer = d; g.connect(ctx.destination);
+      S.ttsGapSrc = g;
+      g.onended = function () {
+        if (S.ttsGapSrc === g) S.ttsGapSrc = null;
+      };
+      g.start();
+    };
+    var gapDec = decGet("好的");
+    if (gapDec) {
+      gapPlay(gapDec);
+    } else {
+      var gapBuf = (S.packTTS || {})["好的"];
+      if (gapBuf) {
+        ttsDecode(ctx, gapBuf).then(function (d) {
+          decPut("好的", d);
+          gapPlay(d);
+        });
+      }
+    }
+  }
+  /* P1·竹语: 流式首声接管(开关 on + 能力在 + 非缓存命中)
+     ——首子句走 SSE 分片直灌(首声 ~60-110ms), 余句仍整句
+     并行错峰(双层结构: 缓存秒播 21ms / 流式兜底) */
+  var streamFirst = (S.ttsStream === "on") && STREAM_OK
+    && !packed && chunks.length >= 1;
+  if (streamFirst) {
+    streamFirstChunk(ctl, ctx, chunks[0], mood,
+                     chunks.length, done);
+  }
+  /* v79 回退串行链(v78 教训): fetchChain 回调链在 X5 实证
+     每块 fetch 挂起 ~10s(02:34:46/56 nginx GET 晚 10~11s 才
+     到达, 首发丢失静默重试)——播报每块拖 10s+/指令无提交/
+     二次唤醒延迟三症状同源; 回退 v77 forEach 并发(X5 实证
+     fetch 即时发出), 错峰 250→800ms 压在途峰值至 ~3(1302
+     并发限流预防: 6 并发才触发, 3 安全), 块级 400ms 重试保留 */
+  chunks.forEach(function (c, idx) {
+    setTimeout(function () {
+      if (S.ttsAbort !== ctl) return; /* 旧轮: 后续块不再发 */
+      if (idx === 0 && streamFirst) return; /* 流式负责首块 */
+      var pre = packedGet(c);
+      var tried = false;
+      var fetchChunk = function () {
+        return (pre ? Promise.resolve(pre)
+          : fetch(ttsUrl(c, mood), {
+              headers: hdrs,
+              signal: ctl ? ctl.signal : undefined })
+            .then(function (r) {
+              if (!r.ok) throw new Error("tts " + r.status);
+              return r.arrayBuffer();
+            }));
+      };
+      var run = function () {
+        fetchChunk().then(function (buf) {
+          if (S.ttsAbort !== ctl) return;
+          if (!buf) {
+            return ttsEnqueue(null, idx,
+              idx === chunks.length - 1 ? done : null, ctl);
+          }
+          /* P2·O3: decoded 旁路命中零 decode; 未命中解码后
+             回填(同句二播即零成本) */
+          var _d0 = decGet(c);
+          if (_d0) {
+            return ttsEnqueue(_d0, idx,
+              idx === chunks.length - 1 ? done : null, ctl);
+          }
+          return ttsDecode(ctx, buf).then(function (d) {
+            if (S.ttsAbort !== ctl) return;
+            decPut(c, d);
+            ttsEnqueue(d, idx,
+              idx === chunks.length - 1 ? done : null, ctl);
+          });
+        }).catch(function () {
+          if (S.ttsAbort !== ctl) return;
+          if (!tried) {
+            tried = true;
+            setTimeout(function () {
+              if (S.ttsAbort === ctl) run();
+            }, 400);
+            return;
+          }
+          ttsEnqueue(null, idx,
+            idx === chunks.length - 1 ? done : null, ctl);
+        });
+      };
+      run();
+    }, idx * 800); /* 错峰 800ms: 峰值在途 ~3 块(<1302 触发
+                      阈值), X5 并发 fetch 实证不挂起 */
+  });
+  /* 轮级兜底: 全文估时+8s(覆盖块级推进间隙与 fetch 黑洞),
+     仍在播则强制收尾(防卡死免提) */
+  var estMs = Math.min(30000, 2000 + all.length * 300) + 8000;
+  setTimeout(function () {
+    if (S.ttsAbort === ctl && S.ttsPlaying) {
+      S.ttsChunks = null;
+      stopTtsNow();
+      done();
+    }
+  }, estMs);
+}
+
+/* ===== 免提连续对话: 自动聆听→VAD静音断句→发送→播报完续听 ===== */
+function scheduleHandfree(delay) {
+  if (!S.handfree || S.pending || S.ttsPlaying || !S.sid
+      || S.hidden) return;
+  clearTimeout(S.hfTimer);
+  S.hfTimer = setTimeout(function () {
+    if (S.handfree && !S.pending && !S.ttsPlaying && S.sid
+        && !S.hidden && !cloudActive) cloudStart();
+  }, delay || 600);
+}
+function toggleHandfree() {
+  S.handfree = !S.handfree;
+  document.getElementById("hfBtn").textContent
+    = S.handfree ? "🎧 免提开" : "🎧 免提关";
+  if (S.handfree) {
+    showToast("免提对话已开启——直接说话即可");
+    setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，说完自动发送");
+    scheduleHandfree(400);
+  } else {
+    clearTimeout(S.hfTimer);
+    if (cloudActive) { cloudActive = false; hardStopCloud(); }
+    showToast("免提已关——点击麦克风手动说话");
+    setMicStatus(IS_TOUCH ? "⏺ 按住麦克风录音 · 松开发送"
+                          : "⏺ 点击麦克风开始录音 · 再点一次结束发送");
+  }
+}
+/* ===== 冷唤醒开关(embed 模式): 全站呼唤「小竹、小竹」或「你好小竹」唤出面板 =====
+   状态写 localStorage 'xiaozhu.wake'(与主站 voice-wake-widget 同源
+   共享); postMessage xz-wake-on/off 即时通知父页启停监听 */
+function toggleWake() {
+  var next = (localStorage.getItem("xiaozhu.wake") === "on")
+    ? "off" : "on";
+  localStorage.setItem("xiaozhu.wake", next);
+  renderWakeBtn();
+  try { window.parent.postMessage(
+    { type: next === "on" ? "xz-wake-on" : "xz-wake-off" }, "*"); } catch (e) {}
+  showToast(next === "on"
+    ? "唤醒已开启——全站任意页呼唤「小竹、小竹」或「你好小竹」唤出语音精灵"
+    : "唤醒已关闭——小竹球回归，点击可手动打开");
+}
+function renderWakeBtn() {
+  var el = document.getElementById("wakeBtn");
+  if (!el) return;
+  var on = localStorage.getItem("xiaozhu.wake") === "on";
+  el.textContent = on ? "📣 唤醒开" : "📣 唤醒关";
+  el.title = on
+    ? "已开启：全站任意页呼唤唤醒词唤出面板"
+    : "已关闭：点此开启全站语音唤醒";
+}
+/* ===== 唤醒词设置(embed 面板与独立页通用): 预设 + 自定义 =====
+   存 localStorage 'xiaozhu.wakeword'(与主站 voice-wake-widget
+   同源共享); embed 面板内 postMessage 'xz-wake-word' 通知父页
+   引擎即时重建; 独立页无父页监听, 主站下次加载生效 */
+function showWakeWordSet() {
+  var w = localStorage.getItem("xiaozhu.wakeword") || "";
+  if (w === "你好小竹") { w = ""; } /* 旧「你好小竹」预设已并入默认双词 */
+  document.getElementById("wwCur").textContent = w
+    ? "「" + w + "」（自定义词 · 同音容错）"
+    : "小竹、小竹 / 你好小竹（双词并存 · 默认）";
+  document.getElementById("wwInput").value = w;
+  document.getElementById("wwMask").classList.remove("hidden");
+  renderWwPreview();
+}
+function hideWakeWordSet() {
+  document.getElementById("wwMask").classList.add("hidden");
+}
+function applyWakeWordPreset(w) {
+  saveWakeWord(w);
+}
+/* 「小竹」前缀自动补全: 不带前缀的自定义词保存时自动补全
+   (已带则原样); 补全后超 8 字返回 null(超长) */
+function normalizeCustomWord(v) {
+  v = String(v || "").trim();
+  if (!v) { return ""; }
+  if (v.indexOf("小竹") === 0) { return v; }
+  if (v.length + 2 > 8) { return null; }
+  return "小竹" + v;
+}
+/* 输入实时预览: 补全后的最终唤醒词/超长提示 */
+function renderWwPreview() {
+  var el = document.getElementById("wwPreview");
+  var v = document.getElementById("wwInput").value.trim();
+  if (!v) { el.className = "ww-preview"; el.textContent = ""; return; }
+  var n = normalizeCustomWord(v);
+  el.className = "ww-preview show";
+  if (n === null) {
+    el.style.background = "#fdecea";
+    el.style.color = "#b5453c";
+    el.textContent = "「" + v + "」加上「小竹」前缀后超 8 字，请缩短核心词";
+  } else {
+    el.style.background = "";
+    el.style.color = "";
+    el.textContent = "保存后呼唤：「" + n + "」"
+      + (v.indexOf("小竹") === 0 ? "" : "（已自动补全「小竹」前缀）");
+  }
+}
+function saveWakeWordCustom() {
+  var v = document.getElementById("wwInput").value.trim();
+  if (!v) { saveWakeWord(""); return; } /* 清空保存 = 恢复默认 */
+  if (v.length < 2) { showToast("自定义核心词至少 2 个字"); return; }
+  var n = normalizeCustomWord(v);
+  if (n === null) { showToast("加上「小竹」前缀后超 8 字，请缩短核心词"); return; }
+  saveWakeWord(n);
+}
+function saveWakeWord(w) {
+  if (w) { localStorage.setItem("xiaozhu.wakeword", w); }
+  else { localStorage.removeItem("xiaozhu.wakeword"); }
+  var embed = document.body.classList.contains("embed");
+  if (embed) { try { window.parent.postMessage(
+    { type: "xz-wake-word", word: w || "" }, "*"); } catch (e) {} }
+  showWakeWordSet();
+  showToast(w
+    ? "唤醒词已设为「" + w + "」" + (embed ? "——呼唤试试" : "——在主站任意页呼唤即可唤出")
+    : "唤醒词已恢复默认（小竹、小竹 / 你好小竹 双词并存）");
+}
+/* ===== 浮层隐藏暂停/重开恢复(跳转/关闭浮层后) =====
+   隐藏的 iframe 若继续免提监听: 环境杂音污染会话(# 转写/
+   旁人对话误触发) + 空烧每日额度 + 隐藏页 TTS 占音频焦点
+   干扰后续录音——隐藏即暂停, 重开自动恢复聆听;
+   且必须无条件释放麦克风(X5 独占: 浮层隐藏即交接给父页
+   唤醒引擎——免提待续听态流仍开, 不停则父页拿不到麦克风) */
+function pauseVoiceForHidden() {
+  S.hidden = true;
+  clearTimeout(S.hfTimer); /* 停续听排程 */
+  cloudActive = false;
+  hardStopCloud(); /* 无条件硬停+释放麦克风(幂等安全) */
+  if (window.speechSynthesis) {
+    try { window.speechSynthesis.cancel(); } catch (e) {}
+  }
+  try { if (S.ttsSrc) { S.ttsSrc.stop(); } } catch (e) {}
+  S.ttsPlaying = false; /* 隐藏页不再播报(防占音频焦点) */
+  if (S.handfree) setMicStatus(
+    "🎧 浮层已隐藏 · 需要继续请点右下角<b>小竹</b>");
+}
+function resumeVoiceFromHidden() {
+  if (!S.hidden) return;
+  S.hidden = false;
+  if (S.handfree && S.sid && !S.pending && !S.ttsPlaying) {
+    setMicStatus("🎧 免提聆听中 · 请<b>直接说话</b>，说完自动发送");
+    scheduleHandfree(400);
+  }
+}
+/* 机制①: 页面可见性(浮层 display:none 时 iframe 变 hidden) */
+document.addEventListener("visibilitychange", function () {
+  if (document.visibilityState === "hidden") pauseVoiceForHidden();
+  else resumeVoiceFromHidden();
+});
+/* 机制②: 父窗口浮层开合通知(兼容不触发 visibilitychange 的内核) */
+/* 意图锚定: 父页(product-detail hash)→商品名预取; 指代词注入
+   (「这个多少钱」→「「竹奕酒·…」多少钱」)——前端文本层
+   指代消解, 现有意图链按商品名解析, 零后端改动 */
+var pageCtx = null; /* {id, pname?} 宿主商品页上下文 */
+function setPageCtx(c) {
+  pageCtx = (c && c.id) ? { id: String(c.id), pname: "" } : null;
+  if (!pageCtx) return;
+  /* 预取商品名(命中指代时零延迟注入; 失败静默不注入) */
+  apiFetch("/api/product/" + pageCtx.id).then(function (j) {
+    var p = (j && j.data) ? j.data : j;
+    if (pageCtx && p && p.name) { pageCtx.pname = String(p.name); }
+  }).catch(function () { /* 静默 */ });
+}
+function ctxInject(t) {
+  if (!pageCtx || !pageCtx.pname || !t) { return t; }
+  if (!/(这个|这款|这瓶|这酒|这件|它)/.test(t)) { return t; }
+  return "「" + pageCtx.pname + "」" + t;
+}
+/* 免唤醒前缀补齐: widget 唤醒命中(xz-panel-wake-hit)后窗口
+   首轮自动补「小竹，」——点亮服务端 5 分钟滑动窗(此后由
+   turn.wake 续期, 过期后服务端回 wakeHint 置回 S.woken=false
+   自动停补); 用户侧无感(气泡显示原文) */
+function wakePrefix(t) {
+  if (!S.woken || !t) { return t; }
+  if (/^(小竹|你好小竹)/.test(t)) { return t; }
+  return "小竹，" + t;
+}
+window.addEventListener("message", function (ev) {
+  var d = ev && ev.data;
+  if (!d || !d.type) return;
+  if (d.type === "xz-panel-hide") pauseVoiceForHidden();
+  else if (d.type === "xz-panel-show") resumeVoiceFromHidden();
+  else if (d.type === "xz-page-ctx") setPageCtx(d.ctx);
+  else if (d.type === "xz-wake-audio-start") {
+    /* widget「我在，请吩咐」开播(用户要求恢复语音应答):
+       VAD 静默切"等结束"——收 end 前不判定, 精确覆盖全部
+       播放期(11:35 实证固定窗对不上 0.5~3s 开播延迟) */
+    S.wakeVadMute = Infinity;
+  } else if (d.type === "xz-wake-audio-end") {
+    /* 应答播完: 静默再留 0.8s 尾音余量后恢复判定 */
+    S.wakeVadMute = Date.now() + 800;
+  } else if (d.type === "xz-panel-wake-hit") {
+    /* widget 唤醒命中(全站唤醒轨) → 面板免唤醒态: 下轮
+       发送自动补「小竹，」前缀点亮服务端 5 分钟滑动窗
+       (唤醒轨不写面板会话, 不补则被打回「请以小竹开头」);
+       尾音静默窗: 开面板瞬间免提把唤醒词尾音录成一轮
+       (06:59 实证「小竹小竹。」成轮污染上下文)——2s 内
+       免提轮静默丢弃 */
+    S.woken = true;
+    /* 83号P1: 唤醒命中事件入服务端通道(误唤醒率可观测) */
+    voice83Event("wake_hit");
+    /* 静默等待式 S1(四态状态机): 语音应答已取消(widget 改纯
+       声学「叮-咚」), wakeVadMute 只需盖 beep 尾音(0.4s
+       beep+0.6s 余量)——1s 后用户即可说话, 比 2.5s 提速;
+       wakeGrace 4.5s 提交丢弃窗保留(beep 尾音段+环境声
+       早期提交防线) */
+    S.wakeVadMute = Date.now() + 1000;
+    S.wakeGrace = Date.now() + 4500;
+    updateWakePill();
+    /* 语音应答已恢复(用户要求): 应答记入播报集合——外放被
+       麦收回时文本层防线可命中; micStatus 文字同步 */
+    S.selfUtter = S.selfUtter || [];
+    S.selfUtterAt = S.selfUtterAt || [];
+    S.selfUtter.push("我在，请吩咐");
+    S.selfUtterAt.push(Date.now());
+    if (S.sid) {
+      setMicStatus("🎙 我在，请吩咐");
+    }
+    /* 二级唤醒: 窗口已关(listenClose 静默回归)或播报进行中
+       (打断走唤醒词——widget 流独立常开不受面板窗口影响)
+       → 唤醒词即时重开拾音窗口; cloudStart 内置 stopTtsNow
+       (v2 打断)处理播报中场景; pending(处理中)不重开 */
+    if (S.handfree && (S.listenClosed || S.ttsPlaying)
+        && !S.pending && !S.hidden && !cloudActive) {
+      cloudStart();
+    }
+  } else if (d.type === "xz-panel-wake-text"
+             && d.text) {
+    /* v80 member 窗意图直入: widget 检测到唤醒后 5 分钟内
+       的意图语音(免喊唤醒词)弹面板并把转写直达首轮——
+       免用户重说一遍; 唤醒态同步点亮(下轮免前缀) */
+    S.woken = true;
+    S.wakeGrace = 0;  /* 直入轮非尾音(意图已过 widget 白名单) */
+    updateWakePill();
+    if (S.listenClosed || S.ttsPlaying) {
+      stopTtsNow();
+    }
+    if (!S.sid) {
+      /* 会话未开(面板刚弹): 记待发文本, 会话就绪即提交 */
+      S.pendingWakeText = String(d.text).slice(0, 60);
+    } else {
+      sendText(String(d.text).slice(0, 60));
+    }
+  }
+});
+/* 硬停录音且不发送(免提关闭时丢弃当前未完成语音) */
+function hardStopCloud() {
+  if (recTimer) { clearInterval(recTimer); recTimer = null; }
+  if (volRaf) { cancelAnimationFrame(volRaf); volRaf = 0; }
+  analyser = null;
+  /* 流式连接同步关闭: 面板隐藏/免提关停时丢弃未完成段——
+     不清理则 CONNECTING/OPEN 连接泄漏至服务端超时,
+     且迟到的 onopen 无守卫可撞(双保险) */
+  streamTeardown();
+  var waveEl = document.getElementById("wave");
+  waveEl.classList.remove("live");
+  waveEl.style.removeProperty("--amp");
+  if (procNode) { try { procNode.disconnect(); } catch (e) {} }
+  if (srcNode) { try { srcNode.disconnect(); } catch (e) {} }
+  if (recStream) { recStream.getTracks().forEach(function (t) { t.stop(); }); }
+  if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
+  setWave(false);
+}
+
+/* ===== 模式切换: 浏览器识别(Web Speech API) / 云端识别(录音上传 ASR) ===== */
+var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+var rec = null, recActive = false;
+function setMode(m) {
+  if (S.micState !== "idle") { showToast("请先停止当前语音输入"); return; }
+  if (m === "browser" && !SR) { showToast("当前浏览器不支持 Web Speech API，已切换云端识别"); m = "cloud"; }
+  S.mode = m;
+  setMicStatus(m === "browser"
+    ? (IS_TOUCH ? "🎤 按住麦克风说话 · 松开发送（浏览器本地识别）"
+                : "🎤 点击麦克风说话 · 说完自动结束（浏览器本地识别）")
+    : (IS_TOUCH ? "⏺ 按住麦克风录音 · 松开发送（云端识别）"
+                : "⏺ 点击麦克风开始录音 · 再点一次结束发送（云端识别）"));
+}
+function setMicStatus(html) { document.getElementById("micStatus").innerHTML = html; }
+function setWave(on, red) {
+  var w = document.getElementById("wave");
+  w.className = on ? "wave show" + (red ? " red" : "") : "wave";
+  document.getElementById("mic").className = on ? "mic on" : "mic";
+  document.getElementById("mic").textContent = on ? "⏹" : "🎤";
+}
+
+function micClick() {
+  if (IS_TOUCH) return; /* 触屏走长按流(pointer), 忽略派生 click */
+  if (S.pending || !S.sid) { showToast(S.pending ? "上一轮处理中…" : "会话开启中…"); return; }
+  if (S.mode === "browser") return browserToggle();
+  return cloudToggle();
+}
+
+/* ---- 长按说话(push-to-talk): 触屏按住录音/识别, 松开发送 ---- */
+var IS_TOUCH = !!(window.matchMedia && window.matchMedia("(pointer:coarse)").matches);
+(function bindMicHold() {
+  var mic = document.getElementById("mic");
+  var holding = false;
+  mic.addEventListener("pointerdown", function (ev) {
+    if (!IS_TOUCH || ev.pointerType !== "touch") return;
+    ev.preventDefault();
+    holding = true;
+    micDown();
+  });
+  mic.addEventListener("pointerup", function () {
+    if (!holding) return;
+    holding = false;
+    micUp();
+  });
+  mic.addEventListener("pointercancel", function () {
+    if (!holding) return;
+    holding = false;
+    micUp();
+  });
+})();
+function micDown() {
+  if (S.pending) { showToast("上一轮处理中…"); return; }
+  if (!S.sid) { showToast("会话开启中…"); return; }
+  if (S.mode === "browser") { if (!recActive) browserStart(); }
+  else if (!cloudActive) cloudStart();
+}
+function micUp() {
+  if (S.mode === "browser") {
+    if (recActive) { try { rec.stop(); } catch (e) {} }
+  } else if (cloudActive) cloudStop();
+}
+
+/* ---- 浏览器识别: SpeechRecognition zh-CN, interim 实时上屏 ---- */
+function browserToggle() {
+  if (recActive) { rec.stop(); return; }
+  browserStart();
+}
+function browserStart() {
+  try {
+    rec = new SR();
+  } catch (e) { showToast("识别器初始化失败"); return; }
+  rec.lang = "zh-CN"; rec.interimResults = true; rec.continuous = false;
+  var fin = "";
+  rec.onresult = function (ev) {
+    fin = "";
+    var inter = "";
+    for (var i = 0; i < ev.results.length; i++) {
+      if (ev.results[i].isFinal) fin += ev.results[i][0].transcript;
+      else inter += ev.results[i][0].transcript;
+    }
+    document.getElementById("interim").innerHTML = inter
+      ? "🗣 " + esc(inter) + "▏" : "";
+  };
+  rec.onend = function () {
+    recActive = false; setWave(false);
+    document.getElementById("interim").textContent = "";
+    setMicStatus("🎤 点击麦克风说话 · 说完自动结束（浏览器本地识别）");
+    if (fin && fin.trim()) sendText(fin.trim());
+  };
+  rec.onerror = function (ev) {
+    recActive = false; setWave(false);
+    if (ev.error === "network") {
+      /* 浏览器识别服务不可达(国内网络常见)——自动切云端识别并引导重试 */
+      setMode("cloud");
+      showToast("浏览器识别服务不可达，已切换云端识别，请重试");
+      setMicStatus("⚠️ 浏览器识别服务不可达——已自动切换<b>云端识别</b>，请重新说话");
+      return;
+    }
+    var m = { "not-allowed": "麦克风权限被拒绝——请在浏览器地址栏授权",
+              "no-speech": "没有听到声音，请再试一次" }[ev.error] || ("识别失败: " + ev.error);
+    setMicStatus(m); showToast(m);
+  };
+  rec.start(); recActive = true; fin = "";
+  setWave(true, false);
+  setMicStatus('<b>聆听中</b> · ' + (IS_TOUCH ? "按住说话 · 松开发送" : "请说话，说完自动结束…"));
+}
+
+/* ---- 云端识别: getUserMedia → PCM → WAV → base64 → POST /voice ---- */
+var audioCtx = null, srcNode = null, procNode = null, recStream = null;
+var pcmChunks = [], recStart = 0, cloudActive = false, recTimer = null;
+var analyser = null, volRaf = 0;
+function cloudToggle() {
+  if (cloudActive) { cloudStop(); return; }
+  cloudStart();
+}
+function fmtSec(s) {
+  var m = Math.floor(s / 60), ss = Math.floor(s % 60);
+  return m + ":" + (ss < 10 ? "0" : "") + ss;
+}
+function cloudStart() {
+  if (S.hidden) return; /* 浮层隐藏期不录音(双保险) */
+  S.listenClosed = false; /* 二级唤醒: 任何开窗路径重置窗口关闭标记 */
+  smT("listening", "cloud_start");  /* v82 影子镜像 */
+  /* v2 打断: 开麦即停旧轮播报/合成(用户开口优先于
+     喇叭还嘴——连续对话时旧轮话音立即让位) */
+  if (S.ttsPlaying || S.ttsAbort) stopTtsNow();
+  /* P1 流式轨: 开麦即建 WS(百炼实时识别, 边说边出字);
+     建连失败本轮+后续自动回退整段上传轨 */
+  if (stOn) streamConnect();
+  /* 免提续听流复用: 已授权流与上下文存活时直接重挂采集节点
+     ——X5/微信重取 getUserMedia 耗时数秒, 每轮重取致句首
+     丢字("小竹看新品"→"长期刚见"/唤醒词被裁) */
+  if (recStream && audioCtx && audioCtx.state !== "closed") {
+    if (audioCtx.state === "suspended") {
+      try { audioCtx.resume(); } catch (e) {}
+    }
+    wireCloudCapture();
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia ||
+      !(window.AudioContext || window.webkitAudioContext)) {
+    setMicStatus("当前浏览器不支持录音（可改用浏览器识别或文字输入）"); return;
+  }
+  /* 关 AEC: 开麦不切"通话模式"音频焦点——否则 X5 全程压制
+     speechSynthesis 媒体音量致播报无声(真机实证 v23 流复用
+     麦克风常驻后 TTS 静音); 回环由文本层 isEchoOfTTS 兜底 */
+  navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: false }
+  }).then(function (stream) {
+    recStream = stream;
+    /* ctx 复用(20:54 修复对偶): 保留的实例携用户手势解锁态,
+       关窗/开窗循环不再新建(X5 新建必 suspended 需点击) */
+    if (!audioCtx || audioCtx.state === "closed") {
+      audioCtx = new (window.AudioContext
+        || window.webkitAudioContext)();
+    }
+    /* 唤醒(语音触发, 无手势)打开面板时 ctx 为 suspended——音频图
+       不跑, ASR 收不到有效帧 -> 连续识别失败触发"#"断路(误报
+       "靠近话筒"提示)。挂一次性交互 resume, 引导用户点一下屏幕 */
+    if (audioCtx.state === "suspended") {
+      var vRh = function () {
+        document.removeEventListener("touchend", vRh, true);
+        document.removeEventListener("click", vRh, true);
+        try {
+          if (audioCtx && audioCtx.state === "suspended") {
+            audioCtx.resume();
+          }
+        } catch (e) { /* 忽略 */ }
+        setMicStatus(S.handfree
+          ? "🎧 免提聆听中 · 请<b>直接说话</b>，说完自动发送"
+          : "🎧 已就绪——点「🎧 免提开」继续，或长按麦克风说话");
+      };
+      document.addEventListener("touchend", vRh, true);
+      document.addEventListener("click", vRh, true);
+      setMicStatus("👆 <b>点一下屏幕</b>开始语音聆听（首次需激活音频）");
+      showToast("点一下屏幕任意处即开始语音对话");
+    }
+    wireCloudCapture();
+  }).catch(function (e) {
+    /* 错误友好化: 不直显英文错误码(真机反馈"具体报错"
+       即此类原始码——NotAllowedError 等对用户无意义) */
+    var micErrMap = {
+      NotAllowedError: "麦克风权限被拒",
+      NotFoundError: "没有检测到麦克风",
+      NotReadableError: "麦克风被其他应用占用",
+      AbortError: "麦克风启动被中断",
+      SecurityError: "需 HTTPS 环境才能录音",
+      OverconstrainedError: "录音参数不支持"};
+    var en = (e && e.name) || "";
+    var mmsg = micErrMap[en] || (en || "未知原因");
+    setMicStatus("🎙 " + mmsg
+      + (en === "NotAllowedError"
+         ? "——微信内: 右上角「···」→ 设置 → 打开麦克风权限"
+         : "")
+      + (S.handfree
+         ? "；<b>点击一次麦克风</b>授权后自动恢复免提"
+         : "；可用下方文字输入"));
+    showToast("🎙 " + mmsg
+      + (S.handfree ? "，点击麦克风重试" : ""));
+  });
+}
+/* 采集节点搭建(新流/复用流共用): 源→处理器→波形/免提VAD */
+function wireCloudCapture() {
+    /* 拆旧链(11:46 实证识别全空根因): listenClose 轻关闭
+       保留流但变量被覆盖——旧 procNode/srcNode 节点仍在跑,
+       每次关窗重开(wake-hit/每轮续听)泄漏一条并行采集链,
+       同帧被推 N 份→服务端音频时间轴拉伸 N 倍→ASR 识别
+       崩(11:35 三连 arm=多链同时推流实证); 重挂前必拆 */
+    if (procNode) { try { procNode.disconnect(); } catch (e) {} }
+    if (srcNode) { try { srcNode.disconnect(); } catch (e) {} }
+    srcNode = audioCtx.createMediaStreamSource(recStream);
+    procNode = audioCtx.createScriptProcessor(4096, 1, 1);
+    pcmChunks = [];
+    S.gain = 1; /* v3.1 软增益会话首重置(防残留放大) */
+    procNode.onaudioprocess = function (e) {
+      var f32 = new Float32Array(e.inputBuffer.getChannelData(0));
+      pcmChunks.push(f32);
+      /* P1 流式轨: 边采集边重采样转发(WS 未就绪时零开销) */
+      streamFeed(f32);
+    };
+    srcNode.connect(procNode);
+    procNode.connect(audioCtx.destination);
+    /* 真实音量可视化: AnalyserNode RMS → --amp 驱动波纹 scaleY
+       + 免提 VAD: 检测说话(rms>阈值)→静音1.3s自动断句发送 */
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    srcNode.connect(analyser);
+    /* 开听宽限: 恢复聆听首 1.5s VAD 阈值提高(0.055)——
+       手机外放 TTS 残响串扰麦克风(无 AEC)音量中低,
+       高阈值滤残响防污染人声转写"#" */
+    var vadOpenAt = Date.now();
+    var waveEl = document.getElementById("wave");
+    var abuf = new Uint8Array(analyser.fftSize);
+    waveEl.classList.add("live");
+    var vadSilentAt = 0;
+    S.vadSpoke = false;
+    S.streamPartial = ""; /* 双轨 re-arm 期间回声 partial 清零(防污染 VAD 尾字判定) */
+    /* v83-A 面板哑流自愈(02:48 实证 rms=4 纯静音段/07:25:59
+       唤醒后说话空转写): X5 开窗取流偶发路由错乱拿到哑流
+       (近零能量, 真麦克风必有底噪≥0.002)——开窗聆听中
+       持续 3s 近零=哑流, 硬重置重开一次(30s 退避防循环,
+       对齐 widget AHM 范式) */
+    var panelDeadStreak = 0, panelAhmAt = 0;
+    (function vtick() {
+      volRaf = requestAnimationFrame(vtick);
+      if (!analyser) return;
+      analyser.getByteTimeDomainData(abuf);
+      var sum = 0;
+      for (var i = 0; i < abuf.length; i++) {
+        var d = (abuf[i] - 128) / 128;
+        sum += d * d;
+      }
+      var rms = Math.sqrt(sum / abuf.length);
+      if (cloudActive && rms < 0.0005) {
+        panelDeadStreak++;
+        if (panelDeadStreak >= 180
+            && Date.now() - panelAhmAt > 30000) {
+          panelAhmAt = Date.now();
+          panelDeadStreak = 0;
+          try { console.info("[P-AHM] dead stream reset"); }
+          catch (e) {}
+          setMicStatus("🎙 重新校准麦克风…请再讲一遍");
+          setTimeout(function () {
+            if (S.handfree) {
+              listenClose(); cloudStart();
+            }
+          }, 200);
+          return;
+        }
+      } else { panelDeadStreak = 0; }
+      waveEl.style.setProperty("--amp",
+        Math.max(0.12, Math.min(1, rms * 3.4)).toFixed(3));
+      /* --- 免提 VAD 断句(宽限期 0.055 高阈值滤 TTS 残响) ---
+         cloudActive 门控: 段外(播报中/pending 中/未开段)不判
+         不断句——AEC 已关(保 TTS 音量), 长播报(>3s)外放声
+         超过 1.5s 宽限后被 0.035 低阈值误判"说话"→断句提交
+         回声段(1.5kHz 电子音淹没人声, 双 provider 识别无词
+         09:34 实证)→"没听清"又播 4s+→回环轰炸; 段外 VAD
+         判定无合法提交路径, 一并掐死 */
+      if (S.handfree && cloudActive) {
+          var now = Date.now();
+          /* 唤醒应答 VAD 静默窗(wakeVadMute): widget「我在，
+             请吩咐」外放直达麦克风 rms 超任何阈值(11:28 实证)
+             ——此窗内跳过一切 VAD 判定(不置 vadSpoke 不静音
+             计时), 否则应答声被当"说话"→窗口不关→尾音断句
+             提交在 wakeGrace 边缘外→回声轮连环+真话轮被
+             not_woken 打回("自己说+回答不了"完整病理);
+             2.5s 仅覆盖应答播放, 不吞用户指令头 */
+          if (S.wakeVadMute && now < S.wakeVadMute) {
+            return;
+          }
+          var thr = (now - vadOpenAt < 1500) ? 0.055 : 0.035;
+          if (rms > thr) {
+            S.vadSpoke = true; vadSilentAt = 0;
+          } else if (S.vadSpoke && !vadSilentAt) {
+            vadSilentAt = now;
+          }
+          /* v3 语义感知尾点: 静音 600ms 后查最新 partial 尾字
+             ——疑问语气词(吗/呢/吧/?)是明确完句信号, 提前断
+             省 600ms 尾部等待; 命令式("来两件竹香春")不提前
+             (截断执行错指令事大)。保守启发式, 不部署模型;
+             基线 1200ms 是真机实证抗换气停顿的限值 */
+          if (S.vadSpoke && vadSilentAt) {
+            var endsAsk = /[吗呢吧？?]$/.test(
+              String(S.streamPartial || "").trim());
+            if (now - vadSilentAt > (endsAsk ? 600 : (S.vadSilenceMs || 1200))) {
+              cloudStop();
+              return;
+            }
+          }
+        }
+        /* v54/v55 能量版 barge-in 已移除——X5 无 AEC 下外放
+           直达 rms 0.15+ 与人声能量不可分, 门限低了每播自掐
+           (10:20 三连建连实证), 高了拦不住任何插话; 打断
+           判定迁移至文本层双轨(见 streamConnect onmessage
+           final 分支): 播报期间 WS 保活推流持续, 用户新指令
+           final 回流→非回声即切断执行, 回声/碎片忽略 */
+    })();
+    recStart = Date.now();
+    cloudActive = true;
+    /* 应答即就绪(2026-10-07): 采集链就绪即通知宿主——widget
+       延后的「我在，请吩咐」此刻开播, 用户听到应答时面板已
+       可收音(开麦真空期说话不再丢); 每轮续听同发, 宿主仅
+       pending 态消费, 无副作用 */
+    try {
+      parent.postMessage({ type: "xz-panel-mic-ready" }, "*");
+    } catch (e) { /* 宿主非 iframe 忽略 */ }
+    setWave(true, true);
+    recTimer = setInterval(function () {
+      var sec = (Date.now() - recStart) / 1000;
+      setMicStatus(S.handfree
+        ? '<b class="rec">🎧 免提聆听 ' + fmtSec(sec) + '</b> · 直接说话，停顿自动发送'
+        : '<b class="rec">● 录音中 ' + fmtSec(sec) + '</b> · '
+          + (IS_TOUCH ? "松开发送" : "点击麦克风结束发送"));
+      /* v2 F: 免提静默 5s 温和问候一次(纯文字不走 TTS——
+         防自录回声、防 VAD 误判破坏 12s 重置; 每会话仅一次) */
+      if (S.handfree && !S.vadSpoke && sec >= 5
+          && !S.greeted) {
+        S.greeted = true;
+        appendBot("我在这儿呢，想买点什么直接说～", null,
+                  null, null, null);
+      }
+      /* 二级对话唤醒(方案"不问不答, 问即唤醒, 答完即退"):
+         8s 聆听窗口无话 → 静默回归一级(listenClose 拆 WS 停
+         判定, widget KWS 接管——回声/环境声从源头不进系统,
+         自言自语/误切断链路整体退役); 已说话 30s 硬上限
+         (智谱 ASR 单段≤30s) */
+      if (S.handfree && listenWindowOver(sec, S.vadSpoke)) {
+        listenClose();
+        return;
+      }
+    }, 500);
+}
+/* 二级唤醒窗口判定(抽函数供单测): 无话 5s 关窗(S3 续问窗,
+   四态文档值——高频续问节奏 3~5s, 8s 环境声暴露面偏大) /
+   说话 30s 上限(ASR 单段) */
+function listenWindowOver(sec, vadSpoke) {
+  return sec >= 30 || (!vadSpoke && sec >= 5);
+}
+/* 二级唤醒窗口关闭: 全释放(答完即退彻底版)——listenClose
+   轻关闭保留流在 X5 上占死麦克风: widget 唤醒轨取不到音频
+   →面板打开期间"再次唤醒不了"(11:51 实证); 关窗即停流
+   (tracks stop+ctx close)把麦克风还给 widget 轨, 唤醒恢复;
+   代价=重开窗重取 getUserMedia 1~3s(wake-hit 后 micStatus
+   提示"正在开麦"), 唤醒可靠性 >> 句首 1s */
+/* 状态机看门狗(五态文档"驻留>10s 强制重置 S0"): 状态异常
+   卡死兜底——ttsPlaying 挂死(播报链异常 done 未回调)/
+   wakeVadMute Infinity 卡死(播放同步 end 消息丢失)/
+   pending 挂死(网络异常)——驻留超时强制复位到待机态,
+   防单点故障致面板永久不可用; 60s 一查, 轻量 */
+setInterval(function () {
+  try {
+    if (S.ttsPlaying && S.ttsStartAt
+        && Date.now() - S.ttsStartAt > 60000) {
+      stopTtsNow();
+    }
+    if (S.pending && S.pendingAt
+        && Date.now() - S.pendingAt > 60000) {
+      S.pending = false;
+      removeTyping();
+      setMicStatus("🎙 处理超时已复位——请再说一次");
+      scheduleHandfree(400);
+    }
+    if (S.wakeVadMute === Infinity) {
+      /* 应答播放同步 start 收到但 end 永远未到(面板重载
+         竞态)——10s 后强制解除静默 */
+      S.wakeVadMute = 0;
+    }
+  } catch (e) { /* 看门狗自身 fail-soft */ }
+}, 60000);
+function listenClose() {
+  if (recTimer) { clearInterval(recTimer); recTimer = null; }
+  if (volRaf) { cancelAnimationFrame(volRaf); volRaf = 0; }
+  analyser = null;
+  cloudActive = false;
+  streamTeardown();
+  S.listenClosed = true;
+  smT("idle", "win_close");  /* v82 影子镜像 */
+  var waveEl = document.getElementById("wave");
+  waveEl.classList.remove("live");
+  waveEl.style.removeProperty("--amp");
+  setWave(false);
+  if (procNode) { try { procNode.disconnect(); } catch (e) {} }
+  if (srcNode) { try { srcNode.disconnect(); } catch (e) {} }
+  if (recStream) {
+    recStream.getTracks().forEach(function (t) { t.stop(); });
+    recStream = null;
+  }
+  /* audioCtx 保留不 close(20:54 换一款轮实证: 关窗 close
+     ctx 后下轮 TTS 走 ttsPlayCtx 新建→X5 无手势 suspended
+     →回复合成不发声="不能下一轮对话"; ctx 不持麦克风,
+     归还麦克风由 recStream.stop 完成, 保留实例零影响) */
+  if (audioCtx && audioCtx.state === "suspended") {
+    try { audioCtx.resume().catch(function () {}); }
+    catch (e) { /* 忽略 */ }
+  }
+  setMicStatus("🎙 休息了——喊「小竹小竹」随时叫我");
+  /* 通知 widget 麦克风已归还(13:09:47 实证「二次唤醒不了」):
+     面板取流期间 widget 旧流被 X5 单占 mute 不自愈, 归还后
+     widget 需拆链重取流——唤醒识别质量才能恢复 */
+  try {
+    window.parent.postMessage({ type: "xz-mic-released" }, "*");
+  } catch (e) { /* 独立页打开无父页忽略 */ }
+}
+function cloudStop() {
+  /* v3 延迟埋点: VAD 断句时刻(全链路计时起点) */
+  S.latMarks = { vad: Date.now() };
+  S.streamPartial = "";
+  if (recTimer) { clearInterval(recTimer); recTimer = null; }
+  if (volRaf) { cancelAnimationFrame(volRaf); volRaf = 0; }
+  analyser = null;
+  var waveEl = document.getElementById("wave");
+  waveEl.classList.remove("live");
+  waveEl.style.removeProperty("--amp");
+  if (procNode) { try { procNode.disconnect(); } catch (e) {} }
+  if (srcNode) { try { srcNode.disconnect(); } catch (e) {} }
+  var rate = audioCtx ? audioCtx.sampleRate : 48000;
+  /* 免提续听: 保留已授权流与上下文(下轮 cloudStart 复用, 省
+     getUserMedia 数秒防句首丢字); 手动模式每轮释放 */
+  if (!S.handfree) {
+    if (recStream) {
+      recStream.getTracks().forEach(function (t) { t.stop(); });
+      recStream = null;
+    }
+    if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
+  }
+  cloudActive = false;
+  setWave(false);
+  var dur = (Date.now() - recStart) / 1000;
+  if (!pcmChunks.length || dur < 0.5) {
+    setMicStatus("录音太短，未发送");
+    streamTeardown();
+    scheduleHandfree(600);
+    return;
+  }
+  /* 免提模式: 整段无有效语音(环境静音/硬停) → 提示后继续聆听 */
+  if (S.handfree && !S.vadSpoke) {
+    showToast("没听到声音——请离麦克风近一点再说");
+    setMicStatus("🎧 免提聆听中 · 请<b>靠近一点直接说话</b>，说完自动发送");
+    streamTeardown();
+    scheduleHandfree(300);
+    return;
+  }
+  /* P1 流式轨优先: 说完直接提交已转写文本(零重复转写零上传);
+     final 空/超时 → 回退整段 WAV 上传轨 */
+  streamFinish(function (finalText) {
+    if (finalText && finalText.trim()) {
+      postVoiceTranscript(finalText.trim(), dur);
+      /* 二级唤醒窗口制: 段提交后不再 re-arm(播报期间不拾音
+         ——v56 双轨供能点移除, 回声 partial 无回流, 播报完
+         整性恢复; 打断走唤醒词: widget KWS 独立流常开,
+         喊「小竹小竹」→ wake-hit → cloudStart 重开窗) */
+      return;
+    }
+    streamTeardown();
+    setMicStatus("编码 WAV…");
+    try {
+      var wav = encodeWav(pcmChunks, rate, 16000);
+      if (!wav) {
+        /* 裁剪后无有效语音(全程静音) → 明确提示(不静默丢弃) */
+        showToast("没听到声音——请离麦克风近一点再说");
+        setMicStatus("🎧 免提聆听中 · 请<b>靠近一点直接说话</b>");
+        scheduleHandfree(300);
+        return;
+      }
+      sendVoice(arrayBufferToBase64(wav), dur);
+    } catch (e) {
+      setMicStatus("编码失败: " + (e && e.message ? e.message : e));
+      scheduleHandfree(600);
+    }
+  });
+}
+/* Float32 单声道块 → (有效语音段裁剪+线性降采样) → 16bit PCM WAV
+   targetRate: 目标采样率——16kHz 为 ASR 足够精度, 48kHz 录音降 3 倍体积
+   裁剪: 头/尾静音裁掉(留 0.3s 余量)——VAD 断句慢时长段尾部大量
+   静音/噪音致 ASR 失败转"#", 裁剪后只送有效语音; 全静音返回 null */
+function encodeWav(chunks, sampleRate, targetRate) {
+  targetRate = targetRate || sampleRate;
+  var srcLen = 0;
+  chunks.forEach(function (c) { srcLen += c.length; });
+  var src = new Float32Array(srcLen);
+  var so = 0;
+  chunks.forEach(function (c) { src.set(c, so); so += c.length; });
+
+  /* --- 有效语音段检测(100ms 窗 RMS, 阈值 0.012 低于 VAD 判定) --- */
+  var win = Math.floor(sampleRate * 0.1);
+  var nWin = Math.floor(src.length / win);
+  var first = -1, last = -1;
+  for (var wi = 0; wi < nWin; wi++) {
+    var s = 0;
+    for (var j = wi * win; j < (wi + 1) * win; j++) s += src[j] * src[j];
+    if (Math.sqrt(s / win) > 0.012) {
+      if (first < 0) first = wi;
+      last = wi;
+    }
+  }
+  if (first < 0) return null; /* 全程静音 → 无有效语音 */
+  var pad = Math.floor(sampleRate * 0.3);
+  var st = Math.max(0, first * win - pad);
+  var en = Math.min(src.length, (last + 1) * win + pad);
+  if (st > 0 || en < src.length) {
+    var trimmed = new Float32Array(en - st);
+    trimmed.set(src.subarray(st, en));
+    src = trimmed;
+    srcLen = src.length;
+  }
+
+  var data = src, rate = sampleRate;
+  if (targetRate < sampleRate) {
+    var outLen = Math.floor(src.length * targetRate / sampleRate);
+    data = new Float32Array(outLen);
+    var ratio = sampleRate / targetRate;
+    for (var i = 0; i < outLen; i++) {
+      var p = i * ratio, i0 = Math.floor(p);
+      var i1 = Math.min(i0 + 1, src.length - 1);
+      data[i] = src[i0] + (src[i1] - src[i0]) * (p - i0);
+    }
+    rate = targetRate;
+  }
+  var len = data.length;
+  var buf = new ArrayBuffer(44 + len * 2);
+  var v = new DataView(buf);
+  function ws(o, s) { for (var i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); }
+  ws(0, "RIFF"); v.setUint32(4, 36 + len * 2, true); ws(8, "WAVE");
+  ws(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true); v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true); ws(36, "data"); v.setUint32(40, len * 2, true);
+  var off = 44;
+  for (var k = 0; k < len; k++, off += 2) {
+    var s2 = Math.max(-1, Math.min(1, data[k]));
+    v.setInt16(off, s2 < 0 ? s2 * 0x8000 : s2 * 0x7FFF, true);
+  }
+  return buf;
+}
+function arrayBufferToBase64(buf) {
+  var b = new Uint8Array(buf), s = "";
+  for (var i = 0; i < b.length; i += 0x8000) {
+    s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+  }
+  return btoa(s);
+}
+
+/* ===== iOS/移动端键盘适配: visualViewport 实时跟随 =====
+   iOS Safari 软键盘弹起不改 layout viewport——100dvh 布局下输入框
+   会被键盘遮挡/挤压异常。以 VV 高度实时收紧 body, 并标记 .kb 态
+   释放 composer 的 safe-area 底部增量。 */
+(function () {
+  var vv = window.visualViewport;
+  if (!vv) return;
+  var fit = function () {
+    document.body.style.height = Math.round(vv.height) + "px";
+    /* 键盘弹起判定: 视觉视口显著小于布局视口 */
+    document.body.classList.toggle("kb", vv.height < window.innerHeight * 0.78);
+    if (document.activeElement && document.activeElement.tagName === "INPUT") {
+      setTimeout(scrollChat, 60);
+    }
+  };
+  vv.addEventListener("resize", fit);
+  fit();
+})();
+/* 输入框聚焦: 键盘弹起动画后消息流滚到底(保持输入框可见) */
+document.addEventListener("focusin", function (ev) {
+  if (ev.target && ev.target.tagName === "INPUT") {
+    setTimeout(scrollChat, 350);
+  }
+});
+
+/* ===== 启动 ===== */
+(function () {
+  /* 默认云端识别(自有智谱ASR链路, 国内可用);
+     浏览器识别依赖厂商云端服务(Chrome→Google), 国内网络普遍不可达, 降级为用户主动选择 */
+  setMode("cloud");
+  /* embed 模式(全站浮层 iframe): 隐藏页脚声明, jump 导航父窗口(主站);
+     唤醒开关仅 embed 态可见(冷唤醒为父页 widget 消费, 独立页无意义);
+     ⚙️ 唤醒词设置全态可见(独立页保存亦写同源 localStorage,
+     主站 widget 下次加载时生效) */
+  if (/[?&]embed=1/.test(location.search)) {
+    document.body.classList.add("embed");
+    document.getElementById("wakeBtn").style.display = "";
+    document.getElementById("wakeSp").style.display = "";
+    renderWakeBtn();
+  }
+  var auth = getAuth();
+  if (auth && auth.token) enterMain(); else showLogin();
+})();
+</script>
+<script>
+/* 全局返回按钮(2026-10-19, 自包含版): 本页未加载 main.js, 自带注入 */
+(function(){var p=(location.pathname.split('/').pop()||'').toLowerCase();
+if(!p||p==='index.html'||p==='official.html'||p==='app.html')return;
+function m(){if(document.getElementById('globalBackBtn'))return;
+var b=document.createElement('button');b.type='button';b.id='globalBackBtn';
+b.innerHTML='&#8592;';b.setAttribute('aria-label','返回上一页');
+b.style.cssText='position:fixed;left:14px;bottom:110px;z-index:2147483000;'
++'width:44px;height:44px;border-radius:50%;border:none;cursor:pointer;'
++'background:rgba(53,92,68,.92);color:#fff;font-size:22px;line-height:44px;'
++'padding:0;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.28);'
++'font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent;';
+b.onclick=function(){if(history.length>1){history.back();}else{location.href='index.html';}};
+document.body.appendChild(b);}
+if(document.body){m();}else{document.addEventListener('DOMContentLoaded',m);}})();
+</script></body>
+</html>

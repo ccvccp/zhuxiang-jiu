@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=91";
+  var VER = "v=102";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -150,6 +150,8 @@
     "#xiaozhu-wake-tip.show{display:block}",
     "@keyframes xzPulse{0%,100%{opacity:.35}50%{opacity:.78}}",
     "#xiaozhu-entry-ball.xz-breathe{animation:xzPulse 2.4s ease-in-out infinite}",
+    "#xiaozhu-entry-ball.xz-mini span{display:none}",
+    "#xiaozhu-entry-ball.xz-mini img{width:26px;height:26px;margin:0}",
     "@media(min-width:768px){#xiaozhu-wake-tip{bottom:32px}}"
   ].join("");
   document.head.appendChild(css);
@@ -284,7 +286,7 @@
     "box-shadow:0 3px 12px rgba(0,0,0,.25)",
     "transition:transform .15s ease", "cursor:pointer"
   ].join(";");
-  b.innerHTML = '<span style="font-size:18px;line-height:1">🎤</span>'
+  b.innerHTML = '<img src="/images/ip/ip-64.png" alt="小竹" style="width:24px;height:24px;border-radius:50%;object-fit:cover;display:block;margin:0 auto 1px">'
     + "<span>小竹</span>";
   b.onclick = onBallClick;
   b.onmouseenter = function () { b.style.transform = "scale(1.08)"; };
@@ -305,13 +307,13 @@
       b.style.width = "40px";
       b.style.height = "40px";
       b.style.opacity = "";
-      b.classList.add("xz-breathe"); /* 待命呼吸动画: 示意监听中 */
+      b.classList.add("xz-breathe", "xz-mini"); /* 待命呼吸动画: 示意监听中 */
       b.title = "唤醒待命中——喊「小竹小竹」或「你好小竹」（点击打开语音面板）";
     } else {
       b.style.width = "52px";
       b.style.height = "52px";
       b.style.opacity = "1";
-      b.classList.remove("xz-breathe");
+      b.classList.remove("xz-breathe", "xz-mini");
       b.title = "";
     }
   }
@@ -339,15 +341,24 @@
     return localStorage.getItem(WAKE_KEY) === "on";
   }
 
-  /* 球点击: 已开启→开面板(手动); 未开启→引导开启唤醒, 取消则直接开面板 */
+  /* 球点击: 已开启→开面板(手动); 未开启→引导开启唤醒, 取消则直接开面板
+     体验授权条款式前移: 注册时勾选「语音体验」的会员(voice_consent=1)
+     已预同意麦克风授权 → 跳过运行时 confirm 打断, 直接开启;
+     存量会员无标记/明确未勾(0) 保持原确认弹窗行为 */
+  function micConsented() {
+    try { return localStorage.getItem("voice_consent") === "1"; }
+    catch (e) { return false; }
+  }
   function onBallClick() {
     if (panel.classList.contains("mini")) { maximizePanel(); return; }
     if (wakeOn()) { openPanel(); return; }
-    var ok = confirm('开启「小竹」语音唤醒？\n\n'
-      + '开启后对着麦克风呼唤"小竹、小竹"或"你好小竹"即可唤出语音精灵\n'
-      + '(需使用麦克风, 仅在检测到人声时上传音频);\n'
-      + '小竹球将缩小为小点常驻, 点击它随时可直接打开面板。');
-    if (!ok) { openPanel(); return; } /* 不开唤醒 → 当普通入口用 */
+    if (!micConsented()) {
+      var ok = confirm('开启「小竹」语音唤醒？\n\n'
+        + '开启后对着麦克风呼唤"小竹、小竹"或"你好小竹"即可唤出语音精灵\n'
+        + '(需使用麦克风, 仅在检测到人声时上传音频);\n'
+        + '小竹球将缩小为小点常驻, 点击它随时可直接打开面板。');
+      if (!ok) { openPanel(); return; } /* 不开唤醒 → 当普通入口用 */
+    }
     enableWake();
   }
 
@@ -816,14 +827,20 @@
     }, 600);
   });
 
+  /* 握手单飞锁(2026-10-04 连接风暴根治): preconnect 只查
+     preWs(已入池)——握手期 preWs 仍空, 退避重试再建新连接,
+     先入池者之外的成孤儿连接堆积(容器重启日实测 4 连并发,
+     音频流互踩识别为空)。armed 入池/onclose 任一出口解锁 */
+  var preConnecting = false;
   function preconnect() {
-    if (preWs || !wakeOn() || !authToken()) { return; }
+    if (preWs || preConnecting || !wakeOn() || !authToken()) { return; }
     var proto = location.protocol === "https:" ? "wss://" : "ws://";
     var ws;
     try {
       ws = new WebSocket(proto + location.host + "/api/xiaozhu/ws/asr");
       ws.binaryType = "arraybuffer";
-    } catch (e) { return; }
+    } catch (e) { preConnecting = false; return; }
+    preConnecting = true;
     ws._xzV2 = true;
     ws.onopen = function () {
       try {
@@ -837,6 +854,7 @@
     ws.onclose = function () {
       if (preWs === ws) { preWs = null; stopPing(); }
       if (eng.ws === ws) { teardownSeg(); }
+      preConnecting = false;  /* 握手出口解锁(失败/正常关) */
       /* 前台断连自动重建(带退避): 网络抖动/nginx 超时拆连接后
          池空——下一段虽可临时建连, 但 VAD 不起段的哑引擎场景
          需要连接层主动自愈 */
@@ -858,7 +876,7 @@
           try { ws.send(JSON.stringify({ type: "arm", wakeword: getWord() })); }
           catch (ex) { teardownSeg(); }
         } else if (!preWs) {
-          preWs = ws; startPing();  /* 预热完成入池 */
+          preWs = ws; preConnecting = false; startPing();  /* 预热完成入池(握手锁解锁) */
         }
       } else if (m.type === "ready") {
         eng.wsReady = true;
@@ -894,13 +912,31 @@
         }
       } else if (m.type === "partial" && m.text) {
         eng.lastPartial = m.text;
+        /* 播报窗防重唤醒(2026-10-07 抢话修复): 「我在，请吩咐」
+           外放期间用户插话若带「小竹」→ 原逻辑再次 onWakeHit
+           重新应答, 对话轮被重置(体感"抢话不听讲"); 窗内唤醒
+           命中静默——面板已在对话态, 插话由面板文本层 barge-in
+           切断执行处理 */
+        if (inSelfReply()) { return; }
         if (matchWake(m.text)) { onWakeHit(); }
       } else if (m.type === "final") {
         if (eng.pendingResub) { eng.pendingResub = null; }
         var ft = m.text || eng.lastPartial || "";
+        if (inSelfReply()) {
+          /* 播报窗内 final: 含唤醒词不重弹应答; 面板未开时
+             例外放行(首唤醒应答自身尾段竞态由 selfUtter 兜底) */
+          if (panelOpen()) { return; }
+        }
         if (matchWake(ft)) {
           onWakeHit();
         } else if (ft) {
+          /* 交接窗有效语音直入(面板开麦真空期兜底, 见
+             onWakeHit 注记): ≥2 实义字即直入, 纯语气词除外 */
+          if (eng.handoffUntil > Date.now()
+              && meaningfulText(ft)) {
+            onWakeHitIntent(ft);
+            return;
+          }
           /* v80 member 窗意图直入: 唤醒后 5 分钟内免唤醒词
              (02:46:51 实证「换一款」转写出来但无响应——续问
              窗 5s 已关, member 窗与 widget 两窗断层); 意图
@@ -1172,6 +1208,20 @@
      意图语音(动词白名单防环境声)免喊唤醒词直接弹面板提交 */
   var WAKE_AT_KEY = "xz.wakeAt";
   var selfReplyAt = 0;  /* widget 应答「我在，请吩咐」播放时刻 */
+  var pendingWakeReply = false;  /* 应答挂起待面板麦就绪(应答即就绪) */
+  /* 播报窗判定: widget 应答外放起 4s 内(插话防重唤醒) */
+  function inSelfReply() {
+    return selfReplyAt > 0 && Date.now() - selfReplyAt < 4000;
+  }
+  function panelOpen() {
+    return panel && panel.classList.contains("open");
+  }
+  /* 交接窗有效文本: ≥2 实义字(纯语气/叹词不算) */
+  function meaningfulText(t) {
+    return String(t || "")
+      .replace(/[嗯啊哦呃唉嗨呀吧呢了。,.!！？?\s]/g, "")
+      .length >= 2;
+  }
   var INTENT_HEAD = new RegExp(
     "^(看|来|介绍|查|买|加|推荐|换|帮我"
     + "|怎么|多少|为什么|什么|哪|有没有"
@@ -1201,12 +1251,27 @@
 
   function onWakeHit() {
     eng.emptyStreak = 0; /* 命中即清连续空计数 */
+    /* 交接窗(2026-10-07 唤醒两次修复): 面板弹窗+重取麦克风
+       1~3s 真空期内 widget 引擎仍在识别——窗内有效语音直入
+       面板首轮(onWakeHitIntent), 用户"我在请吩咐"后立刻说的
+       指令不再被丢弃(原仅动词白名单命中才直入, 白名单外
+       指令静默丢弃=用户被迫再唤醒一次) */
+    eng.handoffUntil = Date.now() + 8000;
     teardownSeg();
     try {
       localStorage.setItem(WAKE_AT_KEY, String(Date.now()));
     } catch (e) { /* 忽略 */ }
     wakeBeep();
-    speakWakeReply(); /* 「我在，请吩咐」播报(用户要求) */
+    /* 应答即就绪: 「我在，请吩咐」延后到面板 mic-ready 信号再播
+       (开麦真空 1~3s 期间播报=用户听指令说话被丢→被迫二次唤醒);
+       8s 兜底: 面板没开起来(登录态/网络异常)仍给声反馈 */
+    pendingWakeReply = true;
+    setTimeout(function () {
+      if (pendingWakeReply) {
+        pendingWakeReply = false;
+        speakWakeReply();
+      }
+    }, 8000);
     openPanel();
     /* 免唤醒窗口打通: widget 唤醒(ws_asr 轨)不写面板会话——
        服务端 wake 窗口(5 分钟)未被点亮, 唤醒后面板说话被打回
@@ -1264,6 +1329,16 @@
         不自愈(13:09:47 实证二次唤醒只识出「小。」)——拆
         旧采集链重取流, 唤醒识别质量恢复 */
       rebuildWakeStream();
+      return;
+    }
+    if (d.type === "xz-panel-mic-ready") {
+      /* 应答即就绪(2026-10-07 唤醒两次修复): 面板麦克风真正
+         可收音的时刻——延后的「我在，请吩咐」此刻才播, 用户
+         听到应答即说话不再落入面板开麦 1~3s 真空期 */
+      if (pendingWakeReply) {
+        pendingWakeReply = false;
+        speakWakeReply();
+      }
       return;
     }
     if (d.type === "xz-panel-maximize") { maximizePanel(); return; }
