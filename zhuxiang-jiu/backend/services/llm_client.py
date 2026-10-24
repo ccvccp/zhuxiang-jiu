@@ -118,9 +118,22 @@ def _keepalive_conn(scheme: str, host: str, port: int):
     fresh = conn is None
     if fresh:
         import http.client as _hc
-        cls = (_hc.HTTPSConnection
-               if scheme == "https" else _hc.HTTPConnection)
-        conn = cls(host, port, timeout=_TIMEOUT)
+        if scheme == "https":
+            # certifi 显式 CA(2026-10-24 双机实证): 乌兰察布出网被
+            # CDN 调度到 8.160.x 节点, 证书链缺中间证书——默认
+            # 上下文 CERTIFICATE_VERIFY_FAILED, cogtts 全 503;
+            # certifi 包含完整链 4/4 恢复。缺失时退回默认上下文。
+            kwargs = {"timeout": _TIMEOUT}
+            try:
+                import ssl as _ssl
+                import certifi as _certifi
+                kwargs["context"] = _ssl.create_default_context(
+                    cafile=_certifi.where())
+            except ImportError:
+                pass
+            conn = _hc.HTTPSConnection(host, port, **kwargs)
+        else:
+            conn = _hc.HTTPConnection(host, port, timeout=_TIMEOUT)
         _TLS_POOL.conn = conn
     return conn, fresh
 
