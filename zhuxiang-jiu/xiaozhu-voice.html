@@ -1940,7 +1940,7 @@ function streamConnect() {
          v54 能量版实证每播自掐)。切断后发 finish 收段等
          完整 final——不吞半句(用户可能还没说完), 提交走
          正常流; 判定规则见 bargeShouldCut */
-      if (bargeShouldCut(m.text)) {
+      if (S.ttsPlaying && bargeShouldCut(m.text)) {
         /* v82-B 打断延迟埋点(SLA"智能感核心指标"可测):
            打断发生于播报开始后 Xms——观察期收集基线后
            定 SLA 阈值(全双工范式 <200ms 口径受百炼 partial
@@ -1998,6 +1998,20 @@ function streamConnect() {
           }, 200);
         }
       } else { S.asrFragStreak = 0; }
+      /* v116 播报期服务端自主判段 final(用户插话已说完, 服务
+         端 VAD 先于客户端 partial 判定收段): 无 cb + 播报中 +
+         非回声 → 同 barge 切断链——停播+提交, 插话不丢 */
+      if (!cb && S.ttsPlaying && _ft
+          && bargeShouldCut(_ft)) {
+        if (S.ttsStartAt) {
+          voice83Event("barge_cut", {
+            afterMs: Date.now() - S.ttsStartAt,
+            via: "final" });
+        }
+        stopTtsNow();
+        setMicStatus("🎙 已暂停播报——新任务收到");
+        postVoiceTranscript(_ft, 1, true);
+      }
       if (cb) cb(m.text || "");
     } else if (m.type === "error") {
       stOn = false; streamTeardown();
@@ -2081,12 +2095,15 @@ function streamFeed(f32) {
 function streamFinish(cb) {
   if (!stWS || stWS.readyState !== 1 || !stSent) { cb(""); return; }
   setMicStatus("整理语音…");
+  /* v116: 免提模式收 final 后连接不关——服务端 v2 armed 态
+     保活, 播报期继续识别供能(打断链); 手动模式照旧关闭 */
+  var keep = !!S.handfree;
   var to = setTimeout(function () {
     if (stFinalCb) { var f = stFinalCb; stFinalCb = null; f(""); }
   }, 4000);
   stFinalCb = function (final) {
     clearTimeout(to);
-    if (stWS) { try { stWS.close(); } catch (e) {} stWS = null; }
+    if (stWS && !keep) { try { stWS.close(); } catch (e) {} stWS = null; }
     cb(final);
   };
   try { stWS.send(JSON.stringify({ type: "finish" })); }
@@ -3490,8 +3507,8 @@ function wireCloudCapture() {
     var abuf = new Uint8Array(analyser.fftSize);
     waveEl.classList.add("live");
     var vadSilentAt = 0;
-    S.vadSpoke = false;
-    S.streamPartial = ""; /* 双轨 re-arm 期间回声 partial 清零(防污染 VAD 尾字判定) */
+  S.vadSpoke = false;
+  S.streamPartial = ""; /* 双轨 re-arm 期间回声 partial 清零(防污染 VAD 尾字判定) */
     /* v83-A 面板哑流自愈(02:48 实证 rms=4 纯静音段/07:25:59
        唤醒后说话空转写): X5 开窗取流偶发路由错乱拿到哑流
        (近零能量, 真麦克风必有底噪≥0.002)——开窗聆听中
@@ -3689,8 +3706,19 @@ function cloudStop() {
   var waveEl = document.getElementById("wave");
   waveEl.classList.remove("live");
   waveEl.style.removeProperty("--amp");
-  if (procNode) { try { procNode.disconnect(); } catch (e) {} }
-  if (srcNode) { try { srcNode.disconnect(); } catch (e) {} }
+  /* v116 全双工打断(用户核心诉求"播报中插话即切"): 免提模式
+     断句后采集链保留——procNode/srcNode 不拆, 帧持续喂 stWS,
+     播报期服务端持续识别, partial 回流 bargeShouldCut 文本
+     判定(回声由 bargeIsEcho 三级防御拦, B8~B22 已验证)。
+     原实现(v56 移除拾音+打断靠唤醒词)真机实证打断失灵:
+     面板占麦期 widget 流被 X5 单占 mute, 喊「小竹」也无
+     人应——用户只能听完(14:55:35 插话转写成功但零提交)
+     手动模式照旧全拆(每轮释放); VAD 断句器停(播报期由
+     文本判定接管, 防 TTS 自声触发段提交) */
+  if (!S.handfree) {
+    if (procNode) { try { procNode.disconnect(); } catch (e) {} }
+    if (srcNode) { try { srcNode.disconnect(); } catch (e) {} }
+  }
   var rate = audioCtx ? audioCtx.sampleRate : 48000;
   /* 免提续听: 保留已授权流与上下文(下轮 cloudStart 复用, 省
      getUserMedia 数秒防句首丢字); 手动模式每轮释放 */
