@@ -1149,10 +1149,16 @@ function loadVoices() {
   }).catch(function () { S.ttsStream = "off";
     S.latReport = "off"; fill(VOICE_FALLBACK); });
 }
-/* 预取缓存命中(音色归属校验——切音色后旧缓存不可见) */
+/* 预取缓存命中(音色归属校验——切音色后旧缓存不可见);
+   v110: byteLength=0 的 detached 尸体视为未命中并清除
+   (decodeAudioData transfer 后残留引用防二次消费) */
 function packedGet(text) {
-  return (S.packVoice === voiceVal() && S.packTTS)
-    ? S.packTTS[text] : null;
+  if (S.packVoice === voiceVal() && S.packTTS) {
+    var b = S.packTTS[text];
+    if (b && b.byteLength > 0) return b;
+    if (b) { delete S.packTTS[text]; }
+  }
+  return null;
 }
 /* P2·O3: decoded AudioBuffer 旁路缓存(重复句零 decode 30~80ms)
    ——播过一次的块(过渡音"好的"/高频句/预合成首块二播)再播
@@ -1568,7 +1574,13 @@ function setPending(on) {
         if (g0) { playAck(g0); }
         else {
           var gb = packedGet("好的");
-          if (gb) { ttsDecode(ctx, gb).then(playAck); }
+          /* v110: 解码成功补 decPut 回填——此处原漏存, 导致
+             packTTS 原件被 decode 消费后每轮重复踩 detached
+             尸体; 回填后 decGet 命中, 后续轮零 decode 零报错 */
+          if (gb) { ttsDecode(ctx, gb).then(function (d) {
+            if (d) decPut("好的", d);
+            playAck(d);
+          }); }
         }
       }
     } catch (e) { /* ACK 失败静默不阻断 */ }
@@ -2381,9 +2393,20 @@ function ttsPlayCtx() {
   return ctx;
 }
 function ttsDecode(ctx, buf) {
+  /* v110 detached ArrayBuffer 根治: decodeAudioData 按规范
+     transfer(抽空)传入 buffer——预取缓存 S.packTTS 里的原始
+     buffer 被消费后成 byteLength=0 尸体, 下轮再 decode 报
+     "Cannot decode detached ArrayBuffer"(12:40-12:44 连发5次
+     实证)。入口 slice(0) 复制副本喂 decoder, 缓存原件永不
+     detach, 一份预取跨轮永久可用 */
+  var _b = buf;
+  try {
+    if (!_b || _b.byteLength === 0) { return Promise.resolve(null); }
+    if (_b.slice) { _b = _b.slice(0); }
+  } catch (e) { return Promise.resolve(null); }
   var go = function () {
     return new Promise(function (res, rej) {
-      ctx.decodeAudioData(buf, res, rej);
+      ctx.decodeAudioData(_b, res, rej);
     });
   };
   return (ctx.state === "suspended"
