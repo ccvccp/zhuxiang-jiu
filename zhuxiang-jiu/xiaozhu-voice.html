@@ -551,7 +551,19 @@ function apiFetch(path, opts) {
   var auth = getAuth();
   var headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
   if (auth && auth.token) headers["Authorization"] = "Bearer " + auth.token;
-  return fetch(path, Object.assign({}, opts, { headers: headers })).then(function (r) {
+  /* v105: X5 fetch 永久挂起兜底(11:18 实证: 提交撞 TTS 音频下载/
+     WS 连接池高峰, POST 排队既不发也不 reject, 后端 0.2s 就绪却
+     等来 15s 看门狗"网络慢了半拍")——AbortController 12s 强制
+     结算 + 一次自动重试(新连接), 挂起必复活 */
+  var ctrl = (typeof AbortController !== "undefined")
+    ? new AbortController() : null;
+  var tId = ctrl ? setTimeout(function () {
+    try { ctrl.abort(); } catch (e) {}
+  }, 12000) : null;
+  var fopts = Object.assign({}, opts, { headers: headers });
+  if (ctrl) { fopts.signal = ctrl.signal; }
+  return fetch(path, fopts).then(function (r) {
+    if (tId) clearTimeout(tId);
     if (r.status === 401 && auth && auth.refreshToken && !opts.__retried) {
       return fetch("/api/auth/refresh", {
         method: "POST",
@@ -568,6 +580,12 @@ function apiFetch(path, opts) {
       });
     }
     return r.json();
+  }, function (err) {
+    if (tId) clearTimeout(tId);
+    if (!opts.__to && ctrl) {
+      return apiFetch(path, Object.assign({}, opts, { __to: 1 }));
+    }
+    throw err;
   });
 }
 
