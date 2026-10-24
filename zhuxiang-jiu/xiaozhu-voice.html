@@ -546,30 +546,44 @@ function quickFill() {
 }
 
 /* apiFetch: 401 → refresh → retry 一次 */
+/* v107: X5 fetch 三重防御——①Promise.race 看门狗(X5 的
+   AbortController signal 静默失效: 11:18/12:00 两轮实证 fetch
+   既不 resolve 也不 reject, abort 回调不触发, v105 重试从未
+   执行) ②挂起/异常后 XHR 重试(XMLHttpRequest.timeout 在 X5
+   真实生效且与 fetch 连接池调度不同) ③响应包装统一 401 刷新 */
+function xhrJsonReq(path, opts, headers, timeoutMs) {
+  return new Promise(function (resolve, reject) {
+    try {
+      var x = new XMLHttpRequest();
+      x.open((opts.method || "GET"), path, true);
+      x.timeout = timeoutMs || 12000;
+      for (var k in headers) {
+        try { x.setRequestHeader(k, headers[k]); } catch (e) {}
+      }
+      x.onload = function () {
+        var j = null;
+        try { j = JSON.parse(x.responseText); } catch (e) {}
+        resolve({ status: x.status,
+                  json: function () { return Promise.resolve(j); } });
+      };
+      x.onerror = function () { reject(new Error("xhr-network")); };
+      x.ontimeout = function () { reject(new Error("xhr-timeout")); };
+      x.send(opts.body || null);
+    } catch (e) { reject(e); }
+  });
+}
 function apiFetch(path, opts) {
   opts = opts || {};
   var auth = getAuth();
   var headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
   if (auth && auth.token) headers["Authorization"] = "Bearer " + auth.token;
-  /* v105: X5 fetch 永久挂起兜底(11:18 实证: 提交撞 TTS 音频下载/
-     WS 连接池高峰, POST 排队既不发也不 reject, 后端 0.2s 就绪却
-     等来 15s 看门狗"网络慢了半拍")——AbortController 12s 强制
-     结算 + 一次自动重试(新连接), 挂起必复活 */
-  var ctrl = (typeof AbortController !== "undefined")
-    ? new AbortController() : null;
-  var tId = ctrl ? setTimeout(function () {
-    try { ctrl.abort(); } catch (e) {}
-  }, 12000) : null;
-  var fopts = Object.assign({}, opts, { headers: headers });
-  if (ctrl) { fopts.signal = ctrl.signal; }
-  return fetch(path, fopts).then(function (r) {
-    if (tId) clearTimeout(tId);
-    if (r.status === 401 && auth && auth.refreshToken && !opts.__retried) {
-      return fetch("/api/auth/refresh", {
+  var authRetry = function (w) {
+    if (w.status === 401 && auth && auth.refreshToken && !opts.__retried) {
+      return apiFetch("/api/auth/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken: auth.refreshToken })
-      }).then(function (r2) { return r2.json(); }).then(function (j2) {
+      }).then(function (j2) {
         var nt = j2 && (j2.accessToken || (j2.data && j2.accessToken));
         if (nt) {
           setAuth(Object.assign(auth, { token: nt }));
@@ -579,14 +593,28 @@ function apiFetch(path, opts) {
         throw new Error("登录已过期");
       });
     }
-    return r.json();
-  }, function (err) {
-    if (tId) clearTimeout(tId);
-    if (!opts.__to && ctrl) {
-      return apiFetch(path, Object.assign({}, opts, { __to: 1 }));
-    }
-    throw err;
-  });
+    return w.json();
+  };
+  var fetchOnce = function () {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var tid = setTimeout(function () {
+        if (!done) { done = true; reject(new Error("fetch-race-timeout")); }
+      }, 10000);
+      try {
+        fetch(path, Object.assign({}, opts, { headers: headers })).then(
+          function (r) { if (!done) { done = true; clearTimeout(tid); resolve(r); } },
+          function (e) { if (!done) { done = true; clearTimeout(tid); reject(e); } });
+      } catch (e) {
+        if (!done) { done = true; clearTimeout(tid); reject(e); }
+      }
+    });
+  };
+  return fetchOnce().catch(function (e) {
+    voice83Event("turn_drop", { reason: "fetch_hang",
+      err: String(e).slice(0, 40) });  /* v107: 挂起留痕+换轨 */
+    return xhrJsonReq(path, opts, headers, 12000);
+  }).then(authRetry);
 }
 
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]; }); }
@@ -1693,10 +1721,20 @@ function postVoiceTranscript(text, durationSec, skipSelfCheck) {
      首声延迟体感"网络慢了半拍"): 用户已说完话, 播报无意义,
      提交前停播(abort 在途音频下载+停 WebAudio)——轮次 POST
      独享通道, 提交即达; 回复回来 speakCloud 正常接力 */
-  if (S.ttsPlaying || S.ttsAbort) { stopTtsNow(); }
-  setPending(true);
-  playChime(); /* 78号P1: 思考微音效(流式轨同链) */
-  showTyping();
+  /* v107 前置段异常埋点: 区分"没走到 fetch"(此处 throw)与
+     "fetch 永挂"(fetch_hang 事件)——12:00:44 轮无任何后续
+     事件, 两种可能一测便知 */
+  try {
+    if (S.ttsPlaying || S.ttsAbort) { stopTtsNow(); }
+    setPending(true);
+    playChime(); /* 78号P1: 思考微音效(流式轨同链) */
+    showTyping();
+  } catch (e) {
+    voice83Event("turn_drop", { reason: "pre_post_throw",
+      err: String(e).slice(0, 60) });  /* v107 */
+    setPending(false);
+    return;
+  }
   apiFetch("/api/xiaozhu/sessions/" + S.sid + "/voice", {
     method: "POST",
     body: JSON.stringify({ textTranscript: wakePrefix(ctxInject(text)), filename: "audio.wav",
