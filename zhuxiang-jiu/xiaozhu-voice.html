@@ -2024,17 +2024,27 @@ function streamConnect() {
       } else { S.asrFragStreak = 0; }
       /* v116 播报期服务端自主判段 final(用户插话已说完, 服务
          端 VAD 先于客户端 partial 判定收段): 无 cb + 播报中 +
-         非回声 → 同 barge 切断链——停播+提交, 插话不丢 */
-      if (!cb && S.ttsPlaying && _ft
-          && bargeShouldCut(_ft)) {
-        if (S.ttsStartAt) {
-          voice83Event("barge_cut", {
-            afterMs: Date.now() - S.ttsStartAt,
-            via: "final" });
+         非回声 → 同 barge 切断链——停播+提交, 插话不丢
+         v118 回归修复: 非播报期(空闲)的 final 原被静默丢弃
+         ——v116 保活流无客户端 VAD, 服务端判段是唯一出口,
+         丢弃=说完没反应("唤醒又失败"体感根因)。空闲 final
+         非回声即直接提交(回声 bargeIsEcho 拦, ≥2 实义字) */
+      if (!cb && _ft && !S.pending) {
+        var _cut = S.ttsPlaying;
+        if (!_cut) {
+          var _nz2 = _ft.replace(/[\s，。？！、,.?!…·]/g, "");
+          _cut = _nz2.length >= 2 && !bargeIsEcho(_ft);
+        } else { _cut = bargeShouldCut(_ft); }
+        if (_cut) {
+          if (S.ttsStartAt && S.ttsPlaying) {
+            voice83Event("barge_cut", {
+              afterMs: Date.now() - S.ttsStartAt,
+              via: "final" });
+          }
+          stopTtsNow();
+          setMicStatus("🎙 已暂停播报——新任务收到");
+          postVoiceTranscript(_ft, 1, true);
         }
-        stopTtsNow();
-        setMicStatus("🎙 已暂停播报——新任务收到");
-        postVoiceTranscript(_ft, 1, true);
       }
       if (cb) cb(m.text || "");
     } else if (m.type === "error") {

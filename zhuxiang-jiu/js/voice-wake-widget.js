@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=117";
+  var VER = "v=118";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -1018,6 +1018,15 @@
         }
         teardownSeg();
       } else if (m.type === "error") {
+        /* v118 唤醒补救: final 识别失败(返回 None)但此前 partial
+           已转写出唤醒词(15:46:09 实证: partial「小猪小猪」到达
+           后 final=None→error, 唤醒丢失)——用 lastPartial 判定
+           直接触发, 唤醒词识别不因整段转写失败而陪葬 */
+        if (!inSelfReply() && eng.lastPartial
+            && matchWake(eng.lastPartial)) {
+          onWakeHit();
+          return;
+        }
         /* 通道错误可见(token 问题走下方续期自愈) */
         diagTip("识别通道: " + String(m.error || "?").slice(0, 80), 15);
         /* token 可能过期: 单飞刷新一次, 下一段自愈(过期瞬间喊
