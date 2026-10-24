@@ -1938,17 +1938,29 @@ var stWS = null, stOn = true, stAccum = new Float32Array(0),
    (3)误开门的后果由 v122 文本层兜住, 最坏退化为 v122 行为不会更差。 */
 var gateMute = false, gateHot = 0, gateNeed = 2, gateEma = 0,
     gateProbe = 0, gateLook = null, gateMuted = 0,
-    gateOn = false, gateSince = 0;
+    gateOn = false, gateSince = 0,
+    /* v124 尾音延展窗: ttsPlaying 在 onend 立即翻 false, 但 X5 混响
+       尾音 + 免提恢复窗都比它长——用下降沿时间戳把门控窗补到与回声
+       物理窗等长(不改 13 处 ttsPlaying=false 落点, 非侵入不漏挂) */
+    gateWasPlaying = false, gateEndedAt = 0;
+var GATE_TAIL_MS = 1200; /* 与 scheduleHandfree(1200)"回声尾音衰减"对齐 */
+function gateInTail() {
+  return gateEndedAt !== 0 && Date.now() - gateEndedAt < GATE_TAIL_MS;
+}
 function gateReset() {
   gateMute = false; gateHot = 0; gateNeed = 2; gateEma = 0;
   gateProbe = 0; gateLook = null; gateMuted = 0;
   gateOn = false; gateSince = 0;
+  gateWasPlaying = false; gateEndedAt = 0;
 }
 function streamConnect() {
   /* 每轮新建(简单可靠); 失败一次本轮+后续自动回退整段上传轨 */
   stAccum = new Float32Array(0); stBytes = 0; stPhase = 0; stSent = 0;
   stFinalCb = null;
-  gateReset(); /* v123 门控随连接生命周期复位 */
+  /* v124 播报期/尾音窗内重连不清门控: arm_rebuild 续听重建走这里,
+     原无条件 gateReset 会把播报中途的 gateMute/gateEma/gateSince 清零
+     → 重新 700ms 暖机, 这段窗口回声原始 PCM 直送百炼 */
+  if (!S.ttsPlaying && !gateInTail()) { gateReset(); }
   /* 兜底清理上一条未收尾连接(快速开合面板/免提短轮重连时,
      旧 WS 可能仍在 CONNECTING——不清理则旧实例迟到的
      onopen/onclose 与新轮交叉; 竞态根修见下方实例守卫) */
@@ -2145,9 +2157,29 @@ function streamFeed(f32) {
   var sq = 0;
   for (var i = 0; i < f32.length; i++) { sq += f32[i] * f32[i]; }
   var rms = Math.sqrt(sq / f32.length);
-  /* --- v123 播报期门控判定(用原始 rms, 增益前=真实声压水位) --- */
-  if (!S.ttsPlaying) {
-    /* 播报结束/未播报: 自动复位(无需在 stopTtsNow/done 挂钩子) */
+  /* --- v123/v124 播报期门控判定(用原始 rms, 增益前=真实声压水位) --- */
+  /* v124 尾音延展: 门控窗必须 ≥ 回声物理窗。ttsPlaying 在 onend 立即
+     翻 false, 而 scheduleHandfree(1200) 的"回声尾音衰减"只推迟免提
+     聆听恢复, 不推迟门控复位——原 !ttsPlaying 即复位 = 门控窗比回声
+     窗短 1.2s, 这段里麦克风常驻在录 + AEC 关闭(v23 实证必须关), X5
+     混响尾音原始 PCM 直送百炼被转写成指令提交(19:51-19:53 故障期
+     turn_submit "打开商品列表/去结算/结算" 且全时段零 gate_* 可查)。
+     这里就地跟踪下降沿, 播报结束后再延续 GATE_TAIL_MS 关门。 */
+  if (S.ttsPlaying) {
+    if (gateEndedAt !== 0) {
+      /* 尾音窗内又起新播报(连播/追加气泡): 视作新一轮, 补发上一轮
+         静音计数后重新暖机播种, 否则 gateSince 陈旧→700ms 暖机失效
+         → 第二轮播报的首块脉冲会顶开门 */
+      if (gateMuted > 0) { voice83Event("gate_mute", { n: gateMuted }); }
+      gateEndedAt = 0; gateReset();
+    }
+    gateWasPlaying = true;
+  } else if (gateWasPlaying) {
+    gateWasPlaying = false; gateEndedAt = Date.now();
+  }
+  if (!(S.ttsPlaying || gateInTail())) {
+    /* 播报结束(尾音窗已过)/未播报: 自动复位(无需在 stopTtsNow/done 挂钩子) */
+    gateEndedAt = 0; /* 清尾音戳, 使 streamConnect 的正常复位不被长期阻断 */
     if (gateMuted > 0) {
       voice83Event("gate_mute", { n: gateMuted }); /* 补发一次, 避免每帧刷屏 */
     }
@@ -2274,17 +2306,23 @@ function streamFinish(cb) {
   try { stWS.send(JSON.stringify({ type: "finish" })); }
   catch (e) { clearTimeout(to); stFinalCb = null; cb(""); }
 }
-/* TTS 回声判定: 转写为最近播报文本的子串(归一化去标点;
-   限 2-12 字——长转写几乎不可能是纯回声, 防误杀) */
+/* TTS 回声判定: 转写为播报文本的子串(归一化去标点)
+   v124: 参照源 S.lastSpoken 单条 → S.ttsSpokenAll 累积缓冲。lastSpoken
+   一被下一条播报覆盖, 上一条的尾音回声就漏判(19:52-19:53 turn_submit
+   "加入购物车/去结算" 即走此漏判路径); 累积缓冲是"新在前"拼接, 故取
+   前 160 字=最近 1~2 条播报, 避免陈旧历史放大误杀。长度上限 12→16:
+   回声经 ASR 多为短句, 16 字已覆盖整句回声, 再宽则"用户说的正好是
+   小竹刚说过的话"这类真指令会被静默丢弃(此处是响应后路径, 丢弃=命令
+   已执行却无任何反馈, 比漏判回声更伤体验), 故不取 24。 */
 function isEchoOfTTS(t) {
-  var last = S.lastSpoken || "";
+  var last = (S.ttsSpokenAll || "").slice(0, 160) || S.lastSpoken || "";
   if (!last || !t) return false;
   var norm = function (s) {
     return String(s).replace(
       /[\s，。？！、,.?!:：；;「」『』（）()\-—…·]/g, "");
   };
   var a = norm(t), b = norm(last);
-  return a.length >= 2 && a.length <= 12 && b.indexOf(a) >= 0;
+  return a.length >= 2 && a.length <= 16 && b.indexOf(a) >= 0;
 }
 /* 双轨 barge-in v2 回声判定(播报中切断专用)——三级防御的
    第一级(LCS 比率, 借鉴语义-时序联合校验文档):

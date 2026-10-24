@@ -34,8 +34,14 @@ SLA_LABELS = {"tt": "端到端首响", "s2": "后端处理",
               "s3": "TTS+播放"}
 
 # 事件类型白名单(封闭集合)
+# v124 补录 v123 播报期门控三埋点: gate_open/gate_mute/gate_reclose
+# 此前未注册→record_event 返 success=False→路由转 422, 而前端
+# voice83Event 是 .catch(noop) fire-and-forget 静默吞掉→门控是否
+# 启动过零数据, 只能靠用户主观反馈判断(19:51-19:53 播报回声被当
+# 指令提交的故障期恰好无一条 gate_* 可查)
 EVENT_TYPES = ("wake_hit", "barge_cut", "turn_submit", "turn_drop",
-               "turn_resp", "js_error", "wake_miss")  # v114 唤醒未命中(词+转写)
+               "turn_resp", "js_error", "wake_miss",  # v114 唤醒未命中(词+转写)
+               "gate_open", "gate_mute", "gate_reclose")
 TTL_DAYS = 9
 
 TBL_EVENTS = "voice83_events"
