@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=113";
+  var VER = "v=114";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -431,6 +431,26 @@
   var wakeMatcher = buildWakeMatcher();
   function matchWake(text) {
     return wakeMatcher.test(String(text || ""));
+  }
+  /* v114 唤醒未命中上报(sendBeacon 免阻塞): 唤醒失败排查
+     历来靠猜(转写是什么/词是什么/为何没中), 此埋点后一轮
+     日志直达; word 上报当前唤醒词设置, text 上报实际转写 */
+  function wakeMissReport(text) {
+    try {
+      var body = JSON.stringify({
+        events: [{ type: "wake_miss", ts: Date.now(),
+          word: String(getWord() || "你好小竹").slice(0, 12),
+          text: String(text || "").slice(0, 30) }] });
+      var url = "/api/voice83/events";
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(url,
+          new Blob([body], { type: "application/json" }));
+      } else {
+        fetch(url, { method: "POST", headers:
+          { "Content-Type": "application/json" },
+          body: body, keepalive: true }).catch(function () {});
+      }
+    } catch (e) { /* 上报失败无碍 */ }
   }
 
   var eng = {
@@ -960,7 +980,9 @@
           if (/^(你好|喂|嘿)[。.!！？?\s]*$/.test(ft)) {
             eng.prevCall = Date.now();  /* 呼语挂起待组合 */
           } else { eng.prevCall = 0; }
-          /* 未命中唤醒词: 回显转写内容——ASR 实际听到什么可见 */
+          /* 未命中唤醒词: 回显转写内容——ASR 实际听到什么可见
+             + v114 wake_miss 上报(日志侧同步可见) */
+          wakeMissReport(ft);
           diagTip("听到「" + String(ft).slice(0, 24) + "」未含唤醒词", 10);
         } else {
           /* V5.2 空转写健康轮二打: 段能量达标(源 rms≥0.006

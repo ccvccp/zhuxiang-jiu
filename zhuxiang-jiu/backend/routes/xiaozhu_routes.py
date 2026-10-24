@@ -500,14 +500,25 @@ async def _seg_pump(ws, session, dump_f,
                 except Exception:
                     pass
             if final is None:
-                await ws.send_json(
-                    {"type": "error",
-                     "error": session.failed
-                     or "流式识别未出结果",
-                     "fallback": "upload"})
+                # v114 send-after-close 防御: 前端拆连接(唤醒
+                # 命中即开面板拆池)后 final/error 迟到 send 抛
+                # "Cannot call send once a close message has
+                # been sent"(14:15:43 双机实证 ws_asr_error×2)
+                # ——包 try 后连接已关即静默, 连接仍活则正常送
+                try:
+                    await ws.send_json(
+                        {"type": "error",
+                         "error": session.failed
+                         or "流式识别未出结果",
+                         "fallback": "upload"})
+                except Exception:
+                    pass
             else:
-                await ws.send_json({"type": "final",
-                                    "text": final})
+                try:
+                    await ws.send_json({"type": "final",
+                                        "text": final})
+                except Exception:
+                    pass
             break
     return False  # 正常 finish 收段(客户端仍在)
 
