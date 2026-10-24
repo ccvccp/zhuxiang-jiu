@@ -579,10 +579,17 @@ function apiFetch(path, opts) {
   if (auth && auth.token) headers["Authorization"] = "Bearer " + auth.token;
   var authRetry = function (w) {
     if (w.status === 401 && auth && auth.refreshToken && !opts.__retried) {
+      /* v111 递归风暴根治: 内层 refresh 调用原漏 __retried——
+         refreshToken 也过期时 refresh 自身 401 再触发 authRetry
+         又发 refresh, 无限递归(老机 13:22:07 一秒 20+ 次 401
+         实证), clearAuth/showLogin 永远走不到, 用户卡死语音页。
+         带 __retried 后 refresh 401 直接出结果 → 外层拿不到
+         新 token → 清过期登录态弹登录页, 重登即全链恢复 */
       return apiFetch("/api/auth/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken: auth.refreshToken })
+        body: JSON.stringify({ refreshToken: auth.refreshToken }),
+        __retried: true
       }).then(function (j2) {
         var nt = j2 && (j2.accessToken || (j2.data && j2.accessToken));
         if (nt) {
