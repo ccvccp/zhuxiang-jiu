@@ -38,9 +38,12 @@ from repositories.xiaozhu_repository import (
 
 logger = logging.getLogger("xiaozhu_executor")
 
-# 高敏确认令牌有效期(秒)——49号P1: 120→60 收紧
-# (计划 §四 铁律① TTL ≤60s)
-CONFIRM_TOKEN_TTL = 60
+# 高敏确认令牌有效期(秒)——v113: 60→300 放宽
+# (真机实证 60s 不够: TTS 播报"需屏幕确认"约 6-8s + 用户读码
+#  + X5 调起键盘逐格输入 4 位——老机 13:58:45 发码后用户未在
+#  60s 内完成即过期; 安全性由 一次性令牌+3 次码错上限+会话
+#  绑定兜底, 放宽窗口不降防御强度)
+CONFIRM_TOKEN_TTL = 300
 
 # 49号P1 consent_token 有效期(秒——双因子合成凭证)
 CONSENT_TOKEN_TTL = 60

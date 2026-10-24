@@ -902,6 +902,17 @@ function appendBot(reply, card, badgesHtml, extra, jump) {
   h += "</div>";
   d.innerHTML = h;
   c.appendChild(d);
+  /* v113 确认卡自动聚焦: 确认码卡渲染后 300ms 聚焦首格
+     (真机实证老机 13:58:45 发码后零 confirm POST——X5 上
+     4 格小输入框不点不动, 用户找不着入口; 自动弹键盘
+     指路) + 滚动到可视区 */
+  var cf0 = d.querySelector(".ccell");
+  if (cf0) {
+    setTimeout(function () {
+      try { cf0.scrollIntoView({ block: "center" }); } catch (e) {}
+      try { cf0.focus(); } catch (e) {}
+    }, 300);
+  }
   /* jump 独立消息行(气泡外——彻底脱离 bubble/kcard 布局,
      规避 X5 内核行盒重叠与 fit-content 兼容问题) */
   if (jump) {
@@ -2201,6 +2212,20 @@ document.addEventListener("input", function (ev) {
   if (t.value) {
     var n = t.nextElementSibling;
     if (n && n.classList.contains("ccell")) n.focus();
+    else {
+      /* v113 末格填满自动提交: 免去找按钮点击(X5 上 4 格
+         输完再点小按钮是双倍操作, 真机实证用户卡在此);
+         校验 4 格齐再触发, 按钮保留为兜底 */
+      var box0 = t.closest(".confirmbox");
+      var btn0 = box0 ? box0.querySelector("[data-cftoken]") : null;
+      if (btn0 && !btn0.disabled) {
+        var cs = box0.querySelectorAll(".ccell"), full = true;
+        for (var ci = 0; ci < cs.length; ci++) {
+          if (!/^\d$/.test(cs[ci].value || "")) { full = false; break; }
+        }
+        if (full) { setTimeout(function () { doConfirm(btn0); }, 150); }
+      }
+    }
   }
 });
 document.addEventListener("keydown", function (ev) {
@@ -2238,6 +2263,11 @@ function doConfirm(btn) {
   var code = "";
   for (var i = 0; i < cells.length; i++) code += cells[i].value || "";
   if (!/^\d{4}$/.test(code)) {
+    /* v113 确认失败埋点: 码没输齐是双机唯一的客户端报错源
+       (老机 13:58:45 发码后零 confirm POST 实证)——上报后
+       日志可直接区分"输入没完成/服务端拒绝/网络失败" */
+    voice83Event("turn_drop", { reason: "cf_short_code",
+      len: code.length, text: "确认码未输齐" });
     showToast("请输入完整 4 位数字确认码");
     if (cells.length) cells[0].focus();
     return;
@@ -2250,13 +2280,19 @@ function doConfirm(btn) {
   }).then(function (j) {
     removeTyping();
     if (!j || j.success === false) {
+      voice83Event("turn_drop", { reason: "cf_resp_fail",
+        err: String((j && (j.error || j.detail)) || "").slice(0, 60) });
       box.querySelectorAll("input,button").forEach(function (el) { el.disabled = false; });
       appendBot("⚠️ 确认未通过：" + ((j && (j.error || j.detail)) || "码错或已过期"), null, null, "__err__");
       return;
     }
     appendUser("确认码 " + code, "text");
     handleTurn(j, "text");
-  }).catch(function (e) { removeTyping(); turnError(e); });
+  }).catch(function (e) {
+    voice83Event("turn_drop", { reason: "cf_post_fail",
+      err: String(e).slice(0, 60) });
+    removeTyping(); turnError(e);
+  });
 }
 
 /* ===== 语音播报 TTS 双轨 =====
