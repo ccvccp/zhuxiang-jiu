@@ -1042,9 +1042,15 @@ function renderPanel(card) {
       (cur.price != null ? '<div class="pprice">¥' + esc(cur.price) + "</div>" : "") +
       "</div>" +
       '<div class="pbtns">' +
-      '<button class="btn gold" onclick="sendText(\'需要\')">加入清单</button>' +
+      /* v112 文案对齐: "加入清单"→"加入购物车"(真机反馈用户
+         认知里清单≠购物车, 找不到加购入口) */
+      '<button class="btn gold" onclick="sendText(\'需要\')">加入购物车</button>' +
       '<button class="btn" onclick="sendText(\'换一款\')">换一款</button>' +
-      (cur.price != null ? '<button class="btn gold" onclick="sendText(\'结算\')">立即购买</button>' : "") +
+      /* v112 立即购买修复: 原发"结算"但推荐态清单为空, 服务端
+         只能回"清单里还没有商品"——体感按钮无效。改为 buyNow():
+         先"来一件"(affirm 加购正则铁定命中)→ handleTurn 收到
+         cart_added 自动续发"结算", 两步全自动=真·立即购买 */
+      (cur.price != null ? '<button class="btn gold" onclick="buyNow()">立即购买</button>' : "") +
       "</div>";
     el.classList.remove("hidden");
     return;
@@ -1353,6 +1359,18 @@ function handleTurn(j, channel) {
   renderSuggest(bubble, j.suggest);
   /* 商品面板同步: 推荐款/清单态常驻展示(购物氛围入口) */
   try { renderPanel(j.card || null); } catch (e) { /* 面板 fail-soft */ }
+  /* v112 立即购买第二步: buyNow 点"来一件"加购成功(cart_added)
+     → 自动续发"结算"完成闭环; 任何其他卡型/失败即清标志防
+     误触发(换款/聊天后再点结算不串) */
+  if (S.buyNow) {
+    if ((j.card || {}).type === "cart_added" && S.sid
+        && !S.pending) {
+      S.buyNow = 0;
+      setTimeout(function () { sendText("结算"); }, 600);
+    } else {
+      S.buyNow = 0;
+    }
+  }
   /* v2 A: 轮次反馈条(👍/👎——落 turn hash, 可切换; 仅真实轮) */
   if (tr.turnId) attachFeedback(bubble, tr.turnId);
   /* v2 D: 触觉反馈(安卓 Chrome 尽力而为, iOS/X5 静默跳过);
@@ -1646,8 +1664,22 @@ function pageCtx() {
     return { page: "product-detail", productId: pid };
   } catch (e) { return undefined; }
 }
+/* v112 立即购买: 加购→自动结算两步全自动(见推荐卡按钮注记) */
+function buyNow() {
+  S.buyNow = 1;
+  sendText("来一件");
+}
 function sendText(text) {
-  if (!S.sid || S.pending) { showToast(S.pending ? "上一轮处理中…" : "会话未开启"); return; }
+  if (!S.sid || S.pending) {
+    /* v112 按钮静默死排查埋点: 双机实证点"加入购物车/立即
+       购买"后 nginx 零 /text POST——拦截在此但 toast 一闪
+       用户无感。上报拦截原因(sid 空/pending 卡), 下轮日志
+       直达根因 */
+    voice83Event("turn_drop", { reason: "btn_block",
+      sid: S.sid ? 1 : 0, pending: S.pending ? 1 : 0,
+      text: String(text).slice(0, 20) });
+    showToast(S.pending ? "上一轮处理中…" : "会话未开启"); return;
+  }
   appendUser(text, "text");
   setPending(true);
   showTyping();
