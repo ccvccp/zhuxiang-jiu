@@ -370,11 +370,16 @@ async def ws_asr(ws: WebSocket):
         dump_f.setframerate(16000)
         logger.info("ws_asr_dump open %s", _dp)
     _ws_mid = int((member or {}).get("memberId") or 0)
+
+    async def _send_logged(m: dict) -> None:
+        if m.get("type") == "partial":
+            logger.info("ws_asr_partial text=%r", m.get("text"))
+        await ws.send_json(m)
     try:
         if str(auth.get("ver") or "") != "2":
             # 旧协议(v<=37 缓存客户端): auth → 建流 → ready →
             # 单段 → final → 断连(原行为原样, 零影响)
-            session = AsrStreamSession(ws.send_json)
+            session = AsrStreamSession(_send_logged)
             if not await session.start(
                     await _wake_hot(auth.get("wakeword"))):
                 await ws.send_json({"type": "error",
@@ -413,7 +418,7 @@ async def ws_asr(ws: WebSocket):
                         arm = m
                 logger.info("ws_asr_v2_arm wakeword=%r",
                             arm.get("wakeword"))  # 埋点: 段开始
-                session = AsrStreamSession(ws.send_json)
+                session = AsrStreamSession(_send_logged)
                 if not await session.start(
                         await _wake_hot(arm.get("wakeword"))):
                     # 建流失败: 报错回等下一 arm(连接保活,

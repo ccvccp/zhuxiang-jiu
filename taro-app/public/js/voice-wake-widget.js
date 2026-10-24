@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  var VER = "v=102";
+  var VER = "v=103";
   var WAKE_KEY = "xiaozhu.wake";
   var WORD_KEY = "xiaozhu.wakeword";
 
@@ -872,13 +872,16 @@
       var m;
       try { m = JSON.parse(e.data); } catch (ex) { return; }
       if (m.type === "armed") {
+        ws._xzLive = true;  /* v103: 服务端应答=连接存活证明(池 TTL 依据) */
         if (eng.ws === ws) {
           try { ws.send(JSON.stringify({ type: "arm", wakeword: getWord() })); }
           catch (ex) { teardownSeg(); }
         } else if (!preWs) {
+          ws._xzPooledAt = Date.now();  /* v103: 入池时刻(TTL 防僵尸) */
           preWs = ws; preConnecting = false; startPing();  /* 预热完成入池(握手锁解锁) */
         }
       } else if (m.type === "ready") {
+        ws._xzLive = true;  /* v103: 段内建流成功=连接铁证 */
         eng.wsReady = true;
         clearTimeout(eng.armTimer);
         /* V5.2 空转写健康轮二打: 推缓存段音频直接 finish
@@ -1035,9 +1038,17 @@
        重置=1 反致段首尖峰未收敛即削(18:13 批 dump 实证);
        强弱源切换由限速跟随(1.6x/帧)自愈 */
     var ws = null;
-    if (preWs && preWs.readyState === 1) {
+    /* v103: 池命中三重校验(OPEN+存活证明+60s TTL)——服务端重启/
+       移动网半开连接僵尸化后 readyState 仍假开, 复用=段段 8s
+       超时死循环(09:12 双机实证); 僵尸弃池重建(带 auth 握手) */
+    if (preWs && preWs.readyState === 1 && preWs._xzLive
+        && Date.now() - (preWs._xzPooledAt || 0) < 60000) {
       ws = preWs; preWs = null; stopPing();  /* 池命中转正 */
     } else {
+      if (preWs) {
+        try { preWs.close(); } catch (e) { /* 忽略 */ }
+        preWs = null; stopPing();
+      }
       var proto = location.protocol === "https:" ? "wss://" : "ws://";
       try {
         ws = new WebSocket(proto + location.host + "/api/xiaozhu/ws/asr");
@@ -1119,7 +1130,10 @@
     eng.speaking = false;
     clearTimeout(eng.armTimer);
     var keep = null;
-    if (eng.ws && eng.ws._xzV2 && eng.ws.readyState === 1) {
+    /* v103: 增加 eng.wsReady 门槛——本段从未 ready(超时/鉴权失败/
+       僵尸复用)的连接必须关闭, 原版照旧回池=僵尸永生循环 */
+    if (eng.ws && eng.ws._xzV2 && eng.ws.readyState === 1
+        && eng.wsReady) {
       keep = eng.ws; /* V2 段后保活回池: 服务端已回等-arm 态,
                         下一段发 arm 即用(连测唤醒省 N 次握手);
                         非池连接(竞态 CONNECTING)照旧拆 */
@@ -1130,6 +1144,7 @@
     eng.wsReady = false;
     eng.pendingResub = null;
     if (keep) {
+      keep._xzPooledAt = Date.now();  /* v103: 刷新池 TTL 基准 */
       if (!preWs) { preWs = keep; startPing(); }
       else { try { keep.close(); } catch (e) { /* 池已有弃新 */ } }
     }
