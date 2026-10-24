@@ -979,6 +979,22 @@ function renderCard(card) {
     return "";
   }
   if (t === "confirm") {
+    /* v115 一键确认: 真机两轮实证(13:58/14:38 发卡后零提交,
+       输入框从未被碰)——码本就显示在屏幕上让用户照抄无安全
+       增益, "证明看到屏幕"一个大按钮即够; 语音念码不算红线
+       保留(voiceConfirmed 双因子路径不动), 按钮自动带码提交 */
+    var _sc = String(card.screenCode || "");
+    if (!_sc) {
+      var _mm = String(card.codeHint || "").match(/(\d{4})/);
+      if (_mm) { _sc = _mm[1]; }
+    }
+    if (_sc) {
+      return '<div class="confirmbox"><div class="ct">🔐 高敏操作确认</div>' +
+        '<div class="cs">' + esc(card.subject || "") + "</div>" +
+        '<div class="cs" style="font-size:24px;letter-spacing:10px;font-weight:700;color:var(--gold);margin:8px 0">' + esc(_sc) + "</div>" +
+        '<button class="btn gold" style="width:100%;padding:12px;font-size:16px" data-cftoken="' + esc(card.confirmToken || "") + '" data-cfcode="' + esc(_sc) + '">✅ 确认执行</button>' +
+        '<div class="cs" style="margin-top:8px">核对无误请点击上方按钮完成</div></div>';
+    }
     var cells = '<div class="ccells">';
     for (var i = 0; i < 4; i++) {
       cells += '<input class="ccell" maxlength="1" inputmode="numeric" autocomplete="off" aria-label="确认码第' + (i + 1) + '位">';
@@ -2262,6 +2278,11 @@ function doConfirm(btn) {
   var cells = box ? box.querySelectorAll(".ccell") : [];
   var code = "";
   for (var i = 0; i < cells.length; i++) code += cells[i].value || "";
+  /* v115 一键确认: 按钮自带屏幕码(data-cfcode)直接用——
+     码显示在屏上让用户照抄无安全增益, 点击即证明看到屏幕 */
+  if (!code && btn.getAttribute("data-cfcode")) {
+    code = btn.getAttribute("data-cfcode");
+  }
   if (!/^\d{4}$/.test(code)) {
     /* v113 确认失败埋点: 码没输齐是双机唯一的客户端报错源
        (老机 13:58:45 发码后零 confirm POST 实证)——上报后
@@ -2553,10 +2574,11 @@ function pumpTts(ctl) {
    口径, 失败静默; 服务端 voice83:events 日键收集) */
 function voice83Event(type, meta) {
   try {
-    var _a = getAuth() || {};
-    var _hh = { "Content-Type": "application/json",
-                "X-Member-Id": String(_a.uid || "") };
-    if (_a.token) _hh["Authorization"] = "Bearer " + _a.token;
+    /* v115 匿名上报: 原带过期 token 被 strict 中间件拒
+       (public_path_token_invalid→401, 老机 8 连 401 实证;
+       埋点端点匿名放行)——埋点永不带 Authorization, 断网
+       排查链不因 token 生命周期而盲 */
+    var _hh = { "Content-Type": "application/json" };
     fetch("/api/voice83/events", { method: "POST",
       headers: _hh,
       body: JSON.stringify({ type: type, meta: meta || {} })
