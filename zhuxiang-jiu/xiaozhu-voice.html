@@ -1659,6 +1659,21 @@ function setPending(on) {
   b.disabled = on;
   b.textContent = on ? "…" : "发送";
   document.getElementById("mic").classList.toggle("off", on || !S.sid);
+  /* v117 排队指令执行(见 sendText 拦截分支): pending 解除且
+     本轮未再起新提交 → 自动发送用户排队指令(立即购买"来一件
+     "+自动"结算"链在此复活); 延迟 400ms 让本轮播报/面板态
+     先落地; S.pending 复查防竞态(看门狗路径也会走到这) */
+  if (!on && S.queuedText && !S._flushingQ) {
+    var _qt = S.queuedText, _qb = S.queuedBuyNow;
+    S.queuedText = null; S.queuedBuyNow = 0;
+    if (_qb) { S.buyNow = 1; }
+    S._flushingQ = true;
+    setTimeout(function () {
+      S._flushingQ = false;
+      if (S.sid && !S.pending) { sendText(_qt); }
+      else if (_qt) { S.queuedText = _qt; S.queuedBuyNow = _qb ? 1 : 0; }
+    }, 400);
+  }
 }
 function sendFromInput() {
   var inp = document.getElementById("tinput");
@@ -1698,14 +1713,23 @@ function buyNow() {
 }
 function sendText(text) {
   if (!S.sid || S.pending) {
-    /* v112 按钮静默死排查埋点: 双机实证点"加入购物车/立即
-       购买"后 nginx 零 /text POST——拦截在此但 toast 一闪
-       用户无感。上报拦截原因(sid 空/pending 卡), 下轮日志
-       直达根因 */
+    /* v117 用户指令不丢弃(立即购买失败根因: 播报/处理中点按钮
+       被 pending 拦截直接扔掉, 用户以为按钮坏了): 会话在+仅因
+       pending 拦 → 排队, 本轮完成(setPending false)后自动发送
+       (只保留最新一条, 连点覆盖旧指令符合末次意图优先);
+       会话没开才提示 */
+    if (S.sid && S.pending) {
+      S.queuedText = String(text).slice(0, 60);
+      if (S.buyNow) { S.queuedBuyNow = 1; }
+      voice83Event("turn_drop", { reason: "btn_queued",
+        text: String(text).slice(0, 20) });
+      showToast("收到——本轮完成后自动执行");
+      return;
+    }
     voice83Event("turn_drop", { reason: "btn_block",
       sid: S.sid ? 1 : 0, pending: S.pending ? 1 : 0,
       text: String(text).slice(0, 20) });
-    showToast(S.pending ? "上一轮处理中…" : "会话未开启"); return;
+    showToast("会话未开启"); return;
   }
   appendUser(text, "text");
   setPending(true);

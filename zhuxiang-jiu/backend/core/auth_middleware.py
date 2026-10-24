@@ -48,6 +48,11 @@ PUBLIC_EXACT = {
     # 用户认证模块(JWT)
     "/api/auth/register",
     "/api/auth/login",
+    # v116 语音观测埋点(83号): 断网/打断/按钮拦截诊断数据——
+    # 前端已改匿名上报(v115), token 过期即全量 401(双机 8+ 连
+    # 实证)故障期恰好最需要数据; 端点只写事件计数无敏感读,
+    # 类型白名单+TTL 由路由层自限
+    "/api/voice83/events",
     # 网站Agent中枢(75号 RA-P1): 共鸣行为采集——beacon 无登录态,
     # 端点自身带白名单/正则/限流/COLLECT kill 五层闸(auth_middleware
     # 仅免登录, 不豁免路由层校验)
