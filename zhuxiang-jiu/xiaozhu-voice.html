@@ -2949,36 +2949,42 @@ function speakCloud(text, bubbleEl, mood) {
      执行期(提交→回复到达)无拾音不 arm——识别仅在播报期
      (回声判定链 B8~B22 已验证拦回声); 播报完 done→关段,
      窗口制正常接力 */
-  if (stWS && stWS.readyState === 1) {
-    try { stWS.send(JSON.stringify({ type: "arm" })); }
-    catch (e) { /* 连接死由续听重建 */ }
-  }
-  /* v120 arm 供能自愈(16:06:44 实证: 指令轮提交后服务端
-     零 ws_asr 事件——arm 静默丢失/X5 send 半死, 播报期识别
-     断供=打断失灵): 1.2s 无 ready 应答重发 arm; 2.5s 仍无
-     → 重建连接(auth→armed→自动 arm, 麦克风帧 v116 保活
-     自动喂新连接); ready 到达即撤计时器 */
-  clearTimeout(S._armRetry);
-  S._armRetry = setTimeout(function () {
-    if (!S.ttsPlaying) { S._armRetry = null; return; }
+  /* v121 复查修正(v120 协议错位): 面板 auth 不带 ver=2——
+     服务端判 ver!=2 走 v1(final 后立即关连接), speakCloud
+     时 stWS 常态已关; v120 的 arm 在 v1 是空操作(_seg_pump
+     无 arm 分支), armed 分支死代码, 重建全靠 1.2s 兜底→
+     播报前 2s 聋窗+手动模式零音频会话占 _ACTIVE 槽。
+     改: 免提+流式轨在——连接已关→立即重建供能(v1 每轮新建
+     常态, 零聋窗, 不埋点); 连接仍开(半死嫌疑)→arm+看门狗
+     (1.2s 无 ready 重发, 2.5s 仍无→重建+埋点)。手动模式
+     不重建(无采集链, 重建只占槽不供能) */
+  if (S.handfree && stOn) {
     if (stWS && stWS.readyState === 1) {
       try { stWS.send(JSON.stringify({ type: "arm" })); }
-      catch (e) {}
+      catch (e) { /* 连接死由续听重建 */ }
+      clearTimeout(S._armRetry);
       S._armRetry = setTimeout(function () {
-        S._armRetry = null;
-        if (!S.ttsPlaying) { return; }
-        voice83Event("turn_drop", {
-          reason: "arm_rebuild" });
-        streamTeardown(); streamConnect();
-      }, 1300);
+        if (!S.ttsPlaying) { S._armRetry = null; return; }
+        if (stWS && stWS.readyState === 1) {
+          try { stWS.send(JSON.stringify({ type: "arm" })); }
+          catch (e) {}
+          S._armRetry = setTimeout(function () {
+            S._armRetry = null;
+            if (!S.ttsPlaying) { return; }
+            voice83Event("turn_drop", {
+              reason: "arm_rebuild" });
+            streamTeardown(); streamConnect();
+          }, 1300);
+        } else {
+          S._armRetry = null;
+          if (S.ttsPlaying) { streamConnect(); }
+        }
+      }, 1200);
     } else {
-      S._armRetry = null;
-      if (S.ttsPlaying) {
-        voice83Event("turn_drop", { reason: "arm_rebuild" });
-        streamTeardown(); streamConnect();
-      }
+      clearTimeout(S._armRetry); S._armRetry = null;
+      streamTeardown(); streamConnect();
     }
-  }, 1200);
+  }
   var all = String(text);
   /* 78号P1/P3: 情绪语调系数(cogtts speed 叠乘——缓存键
      随 speed 自动分维不串台; mood 空则用户默认语速) */
