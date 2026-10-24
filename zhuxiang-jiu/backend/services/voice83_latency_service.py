@@ -35,7 +35,7 @@ SLA_LABELS = {"tt": "端到端首响", "s2": "后端处理",
 
 # 事件类型白名单(封闭集合)
 EVENT_TYPES = ("wake_hit", "barge_cut", "turn_submit", "turn_drop",
-               "turn_resp")
+               "turn_resp", "js_error")
 TTL_DAYS = 9
 
 TBL_EVENTS = "voice83_events"

@@ -1735,24 +1735,31 @@ function postVoiceTranscript(text, durationSec, skipSelfCheck) {
     setPending(false);
     return;
   }
-  apiFetch("/api/xiaozhu/sessions/" + S.sid + "/voice", {
-    method: "POST",
-    body: JSON.stringify({ textTranscript: wakePrefix(ctxInject(text)), filename: "audio.wav",
-      durationSec: Math.round(durationSec * 10) / 10,
-      streamBytes: stBytes, mode: S.handfree ? undefined : "tap",
-      pageContext: pageCtx(),
-      /* 唤醒标志(21:00:35 实证: 唤醒撞 WS 断连时 member 窗
-         点不亮→真指令 not_woken; 窗开/已唤醒=唤醒后轮次,
-         服务端据此点亮窗, 不依赖 WS 连接健康) */
-      wake: (S.woken || !S.listenClosed) ? 1 : undefined })
-  }).then(function (j) {
-    voice83Event("turn_resp", { ok: (j && j.success !== false) ? 1 : 0,
-      err: (j && j.success === false) ? String(j.error || j.detail || "").slice(0, 40) : "" });  /* v104 */
-    handleVoiceResp(j);
-  }).catch(function (e) {
-    voice83Event("turn_drop", { reason: "post_fail",
-      err: String(e).slice(0, 60) });  /* v104 */
-    setPending(false); removeTyping(); setMicStatus("提交失败"); turnError(e); scheduleHandfree(1200); });
+  /* v108: apiFetch 调用+参数求值(wakePrefix/ctxInject/pageCtx/
+     stBytes)纳入保护——12:14:16 轮 turn_submit 后三防线全静默,
+     唯一路径=此段同步 throw 被 WS 消息处理器吞掉; 异常名上报,
+     一轮定位行号级根因 */
+  try {
+    apiFetch("/api/xiaozhu/sessions/" + S.sid + "/voice", {
+      method: "POST",
+      body: JSON.stringify({ textTranscript: wakePrefix(ctxInject(text)), filename: "audio.wav",
+        durationSec: Math.round(durationSec * 10) / 10,
+        streamBytes: stBytes, mode: S.handfree ? undefined : "tap",
+        pageContext: pageCtx(),
+        wake: (S.woken || !S.listenClosed) ? 1 : undefined })
+    }).then(function (j) {
+      voice83Event("turn_resp", { ok: (j && j.success !== false) ? 1 : 0,
+        err: (j && j.success === false) ? String(j.error || j.detail || "").slice(0, 40) : "" });
+      handleVoiceResp(j);
+    }).catch(function (e) {
+      voice83Event("turn_drop", { reason: "post_fail",
+        err: String(e).slice(0, 60) });
+      setPending(false); removeTyping(); setMicStatus("提交失败"); turnError(e); scheduleHandfree(1200); });
+  } catch (e) {
+    voice83Event("turn_drop", { reason: "api_call_throw",
+      err: String(e && e.message || e).slice(0, 80) });  /* v108 */
+    setPending(false); removeTyping(); scheduleHandfree(1200);
+  }
 }
 /* 语音轮次响应处理(整段轨/流式轨共用) */
 function handleVoiceResp(j) {
@@ -2458,6 +2465,25 @@ function voice83Event(type, meta) {
     }).catch(function () {});
   } catch (e) {}
 }
+/* v108 全局错误网: 任何未捕获异常/未处理 Promise 拒绝实时上报
+   (type=js_error)——三轮"静默死亡"(11:18/12:00/12:14)的异常
+   从此不再被事件处理器吞掉, 行号直达 */
+window.addEventListener("error", function (ev) {
+  try {
+    voice83Event("js_error", {
+      src: "onerror",
+      msg: String(ev.message || "").slice(0, 100),
+      line: (ev.filename || "").split("/").pop() + ":" + ev.lineno });
+  } catch (e) {}
+});
+window.addEventListener("unhandledrejection", function (ev) {
+  try {
+    var r = ev.reason;
+    voice83Event("js_error", {
+      src: "unhandledrejection",
+      msg: String((r && (r.message || r)) || "").slice(0, 100) });
+  } catch (e) {}
+});
 function latReport() {
   var m = S.latMarks || {};
   var seg = function (a, b) {
