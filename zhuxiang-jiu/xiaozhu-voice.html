@@ -1918,10 +1918,37 @@ function handleVoiceResp(j) {
 /* ===== P1 流式识别轨(PCM→WS→百炼实时识别→partial 实时显示) ===== */
 var stWS = null, stOn = true, stAccum = new Float32Array(0),
     stBytes = 0, stPhase = 0, stFinalCb = null, stSent = 0;
+/* ===== v123 播报期上行门控(链路层回声治理) =====
+   根因: AEC 不可开(v23 实证——开 echoCancellation 后 X5 切"通话
+   模式"音频焦点, 全程压制 speechSynthesis 媒体音量→播报无声),
+   播报声经外放直达麦克风; v116 保活流在播报期持续把真实 PCM 送
+   给百炼→服务端把小竹自己的播报(与环境电视声)转写成 partial/
+   final。v122 纯文本层 LCS 拦不住 ASR 乱码(新机 16:54 实证:
+   barge_cut{afterMs:5333} 后紧跟 turn_submit{text:"100毫升。"}
+   ——播报回声被当指令提交并自掐播报)。
+   方案: 播报期(S.ttsPlaying)在送帧口把真实 PCM 替换为等长静音帧。
+   帧节奏(200ms/帧)完全不变→百炼实时时间轴安全(v63 突发推流教训:
+   ready 后瞬间涌入 0.5~1s 帧使收帧速率 N 倍于实时→识别崩);
+   服务端只见静音→不出字→回声与环境音从源头消失。
+   同时本地 rms 门控放行真人插话——"播报中可被真人打断"是用户首要
+   诉求(消息 7/8/11"像听广告, 诱骗听广告"), 不能退化成单向播报。
+   与已退役的 v54 能量版区别: (1)非对称 EMA 自适应基线而非死门限;
+   (2)补齐自掐回退环——开门后探测窗(1.5s)内 partial 被 bargeIsEcho
+   判为回声→重新关门且不停播报(播报无感继续, 不误掐);
+   (3)误开门的后果由 v122 文本层兜住, 最坏退化为 v122 行为不会更差。 */
+var gateMute = false, gateHot = 0, gateNeed = 2, gateEma = 0,
+    gateProbe = 0, gateLook = null, gateMuted = 0,
+    gateOn = false, gateSince = 0;
+function gateReset() {
+  gateMute = false; gateHot = 0; gateNeed = 2; gateEma = 0;
+  gateProbe = 0; gateLook = null; gateMuted = 0;
+  gateOn = false; gateSince = 0;
+}
 function streamConnect() {
   /* 每轮新建(简单可靠); 失败一次本轮+后续自动回退整段上传轨 */
   stAccum = new Float32Array(0); stBytes = 0; stPhase = 0; stSent = 0;
   stFinalCb = null;
+  gateReset(); /* v123 门控随连接生命周期复位 */
   /* 兜底清理上一条未收尾连接(快速开合面板/免提短轮重连时,
      旧 WS 可能仍在 CONNECTING——不清理则旧实例迟到的
      onopen/onclose 与新轮交叉; 竞态根修见下方实例守卫) */
@@ -2004,6 +2031,21 @@ function streamConnect() {
           streamTeardown();
           scheduleHandfree(400);
         });
+      } else if (gateProbe && Date.now() < gateProbe
+                 && bargeIsEcho(m.text, true)) {
+        /* v123 探测窗关门(补齐 v54 能量版缺失的自掐回退环): 开门后
+           1.5s 内首个 partial 即被判回声→说明这次开门是播报声自己
+           顶开的(不是真人插话), 重新关门。
+           关键: 不调 stopTtsNow——播报无感继续, 不会"每播自掐";
+           不重置 gateEma——EMA 已反映真实回声水位, 阈值随之抬高;
+           gateNeed 提到 3 防抖动(需 ~255ms 连续超阈才再开) */
+        gateMute = true; gateHot = 0; gateNeed = 3;
+        gateLook = null; gateProbe = 0;
+        voice83Event("gate_reclose", {
+          text: String(m.text).slice(0, 24),
+          ema: Math.round(gateEma * 10000) / 10000
+        });
+        setMicStatus("🔊 播报中（已屏蔽自身声音）");
       }
     } else if (m.type === "final") {
       var cb = stFinalCb; stFinalCb = null;
@@ -2103,6 +2145,63 @@ function streamFeed(f32) {
   var sq = 0;
   for (var i = 0; i < f32.length; i++) { sq += f32[i] * f32[i]; }
   var rms = Math.sqrt(sq / f32.length);
+  /* --- v123 播报期门控判定(用原始 rms, 增益前=真实声压水位) --- */
+  if (!S.ttsPlaying) {
+    /* 播报结束/未播报: 自动复位(无需在 stopTtsNow/done 挂钩子) */
+    if (gateMuted > 0) {
+      voice83Event("gate_mute", { n: gateMuted }); /* 补发一次, 避免每帧刷屏 */
+    }
+    if (gateOn) { gateReset(); }
+  } else {
+    if (!gateOn) {
+      /* 播报起始即关门, EMA 以现场实证回声水位播种(X5 外放直达
+         rms≈0.15)——若从 0 起算, 阈值 max(0.12,0)=0.12 低于回声水位,
+         头 2 块就开门=门控形同虚设 */
+      gateOn = true; gateMute = true; gateSince = Date.now();
+      gateEma = 0.15; gateHot = 0; gateLook = null; gateMuted = 0;
+    }
+    /* 非对称 EMA: 关门期涨 0.12(~8 块/680ms 收敛到真实回声水位→阈值
+       随之抬高, 音量调大也不会持续误开门), 开门期涨慢(0.06);
+       跌快(0.20)使句间停顿快速回落→阈值下降, 停顿处插话更易放行。
+       关门期上升系数不能更大: 0.25 时阈值会"跑赢"持续人声(0.22 的
+       插话第 2 块就被抬到 0.226 之上→永远开不了门) */
+    var _gUp = gateMute ? 0.12 : 0.06;
+    if (rms > gateEma) { gateEma = gateEma * (1 - _gUp) + rms * _gUp; }
+    else { gateEma = gateEma * 0.80 + rms * 0.20; }
+    /* 阈值 max(0.12, EMA×1.35)——刻意偏低: 用户第一诉求是"播报能被
+       打断"(消息 7/8/11"像听广告"), 阈值过高=完全打断不了; 误开门
+       的后果由 v122 文本层 + 下方探测窗关门兜住(不会误掐播报) */
+    var gThr = Math.max(0.12, gateEma * 1.35);
+    if (gateMute) {
+      if (rms > gThr) { gateHot++; } else if (gateHot > 0) { gateHot--; }
+      /* 播报起始 700ms 暖机不评判开门: 覆盖播报首块脉冲/媒体音量爬升,
+         并让 EMA 有 ~8 块收敛到真实回声水位(否则大音量播报会在收敛
+         途中顶开门); 之后连续 gateNeed 个采集块(4096@48k≈85ms/块)
+         超阈才开门 */
+      if (gateHot >= gateNeed && Date.now() - gateSince > 700) {
+        gateMute = false; gateHot = 0;
+        gateProbe = Date.now() + 1500; /* 探测窗: 1.5s 内验明是否回声 */
+        voice83Event("gate_open", {
+          rms: Math.round(rms * 10000) / 10000,
+          thr: Math.round(gThr * 10000) / 10000,
+          ema: Math.round(gateEma * 10000) / 10000,
+          at: Date.now() - gateSince
+        });
+        /* 1 帧回溯: 把上一个被静音的 3200 样本帧前置拼接进 stAccum——
+           句首丢失从 ~200ms+ 降到接近 0; 仅产生 1 帧追赶(12.8KB/tick),
+           不构成 v63 式突发推流 */
+        if (gateLook) {
+          var _pre = new Float32Array(gateLook.length + stAccum.length);
+          _pre.set(gateLook); _pre.set(stAccum, gateLook.length);
+          stAccum = _pre; gateLook = null;
+        }
+      }
+    } else {
+      /* 开门后保持开启直到播报结束或探测窗判回声关门——中途重关会
+         截断真人整句(barge-in 是首要诉求, 不能因保守而废) */
+      gateHot = 0;
+    }
+  }
   if (rms > 0.004) {
     var want = 0.10 / rms;
     if (want > (S.gain || 1)) {
@@ -2136,13 +2235,24 @@ function streamFeed(f32) {
   stBytes += out.length * 2;
   /* 3200 样本 = 200ms@16k(6.4KB/帧——百炼 ≤16KB 约束内) */
   while (stAccum.length >= 3200) {
+    var seg = stAccum.subarray(0, 3200);
+    stAccum = stAccum.slice(3200);
+    if (gateMute) {
+      /* v123 播报期关门: 上行等长静音帧(帧长/节奏不变→百炼时间轴
+         安全), 真实 PCM 只留 1 帧作开门回溯; 服务端收静音不出字
+         →播报回声与环境音不再被转写成 partial/final */
+      gateLook = new Float32Array(seg);
+      gateMuted++;
+      try { stWS.send(new Int16Array(3200).buffer); stSent++; }
+      catch (e) { return; }
+      continue;
+    }
     var i16 = new Int16Array(3200);
     for (var k = 0; k < 3200; k++) {
-      var s = Math.max(-1, Math.min(1, stAccum[k]));
+      var s = Math.max(-1, Math.min(1, seg[k]));
       i16[k] = s < 0 ? s * 32768 : s * 32767;
     }
     try { stWS.send(i16.buffer); stSent++; } catch (e) { return; }
-    stAccum = stAccum.slice(3200);
   }
 }
 /* cloudStop 流式优先收尾: finish→final→直接提交文本;
