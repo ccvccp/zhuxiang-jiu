@@ -1586,9 +1586,12 @@ function sendText(text) {
   appendUser(text, "text");
   setPending(true);
   showTyping();
+  voice83Event("turn_submit", { sid: S.sid, track: "text",
+    text: String(text).slice(0, 40) });  /* v104 */
   apiFetch("/api/xiaozhu/sessions/" + S.sid + "/text", {
     method: "POST", body: JSON.stringify({ text: wakePrefix(ctxInject(text)), pageContext: pageCtx() })
   }).then(function (j) {
+    voice83Event("turn_resp", { ok: (j && j.success !== false) ? 1 : 0, track: "text" });  /* v104 */
     setPending(false); removeTyping();
     if (!j || j.success === false) { appendBot((j && (j.error || j.detail)) || "指令失败", null, null, "__err__"); return; }
     handleTurn(j, "text");
@@ -1618,6 +1621,9 @@ function postVoiceTranscript(text, durationSec, skipSelfCheck) {
      窗口内免提轮持续丢弃(不清窗), 窗口过后自然放行 */
   if (S.handfree && S.wakeGrace) {
     if (Date.now() < S.wakeGrace) {
+      voice83Event("turn_drop", { reason: "wake_grace",
+        ms_left: Math.max(0, S.wakeGrace - Date.now()),
+        text: String(text).slice(0, 40) });  /* v104 决策埋点 */
       scheduleHandfree(400); return;
     }
     S.wakeGrace = 0;
@@ -1642,6 +1648,9 @@ function postVoiceTranscript(text, durationSec, skipSelfCheck) {
       for (var i = 0; i < S.selfUtter.length; i++) {
         if (S.selfUtterAt && _now - (S.selfUtterAt[i] || 0) > 12000) { continue; }
         if (_nz(S.selfUtter[i]).indexOf(_t2) !== -1) {
+          voice83Event("turn_drop", { reason: "self_utter",
+            text: String(text).slice(0, 40),
+            matched: String(S.selfUtter[i]).slice(0, 20) });  /* v104 */
           scheduleHandfree(400); return;
         }
       }
@@ -1658,6 +1667,9 @@ function postVoiceTranscript(text, durationSec, skipSelfCheck) {
   }
   /* v3 延迟埋点: 提交时刻 */
   if (S.latMarks) S.latMarks.submit = Date.now();
+  voice83Event("turn_submit", { sid: S.sid,
+    text: String(text).slice(0, 40),
+    stripped: (_stripped && _stripped !== text) ? 1 : 0 });  /* v104 */
   setPending(true);
   playChime(); /* 78号P1: 思考微音效(流式轨同链) */
   showTyping();
@@ -1671,7 +1683,14 @@ function postVoiceTranscript(text, durationSec, skipSelfCheck) {
          点不亮→真指令 not_woken; 窗开/已唤醒=唤醒后轮次,
          服务端据此点亮窗, 不依赖 WS 连接健康) */
       wake: (S.woken || !S.listenClosed) ? 1 : undefined })
-  }).then(handleVoiceResp).catch(function (e) { setPending(false); removeTyping(); setMicStatus("提交失败"); turnError(e); scheduleHandfree(1200); });
+  }).then(function (j) {
+    voice83Event("turn_resp", { ok: (j && j.success !== false) ? 1 : 0,
+      err: (j && j.success === false) ? String(j.error || j.detail || "").slice(0, 40) : "" });  /* v104 */
+    handleVoiceResp(j);
+  }).catch(function (e) {
+    voice83Event("turn_drop", { reason: "post_fail",
+      err: String(e).slice(0, 60) });  /* v104 */
+    setPending(false); removeTyping(); setMicStatus("提交失败"); turnError(e); scheduleHandfree(1200); });
 }
 /* 语音轮次响应处理(整段轨/流式轨共用) */
 function handleVoiceResp(j) {
