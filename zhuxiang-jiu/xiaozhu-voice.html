@@ -2055,6 +2055,18 @@ function streamConnect() {
         }
       }
       if (cb) cb(m.text || "");
+    } else if (m.type === "ready") {
+      /* v120 供能确认: 服务端 arm 应答 ready=识别通道就绪,
+       重试计时器可撤(见 speakCloud arm 自愈) */
+      clearTimeout(S._armRetry); S._armRetry = null;
+    } else if (m.type === "armed") {
+      /* v120 预热就绪自动 arm: 连接(重)建后服务端回 armed,
+       若正处播报期(供能窗口)立即 arm——重建连接后供能即时
+       恢复, 不等下一次 speakCloud */
+      if (S.ttsPlaying && stWS === ws) {
+        try { ws.send(JSON.stringify({ type: "arm" })); }
+        catch (e) { /* onclose 兜底 */ }
+      }
     } else if (m.type === "error") {
       stOn = false; streamTeardown();
       if (m.fallback === "upload" && stFinalCb) {
@@ -2941,6 +2953,32 @@ function speakCloud(text, bubbleEl, mood) {
     try { stWS.send(JSON.stringify({ type: "arm" })); }
     catch (e) { /* 连接死由续听重建 */ }
   }
+  /* v120 arm 供能自愈(16:06:44 实证: 指令轮提交后服务端
+     零 ws_asr 事件——arm 静默丢失/X5 send 半死, 播报期识别
+     断供=打断失灵): 1.2s 无 ready 应答重发 arm; 2.5s 仍无
+     → 重建连接(auth→armed→自动 arm, 麦克风帧 v116 保活
+     自动喂新连接); ready 到达即撤计时器 */
+  clearTimeout(S._armRetry);
+  S._armRetry = setTimeout(function () {
+    if (!S.ttsPlaying) { S._armRetry = null; return; }
+    if (stWS && stWS.readyState === 1) {
+      try { stWS.send(JSON.stringify({ type: "arm" })); }
+      catch (e) {}
+      S._armRetry = setTimeout(function () {
+        S._armRetry = null;
+        if (!S.ttsPlaying) { return; }
+        voice83Event("turn_drop", {
+          reason: "arm_rebuild" });
+        streamTeardown(); streamConnect();
+      }, 1300);
+    } else {
+      S._armRetry = null;
+      if (S.ttsPlaying) {
+        voice83Event("turn_drop", { reason: "arm_rebuild" });
+        streamTeardown(); streamConnect();
+      }
+    }
+  }, 1200);
   var all = String(text);
   /* 78号P1/P3: 情绪语调系数(cogtts speed 叠乘——缓存键
      随 speed 自动分维不串台; mood 空则用户默认语速) */
