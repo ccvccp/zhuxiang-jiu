@@ -36,11 +36,12 @@ async def voice83_latency_sla(
 
 @router.post("/events")
 async def voice83_events_report(
-        payload: dict = None,
-        x_member_id: str | None = Header(
-            None, alias="X-Member-Id")):
-    """事件上报(面板 fire-and-forget: wake_hit/barge_cut)"""
-    _require_member(x_member_id)
+        payload: dict = None):
+    """事件上报(面板 fire-and-forget: wake_hit/barge_cut)
+
+    v117 匿名放行: 前端埋点已匿名(v115), 故障期 token 过期恰
+    最需要观测数据; 事件类型白名单+TTL 由服务层自限, 前置
+    security_gateway 威胁闸兜底恶意刷量"""
     p = payload or {}
     if not p.get("type"):
         raise HTTPException(status_code=422, detail="type 必填")
