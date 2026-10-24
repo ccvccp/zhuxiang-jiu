@@ -979,6 +979,10 @@ function renderCard(card) {
     return "";
   }
   if (t === "confirm") {
+    /* v119 高敏期白名单置位(用户设计"打断白名单": 支付确认
+       期间屏蔽普通语音打断): 确认卡在屏期间语音/文本只放行
+       取消词, 防插话吞掉待确认订单 */
+    S.cfPending = 1;
     /* v115 一键确认: 真机两轮实证(13:58/14:38 发卡后零提交,
        输入框从未被碰)——码本就显示在屏幕上让用户照抄无安全
        增益, "证明看到屏幕"一个大按钮即够; 语音念码不算红线
@@ -1731,6 +1735,8 @@ function sendText(text) {
       text: String(text).slice(0, 20) });
     showToast("会话未开启"); return;
   }
+  /* v119 高敏期白名单: 确认卡在屏时文本只放行取消(见 cfGate) */
+  if (cfGate(text)) { return; }
   appendUser(text, "text");
   setPending(true);
   showTyping();
@@ -1764,6 +1770,8 @@ function sendVoice(b64, durationSec) {
 /* P1 流式轨提交: 转写已在流式会话完成(说完了就出字),
    只 POST 最终文本+流式统计——跳过重复转写与音频上传 */
 function postVoiceTranscript(text, durationSec, skipSelfCheck) {
+  /* v119 高敏期白名单: 确认卡在屏时语音只放行取消(见 cfGate) */
+  if (cfGate(text)) { return; }
   /* 唤醒尾音静默窗: 开面板瞬间免提把唤醒词尾音录成一轮
      (06:59 实证); 应答「我在，请吩咐」外放回环同理——
      窗口内免提轮持续丢弃(不清窗), 窗口过后自然放行 */
@@ -2354,17 +2362,47 @@ function doConfirm(btn) {
     if (!j || j.success === false) {
       voice83Event("turn_drop", { reason: "cf_resp_fail",
         err: String((j && (j.error || j.detail)) || "").slice(0, 60) });
+      S.cfPending = 0;  /* v119: 白名单解除(过期/码错重新发起) */
       box.querySelectorAll("input,button").forEach(function (el) { el.disabled = false; });
       appendBot("⚠️ 确认未通过：" + ((j && (j.error || j.detail)) || "码错或已过期"), null, null, "__err__");
       return;
     }
+    S.cfPending = 0;  /* v119: 核销完成白名单解除 */
     appendUser("确认码 " + code, "text");
     handleTurn(j, "text");
   }).catch(function (e) {
     voice83Event("turn_drop", { reason: "cf_post_fail",
       err: String(e).slice(0, 60) });
+    S.cfPending = 0;
     removeTyping(); turnError(e);
   });
+}
+/* v119 高敏期白名单闸(语音/文本统一入口): 确认卡在屏期间只
+   放行取消词——普通插话不吞待确认订单(用户设计"支付确认
+   期间屏蔽普通语音打断"); 取消=隐藏卡+清标志(服务端令牌
+   300s 自然过期, 零成本); 返回 true=已拦截(调用方 return) */
+function cfGate(text) {
+  if (!S.cfPending) { return false; }
+  var t = String(text || "").trim();
+  if (/^(取消|不要了|不买了|算了|不买|别买了|先不)/.test(t)) {
+    S.cfPending = 0;
+    try {
+      document.querySelectorAll(".confirmbox").forEach(function (el) {
+        el.style.display = "none";
+      });
+    } catch (e) {}
+    if (S.ttsPlaying || S.ttsAbort) { stopTtsNow(); }
+    appendBot("已取消本次结算——需要时再说「结算」", null, null, null);
+    voice83Event("turn_drop", { reason: "cf_cancelled",
+      text: t.slice(0, 20) });
+    scheduleHandfree(400);
+    return true;
+  }
+  appendBot("💰 结算确认等待中——请点屏幕「✅ 确认执行」按钮完成支付，或说「取消」", null, null, null);
+  voice83Event("turn_drop", { reason: "cf_gated",
+    text: t.slice(0, 20) });
+  scheduleHandfree(600);
+  return true;
 }
 
 /* ===== 语音播报 TTS 双轨 =====
@@ -3598,10 +3636,20 @@ function wireCloudCapture() {
             return;
           }
           var thr = (now - vadOpenAt < 1500) ? 0.055 : 0.035;
+          /* v119 嘈杂自适应尾静音(状态机 LISTENING 阶段鲁棒性):
+             非语音段慢速跟踪环境底噪(S.noiseFloor EMA), 底噪高
+             (商场/电视/旁人对话 rms>0.02)时尾静音 1200→~1920ms
+             ——嘈杂环境人声间隙被底噪填满, 短尾静音把一句话
+             切成碎片轮(老机 14:43 直播声实证逐句碎片); 安静
+             环境保持 1200ms 基线不增延迟 */
           if (rms > thr) {
             S.vadSpoke = true; vadSilentAt = 0;
-          } else if (S.vadSpoke && !vadSilentAt) {
-            vadSilentAt = now;
+          } else {
+            S.noiseFloor = (S.noiseFloor || 0.012) * 0.97
+              + Math.min(rms, 0.2) * 0.03;
+            if (S.vadSpoke && !vadSilentAt) {
+              vadSilentAt = now;
+            }
           }
           /* v3 语义感知尾点: 静音 600ms 后查最新 partial 尾字
              ——疑问语气词(吗/呢/吧/?)是明确完句信号, 提前断
@@ -3611,7 +3659,11 @@ function wireCloudCapture() {
           if (S.vadSpoke && vadSilentAt) {
             var endsAsk = /[吗呢吧？?]$/.test(
               String(S.streamPartial || "").trim());
-            if (now - vadSilentAt > (endsAsk ? 600 : (S.vadSilenceMs || 1200))) {
+            var _tail = S.vadSilenceMs || 1200;
+            if ((S.noiseFloor || 0.012) > 0.02) {
+              _tail = Math.round(_tail * 1.6);
+            }
+            if (now - vadSilentAt > (endsAsk ? 600 : _tail)) {
               cloudStop();
               return;
             }
