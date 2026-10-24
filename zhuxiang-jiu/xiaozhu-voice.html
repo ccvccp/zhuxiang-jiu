@@ -1688,6 +1688,12 @@ function postVoiceTranscript(text, durationSec, skipSelfCheck) {
   voice83Event("turn_submit", { sid: S.sid,
     text: String(text).slice(0, 40),
     stripped: (_stripped && _stripped !== text) ? 1 : 0 });  /* v104 */
+  /* v106 提交错峰(11:43 实证: 播报期 TTS 音频块下载与轮次
+     POST 并发, X5 连接池饿死轮次请求——12s abort 重试才活,
+     首声延迟体感"网络慢了半拍"): 用户已说完话, 播报无意义,
+     提交前停播(abort 在途音频下载+停 WebAudio)——轮次 POST
+     独享通道, 提交即达; 回复回来 speakCloud 正常接力 */
+  if (S.ttsPlaying || S.ttsAbort) { stopTtsNow(); }
   setPending(true);
   playChime(); /* 78号P1: 思考微音效(流式轨同链) */
   showTyping();
