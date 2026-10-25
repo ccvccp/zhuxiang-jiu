@@ -226,8 +226,11 @@ async def main():
            and _parts[1].rstrip()
            == "我为您推荐竹奕·竹香经典",
            f"parts={[p[:14] for p in _parts]}")
+    # fixture 镜像生产加购轮 reply(逐字一致才有覆盖意义);
+    # v128 尾串去推销追问「还要吗？」→ 中性能力告知(换款/下单)
     _cart = ("已加「竹奕·竹香便携 42° 250ml」×1，¥88，"
-             "清单1件（竹香便携×1）。还要吗？或说「结算」")
+             "清单1件（竹香便携×1）。"
+             "想换说「换一款」，要下单说「结算」")
     _cart_parts = jv.split_speech(_cart)
     record("加购轮: 42° 250ml 数字段完整",
            _cart_parts[0].rstrip()

@@ -3310,9 +3310,15 @@ class XiaozhuService:
         except (TypeError, ValueError):
             total_s = f"¥{price}×{qty}"
         return {
+            # v128 去推销腔: 尾串「还要吗？或说「结算」」是店员式
+            # 追问(用户实测判为"像机器宣传产品"), 改为中性能力告知
+            # ——把下一步决定权交回用户(换款/下单两条出路), 不催单。
+            # ⚠️ 改此处必须同步改 _exec_product_new 的 preheat[0]
+            # (逐字一致才是 TTS 缓存命中前提)与 test_xiaozhu_joyvoice
+            # 第 12 节 fixture。
             "reply": f"已加「{name}」×{qty}，{total_s}，"
                      f"清单{count}件（{detail}）。"
-                     "还要吗？或说「结算」",
+                     "想换说「换一款」，要下单说「结算」",
             "card": {"type": "cart_added",
                      "subject": name, "productId": pid,
                      "price": price, "quantity": qty,
@@ -3372,7 +3378,7 @@ class XiaozhuService:
         return {
             "reply": f"好的，「{name}」已改为 {qty} 件，"
                      f"清单{count}件（{detail}）。"
-                     "还要吗？或说「结算」",
+                     "想换说「换一款」，要下单说「结算」",
             "card": {"type": "cart_setqty",
                      "subject": name, "productId": pid,
                      "price": price, "quantity": qty,
@@ -3460,12 +3466,12 @@ class XiaozhuService:
             reply = (f"好的，「{name}」已从清单去掉，"
                      f"清单{count}件"
                      + (f"（{detail}）" if detail else "为空")
-                     + "。还想看看别的吗？")
+                     + "。想换别的说「换一款」")
         else:
             reply = (f"好的，「{name}」减了 {n} 件，"
                      f"还剩 {new} 件，"
                      f"清单{count}件（{detail}）。"
-                     "还要吗？或说「结算」")
+                     "想换说「换一款」，要下单说「结算」")
         return {
             "reply": reply,
             "card": {"type": "cart_setqty",
@@ -4405,7 +4411,7 @@ class XiaozhuService:
                 preheat.append(
                     f"已加「{name}」×1，¥{total_s}，"
                     f"清单{pcount}件（{pdetail}）。"
-                    f"还要吗？或说「结算」")
+                    f"想换说「换一款」，要下单说「结算」")
                 nxt = (cards[(cursor + 1) % len(cards)]
                        if len(cards) > 1 else first)
                 try:

@@ -655,6 +655,10 @@ var S = { sid: null, turnCount: 0, woken: false, pending: false,
              ctl 为本轮身份——旧轮回调一律身份比对作废 */
           ttsCtl: null, ttsChunks: null, ttsNextIdx: 0,
           ttsCur: null, ttsGapSrc: null,
+          /* v127 块间静默探测窗起点戳(0=无窗)。pumpTts/playNext 在块间
+             置戳并延迟 BARGE_GAP_MS 接力, streamFeed 在窗内用绝对门限
+             检真人插话, stopTtsNow/gateReset 清戳 */
+          ttsProbeAt: 0,
           streamPartial: "", latMarks: null };
 
 /* ===== 主流程 ===== */
@@ -1795,14 +1799,14 @@ function postVoiceTranscript(text, durationSec, skipSelfCheck) {
      skipSelfCheck: 双轨 barge-in v2 切断路径专用——
      bargeIsEcho 已含更强判定(无长度上限+selfUtter 全遍
      历), 二次检测会误静默 ≤10 字短新指令("换一款") */
-  if (!skipSelfCheck && S.handfree && text && S.selfUtter) {
+  if (!skipSelfCheck && S.handfree && text) {
     var _nz = function (s) {
       return String(s).replace(/[，。？！、,.?! ]/g, "");
     };
     var _t2 = _nz(text);
     if (String(text).length <= 10) {
       var _now = Date.now();
-      for (var i = 0; i < S.selfUtter.length; i++) {
+      for (var i = 0; i < (S.selfUtter || []).length; i++) {
         if (S.selfUtterAt && _now - (S.selfUtterAt[i] || 0) > 12000) { continue; }
         if (_nz(S.selfUtter[i]).indexOf(_t2) !== -1) {
           voice83Event("turn_drop", { reason: "self_utter",
@@ -1811,6 +1815,24 @@ function postVoiceTranscript(text, durationSec, skipSelfCheck) {
           scheduleHandfree(400); return;
         }
       }
+    } else if (bargeIsEcho(text, false)) {
+      /* v128 长回声防线(双机实测「播报一直自己在播报」真凶):
+         上方子串防线只管 ≤10 字, 而整句播报被外放收回后 ASR
+         转写普遍 >10 字(「已加竹奕竹香便携42度250ml…」)→
+         防线不覆盖→直接提交→后端 LLM 判出意图→新一轮播报
+         →再被收回, 自问自答闭环。v124 只在门控层补了尾音窗,
+         文本层长回声一直无防(19:51-19:53 turn_submit
+         "打开商品列表/去结算/结算" 即此路径)。
+         这里复用 bargeIsEcho(数字归一 + 双向子串 + LCS≥0.75
+         + 参照 lastSpoken/ttsSpokenAll/selfUtter 20s 窗):
+         它是逐句判定——任一完整句不是小竹说过的话立即
+         return false 放行, 故"换一款/加入购物车/有没有度数
+         低一点的"等真指令零误杀; 阈值取非播报期严档 0.75。
+         拦在提交前=不进会话不留气泡不耗一轮 LLM。 */
+      voice83Event("turn_drop", { reason: "self_utter_long",
+        text: String(text).slice(0, 40),
+        len: String(text).length });
+      scheduleHandfree(400); return;
     }
   }
   /* 应答前缀剥离(13:11/13:17/13:18 三实证混合段): 唤醒应答
@@ -2021,10 +2043,40 @@ var GATE_TAIL_MS = 1200; /* 与 scheduleHandfree(1200)"回声尾音衰减"对齐
    gapFloor 标定), 连续 3 块(4096@48k≈85ms/块 ≈255ms, 足以排除单块
    采样错位导致的伪间隙), 绝对门限 0.04(≈真人语音 rms 下沿) */
 var BARGE_WARMUP_MS = 900, BARGE_NEED = 3, BARGE_MIC_ABS = 0.04;
+/* ===== v127 主动静默探测窗(物理级 barge-in) =====
+   四重死结定性(v123~v126 连败四轮的根因):
+   ① AEC 不可开(v23 铁律: X5 切"通话模式"音频焦点→全程压制媒体
+      音量→播报无声), 故麦克必然收到外放回声;
+   ② 本文件 line 1999 自证: 真人语音原始 rms 仅 0.01~0.08, 而回声
+      实测 0.15~0.30(21:29:44 gate_open rms=0.2992)——人声比回声弱
+      4~30 倍, 任何"能量比较"判据都必然二选一(阈值高→打不断, 阈值
+      低→回声自开门);
+   ③ 降级路 EMA 以 0.15 播种 → gThr = max(0.12, 0.15×1.35) = 0.2025,
+      已落在人声不可达区间 → gateHot 永不累积 → 门永不开。这正是用户
+      双机实测"播报时完全听不到新指令"的直接根因;
+   ④ v125 主路依赖 ttsTap 参考探针, speechSynthesis 回退 / ctx 身份
+      不一致时 gateNoRef=true 强制降级 → 又落回 ③ 的死结。
+   v127 换判据: 不"猜"间隙, 而是**自己制造间隙**——分块播放时在块与
+   块之间插入固定长度静默窗, 窗内我方物理上不出声, 麦克收到的任何
+   能量都只可能是环境声或真人。绝对门限因此可靠, 且**完全不依赖 ref
+   tap**, 主路(gateMode 1)与降级路(gateMode 2)同时生效。
+   附带收益: 块间停顿让播报有自然换气节奏, 直接治用户抱怨的"像机器
+   宣传产品、一直自己在播报"。 */
+var BARGE_GAP_MS = 500,    /* 块间静默窗总长(含 lead) */
+    BARGE_GAP_LEAD = 200,  /* 窗前段跳过: 播放管线冲刷 + 混响主衰减 */
+    BARGE_GAP_ABS = 0.016, /* 窗内绝对门限(真麦底噪 ≥0.002, 人声 0.01~) */
+    BARGE_GAP_NEED = 2;    /* 窗内连续超门限块数(≈170ms, 排除瞬时噪声) */
+var gateGapHit = 0,     /* 探测窗内连续超门限块计数 */
+    gateGapWins = 0,    /* 本轮播报已开过的探测窗数(埋点) */
+    gateGapHitMax = 0;  /* 探测窗内观测到的最大 mic rms(标定 BARGE_GAP_ABS 用) */
 function gateInTail() {
   return gateEndedAt !== 0 && Date.now() - gateEndedAt < GATE_TAIL_MS;
 }
 function gateReset() {
+  /* v127: 探测窗戳与窗内计数必须随门控一起清, 否则陈旧戳会让下一轮
+     播报的播放中被误判成"静默窗"→ 回声顶开门(假打断) */
+  S.ttsProbeAt = 0;
+  gateGapHit = 0; gateGapWins = 0; gateGapHitMax = 0;
   gateMute = false; gateHot = 0; gateNeed = 2; gateEma = 0;
   gateProbe = 0; gateLook = null; gateMuted = 0;
   gateOn = false; gateSince = 0;
@@ -2040,7 +2092,11 @@ function gateStat() {
   return {
     n: gateMuted, mode: gateMode, noRef: gateNoRef ? 1 : 0,
     mic: _r(gateMicMax), ref: _r(gateRMax), peak: _r(gateRefPeak),
-    gap: _r(gateGapMax), floor: _r(gateGapFloor)
+    gap: _r(gateGapMax), floor: _r(gateGapFloor),
+    /* v127: wins=本轮开过的探测窗数, gmic=窗内最大 mic rms
+       (标定 BARGE_GAP_ABS 的唯一依据; 若 gmic 远高却零 barge_gap
+       → lead 太短混响未衰 / NEED 太高) */
+    wins: gateGapWins, gmic: _r(gateGapHitMax)
   };
 }
 function gateMuting() {
@@ -2049,6 +2105,14 @@ function gateMuting() {
      gateMute 不更新, 此时按"播报中/尾音窗内"保守屏蔽——否则回退
      整段 WAV 轨会把回声原样上传(根因 B)。barge 命中后 stopTtsNow
      已清 S.ttsPlaying/gateEndedAt, 本函数随之放行。 */
+  /* v127 探测窗内放行: 窗内我方物理静默(≤300ms 有界), 麦克收到的只可能是
+     环境声或真人 → 让回退整段 WAV 轨也捕获到用户句首(流轨另有 400ms
+     gateLook 回溯, 两轨都零丢字)。窗口有界且窗末必恢复 gateMute, 不存在
+     v123 式"开门后回声长漏"风险 */
+  if (S.ttsProbeAt) {
+    var _pw2 = Date.now() - S.ttsProbeAt;
+    if (_pw2 >= BARGE_GAP_LEAD && _pw2 < BARGE_GAP_MS) return false;
+  }
   if (stWS && stWS.readyState === 1) return gateMute;
   return !!(S.ttsPlaying || gateInTail());
 }
@@ -2359,7 +2423,46 @@ function streamFeed(f32) {
         && Date.now() - gateSince > BARGE_WARMUP_MS) {
       gateNoRef = true;
     }
-    if (!gateNoRef && _ref >= 0) {
+    /* ---------- v127 探测窗判定(优先级高于 v125 主路与降级路) ----------
+       窗内我方物理静默 → 无回声 → 绝对门限可靠, 且不依赖 ref tap,
+       故 gateNoRef=true(桌面 speechSynthesis / tap 空接)时依然生效,
+       一举解开死结 ②③④。判定成功后与 v125 主路完全同款收尾
+       (stopTtsNow → streamArm → 开门 → 400ms 回溯拼进 stAccum)。 */
+    var _pw = S.ttsProbeAt ? Date.now() - S.ttsProbeAt : -1;
+    if (_pw >= BARGE_GAP_LEAD && _pw < BARGE_GAP_MS && gateMute) {
+      gateMode = 3;
+      if (rms > gateGapHitMax) gateGapHitMax = rms;
+      if (rms > BARGE_GAP_ABS) { gateGapHit++; } else { gateGapHit = 0; }
+      if (gateGapHit >= BARGE_GAP_NEED) {
+        gateGapHit = 0;
+        voice83Event("barge_gap", {
+          mic: Math.round(rms * 10000) / 10000,
+          peak: Math.round(gateGapHitMax * 10000) / 10000,
+          ref: _ref >= 0 ? Math.round(_ref * 10000) / 10000 : -1,
+          noRef: gateNoRef ? 1 : 0,
+          win: gateGapWins,
+          at: _pw
+        });
+        S.ttsProbeAt = 0;
+        stopTtsNow();
+        streamArm();
+        gateMute = false; gateHot = 0; gateProbe = 0;
+        gateWasPlaying = false; gateEndedAt = 0;
+        setMicStatus("🎙 已暂停播报——请讲");
+        /* 400ms 回溯: lead 200ms + 检测延迟 ~170ms = 370ms < 400ms,
+           句首完整覆盖(用户可能在窗起点即开口) */
+        var _w0 = gateLook2, _w1 = gateLook;
+        gateLook = null; gateLook2 = null;
+        var _x0 = _w0 ? _w0.length : 0, _x1 = _w1 ? _w1.length : 0;
+        if (_x0 + _x1 > 0) {
+          var _wpre = new Float32Array(_x0 + _x1 + stAccum.length);
+          if (_w0) _wpre.set(_w0);
+          if (_w1) _wpre.set(_w1, _x0);
+          _wpre.set(stAccum, _x0 + _x1);
+          stAccum = _wpre;
+        }
+      }
+    } else if (!gateNoRef && _ref >= 0) {
       /* ========== v125 主路: TTS 静音间隙里的真人插话检测 ========== */
       gateMode = 1;
       if (gateMute) {
@@ -2958,6 +3061,7 @@ function stopTtsNow() {
   } catch (e) {}
   S.ttsGapSrc = null;
   S.ttsChunks = null; S.ttsCtl = null; S.ttsNextIdx = 0;
+  S.ttsProbeAt = 0;  /* v127: 清探测窗戳(残留戳会让下一轮播放中被误判静默窗) */
   if (window.speechSynthesis) {
     try { window.speechSynthesis.cancel(); } catch (e) {}
   }
@@ -3122,6 +3226,10 @@ function ttsEnqueue(decoded, idx, finalDone, ctl) {
 function pumpTts(ctl) {
   try {
     if (S.ttsAbort !== ctl || !S.ttsChunks || S.ttsCur) return;
+    /* v127 探测窗内禁止起播: 窗必须"真静默"。ttsEnqueue 在新块到达时
+       会直接调 pumpTts, 若不拦会在窗内提前出声 → 回声被绝对门限当成
+       真人 → 假打断(窗形同虚设) */
+    if (S.ttsProbeAt) return;
     var item = S.ttsChunks[S.ttsNextIdx];
     /* 失败块连跳(某句合成失败对话继续) */
     while (item && !item.d) {
@@ -3155,8 +3263,19 @@ function pumpTts(ctl) {
       S.ttsCur = null;
       delete S.ttsChunks[S.ttsNextIdx];
       S.ttsNextIdx++;
-      if (item.done) { S.ttsChunks = null; item.done(); }
-      else pumpTts(ctl);
+      if (item.done) { S.ttsChunks = null; item.done(); return; }
+      /* v127 块间静默探测窗: 首块→次块不留窗(保快起播, 用户先听到
+         回应), 之后每块接力前留 BARGE_GAP_MS 物理静默供打断检测。
+         末块走 item.done() 不留窗(播报结束由尾音窗 + scheduleHandfree
+         接管) */
+      if (S.ttsNextIdx <= 1) { pumpTts(ctl); return; }
+      var _st = Date.now();
+      S.ttsProbeAt = _st;
+      gateGapWins++;
+      setTimeout(function () {
+        if (S.ttsProbeAt === _st) { S.ttsProbeAt = 0; }
+        pumpTts(ctl);
+      }, BARGE_GAP_MS);
     };
     src.onerror = src.onended;
     src.start();
@@ -3261,7 +3380,7 @@ function streamFirstChunk(ctl, ctx, text, mood,
   var h = { "X-Member-Id": String(auth.uid || "") };
   if (auth.token) h["Authorization"] = "Bearer " + auth.token;
   var firstPlayed = false, streamDone = false;
-  var sq = [], playing = false;
+  var sq = [], playing = false, pieceN = 0;  /* v127 已起播片数 */
   var dec = new TextDecoder("utf-8");
   var buf = "";
   function takeOver() {
@@ -3272,6 +3391,7 @@ function streamFirstChunk(ctl, ctx, text, mood,
     if (S.ttsAbort !== ctl) return;
     if (!sq.length) { playing = false; return; }
     playing = true;
+    pieceN++;
     var b = sq.shift();
     var src = ctx.createBufferSource();
     src.buffer = b;
@@ -3290,7 +3410,25 @@ function streamFirstChunk(ctl, ctx, text, mood,
     }
     src.onended = function () {
       if (S.ttsCur !== src) return;
-      if (sq.length) { playNext(); return; }
+      if (sq.length) {
+        if (pieceN < 2) { playNext(); return; }  /* 首片不留窗保快起播 */
+        /* v127 流式片间静默探测窗。playing 保持 true → onPiece 的
+           `if (!playing) playNext()` 与 finishStream 的 `if (playing)
+           return` 都不会在窗内抢播; S.ttsCur 置 null 让状态干净,
+           起播防护交给 pumpTts/playNext 的 S.ttsProbeAt 判断 */
+        S.ttsCur = null;
+        var _st2 = Date.now();
+        S.ttsProbeAt = _st2;
+        gateGapWins++;
+        setTimeout(function () {
+          if (S.ttsProbeAt === _st2) { S.ttsProbeAt = 0; }
+          if (S.ttsAbort !== ctl || S.ttsCur) return;  /* 已被接管/已停 */
+          if (sq.length) { playNext(); return; }
+          playing = false;
+          if (streamDone) takeOver();
+        }, BARGE_GAP_MS);
+        return;
+      }
       playing = false;
       if (streamDone) takeOver();
       /* 流未完: S.ttsCur 保留占位, 下一片 push 唤醒 */

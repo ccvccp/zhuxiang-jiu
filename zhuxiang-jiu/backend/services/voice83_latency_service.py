@@ -42,10 +42,15 @@ SLA_LABELS = {"tt": "端到端首响", "s2": "后端处理",
 # v125 补 barge_local: 参考信号间隙检测命中真人插话(先 stopTtsNow
 # 掐回声源再开门)。未注册则该埋点被 422 静默吞掉→无法判断 v125
 # 主路是否生效、以及 BARGE_MIC_ABS/refPeak 系数该如何标定
+# v127 补 barge_gap: 块间"主动静默探测窗"内绝对门限命中真人插话。
+# 这是唯一不依赖 ref tap 的打断路径(覆盖桌面 speechSynthesis /
+# tap 空接的 gateNoRef 降级场景), 未注册则 v127 是否生效零证据,
+# BARGE_GAP_ABS/BARGE_GAP_LEAD 也无从标定
 EVENT_TYPES = ("wake_hit", "barge_cut", "turn_submit", "turn_drop",
                "turn_resp", "js_error", "wake_miss",  # v114 唤醒未命中(词+转写)
                "gate_open", "gate_mute", "gate_reclose",
-               "barge_local")  # v125 间隙检测本地打断
+               "barge_local",  # v125 间隙检测本地打断
+               "barge_gap")  # v127 静默探测窗本地打断
 TTL_DAYS = 9
 
 TBL_EVENTS = "voice83_events"

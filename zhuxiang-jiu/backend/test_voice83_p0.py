@@ -117,7 +117,19 @@ async def test_event_record_and_view():
 
 
 async def test_event_types_closed():
-    assert set(EVENT_TYPES) == {"wake_hit", "barge_cut"}  # T12
+    # T12 白名单棘轮: 已交付埋点不得被误删。封闭集合的"拒绝未注册"
+    # 语义由 T09 覆盖; 成员随版本合规增补(v114 wake_miss /
+    # v124 gate_open,gate_mute,gate_reclose / v125 barge_local /
+    # v127 barge_gap), 故只钉已交付集, 不钉全量字面量——旧写法
+    # == {"wake_hit", "barge_cut"} 是 v114 前的快照, 之后每次
+    # 合规增补都误报红灯(增补本身是被迫的: 未注册→422→前端
+    # .catch(noop) 静默吞掉→埋点零数据)。
+    delivered = {"wake_hit", "barge_cut", "turn_submit", "turn_drop",
+                 "turn_resp", "js_error", "wake_miss",
+                 "gate_open", "gate_mute", "gate_reclose",
+                 "barge_local", "barge_gap"}
+    assert delivered <= set(EVENT_TYPES)              # T12a 棘轮
+    assert len(EVENT_TYPES) == len(set(EVENT_TYPES))  # T12b 无重复
 
 
 async def test_event_day_isolation():
