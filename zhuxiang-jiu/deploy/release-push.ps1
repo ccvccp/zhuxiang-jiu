@@ -62,7 +62,9 @@ $manifest = @{
     note = $Note
 } | ConvertTo-Json -Compress
 $tmpJson = "$env:TEMP\zxrel-latest.json"
-[IO.File]::WriteAllText($tmpJson, $manifest, (New-Object Text.UTF8Encoding $false))
+# 必须带 BOM: 机器侧 Windows PowerShell 5.1 的 Get-Content -Raw 无 BOM 时按 ANSI(GBK) 解码,
+# 中文 note 的 UTF-8 尾字节会吞掉后面的 " 导致 ConvertFrom-Json 失败 → RELEASE-NONE(v123 首发踩坑)
+[IO.File]::WriteAllText($tmpJson, $manifest, (New-Object Text.UTF8Encoding $true))
 Oss-Put $tmpJson 'deploy/release/latest.json' $true
 Remove-Item $stage, $zip, $tmpJson -Recurse -Force -EA SilentlyContinue
 Write-Host "RELEASE-PUSHED version=$ver"

@@ -1918,6 +1918,57 @@ function handleVoiceResp(j) {
 /* ===== P1 流式识别轨(PCM→WS→百炼实时识别→partial 实时显示) ===== */
 var stWS = null, stOn = true, stAccum = new Float32Array(0),
     stBytes = 0, stPhase = 0, stFinalCb = null, stSent = 0;
+/* ===== v126 v2 预热协议对齐(连接常开 + 按需 arm) =====
+   历史: v116 起客户端 streamFinish 就写了 keep=!!S.handfree("免提
+   收 final 不关连接")、v120 写了 armed 分支自动 arm、v121 写了
+   speakCloud arm 看门狗——三处全是为服务端 v2 协议写的, 但面板
+   auth 从未带 ver 字段, 服务端 str(ver or "")!="2" 恒真 → 一直走
+   v1 分支(final 后 session.close() + handler 返回 + Starlette 关
+   连接)。后果(双机 24h 日志实证):
+   (1)播报期 stWS 已关 → streamFeed 首行守卫直接 return → 门控逻辑
+      一行都不跑 → barge-in 检测失效, 违反消息 10"播报必须可打断";
+   (2)播报结束后聋窗 ~2.5s(客户端 1.2s scheduleHandfree + 建连
+      0.2~0.5s + 服务端 session.start 建百炼流 ~1s), 期间开口全丢
+      → "交流识别率低"的最大单一来源;
+   (3)v121 看门狗在 v1 下是死代码里的强制重建 → 6/6 turn_drop
+      {reason:"arm_rebuild"} 全由它产生。
+   v126 改: auth 带 ver=2 让上述三处设计全部生效, 连接常开; 播报期
+   **不** arm(v2 等 arm 循环 if not t: continue 丢弃全部二进制帧,
+   静音帧无害且不占 _ACTIVE 槽), WS 保持 open → 门控照常跑 →
+   barge-in 可检测; 命中后 stopTtsNow() + streamArm() → 服务端起
+   会话, arm→ready 约 1s 窗内音频全进服务端 _pending 缓冲,
+   _flush_pending 分块限速补投(100ms 块≈2x 实时) → 零丢字。
+   stArmed=服务端已应答 armed(连接可 arm); stSess=当前连接上已有
+   活跃会话(防重复 arm——_seg_pump 段内会静默丢弃 arm 消息, 重复
+   arm 永不回 ready → 看门狗式误判) */
+var stArmed = false, stSess = false, stErrRun = 0, stArmTo = null;
+function streamArm() {
+  /* 按需供能: 在已 armed 的常开连接上起一条百炼识别会话 */
+  if (!stWS || stWS.readyState !== 1 || !stArmed || stSess) return;
+  try { stWS.send(JSON.stringify({ type: "arm" })); } catch (e) { return; }
+  stSess = true;
+  /* v126 段字节计数复位: 必须在 arm 时(而非 ready 时)——arm→ready
+     约 1s 窗内已推出的帧(含 barge 命中拼进 stAccum 的 400ms 回溯)
+     属于本段, 若延到 ready 复位, "整句都在窗内说完"的段 stSent=0
+     → streamFinish 守卫直接 bail → 丢转写。
+     stAccum/stPhase 不清: 清 stAccum 会丢最多 200ms 真实语音残量,
+     stPhase 是重采样小数相位进位, 跨段保持连续 */
+  stSent = 0; stBytes = 0;
+  /* arm 看门狗: 3s 无 ready(服务端建流失败但 error 帧丢失/连接
+     半死)→ stSess 卡死 true 会让后续所有 arm 被守卫拦住(整页
+     流式轨死亡)。不能只清 stSess: 服务端 _seg_pump 段内静默
+     丢弃 arm 消息, 陈旧会话+新 arm = 该连接永久死锁 → 必须重建
+     连接(交给 onclose 兜底); 连败 3 次降级整段上传轨 */
+  clearTimeout(stArmTo);
+  stArmTo = setTimeout(function () {
+    stArmTo = null;
+    if (!stSess) return;
+    voice83Event("turn_drop", { reason: "arm_timeout" });
+    stErrRun++;
+    if (stErrRun >= 3) stOn = false;
+    streamTeardown();
+  }, 3000);
+}
 /* ===== v123 播报期上行门控(链路层回声治理) =====
    根因: AEC 不可开(v23 实证——开 echoCancellation 后 X5 切"通话
    模式"音频焦点, 全程压制 speechSynthesis 媒体音量→播报无声),
@@ -2002,7 +2053,9 @@ function gateMuting() {
   return !!(S.ttsPlaying || gateInTail());
 }
 function streamConnect() {
-  /* 每轮新建(简单可靠); 失败一次本轮+后续自动回退整段上传轨 */
+  /* 每轮新建(简单可靠); 失败一次本轮+后续自动回退整段上传轨
+     v126: 新连接必须重新等 armed 应答, 故两个协议态先复位 */
+  stArmed = false; stSess = false;
   stAccum = new Float32Array(0); stBytes = 0; stPhase = 0; stSent = 0;
   stFinalCb = null;
   /* v124 播报期/尾音窗内重连不清门控: arm_rebuild 续听重建走这里,
@@ -2031,7 +2084,11 @@ function streamConnect() {
     if (stWS !== ws) { try { ws.close(); } catch (e) {} return; }
     var sendAuth = function () {
       try {
-        ws.send(JSON.stringify({ type: "auth",
+        /* v126: ver=2 走服务端预热协议(armed → [arm→ready→段]*),
+           连接常开复用——见上方 stArmed/stSess 注释的三条后果。
+           wakeword 不带: 服务端 _wake_hot(None) 展开双预设热词
+           (小竹小竹/你好小竹/小竹)+产品词表, 与 v1 期同口径 */
+        ws.send(JSON.stringify({ type: "auth", ver: 2,
           token: (getAuth() || {}).token || "" }));
       } catch (e) { /* CONNECTING 发送等异常由 onclose 兜底 */ }
     };
@@ -2159,19 +2216,33 @@ function streamConnect() {
       }
       if (cb) cb(m.text || "");
     } else if (m.type === "ready") {
-      /* v120 供能确认: 服务端 arm 应答 ready=识别通道就绪,
-       重试计时器可撤(见 speakCloud arm 自愈) */
+      /* v120 供能确认: 服务端 arm 应答 ready=识别通道就绪。
+         v126: 建流成功即清零连败计数(error 分支的降级依据),
+         并撤 arm 看门狗 */
+      stErrRun = 0;
+      clearTimeout(stArmTo); stArmTo = null;
       clearTimeout(S._armRetry); S._armRetry = null;
     } else if (m.type === "armed") {
-      /* v120 预热就绪自动 arm: 连接(重)建后服务端回 armed,
-       若正处播报期(供能窗口)立即 arm——重建连接后供能即时
-       恢复, 不等下一次 speakCloud */
-      if (S.ttsPlaying && stWS === ws) {
-        try { ws.send(JSON.stringify({ type: "arm" })); }
-        catch (e) { /* onclose 兜底 */ }
-      }
+      /* v126 预热就绪记态: 服务端回 armed = 连接进入"等 arm"态,
+         此后可在同一连接上反复起会话。
+         采集链已在跑(cloudActive)则立即 arm; 否则由
+         wireCloudCapture 的 cloudActive=true 处补 arm——两条路
+         覆盖 armed 与 getUserMedia 的任意先后(fresh 路径授权
+         耗时数秒, armed 必先到; reuse 路径同步完成, armed 后到)。
+         播报期不 arm(见 stArmed 注记): 会话交给 barge-in 命中
+         时按需起, 避免百炼静音超时把会话打死 */
+      if (stWS !== ws) return;
+      stArmed = true;
+      if (cloudActive) streamArm();
     } else if (m.type === "error") {
-      stOn = false; streamTeardown();
+      /* v126: v2 下 error 只表示"本次 arm 建流失败", 连接仍保活
+         并回等下一 arm(服务端 continue)——原 v1 语义的
+         stOn=false 永久降级会让一次抖动打死整页流式轨。
+         改为: 本轮回落整段上传轨 + 连败 3 次才永久降级 */
+      stSess = false;
+      clearTimeout(stArmTo); stArmTo = null;
+      stErrRun++;
+      if (stErrRun >= 3) { stOn = false; streamTeardown(); }
       if (m.fallback === "upload" && stFinalCb) {
         var cb2 = stFinalCb; stFinalCb = null; cb2("");
       }
@@ -2181,13 +2252,33 @@ function streamConnect() {
     clearTimeout(failTimer);
     if (stWS === ws) {
       stWS = null;
+      stArmed = false; stSess = false;
+      clearTimeout(stArmTo); stArmTo = null;
       if (stFinalCb) { var cb = stFinalCb; stFinalCb = null; cb(""); }
+      /* v126 常开连接兜底: v2 下连接本不该在轮次中途关闭
+         (nginx 空闲超时/网络抖动/服务端异常)。免提、播报期或
+         采集链在跑时意外断开 → 门控与供能同时失效(barge-in 打
+         不了断/本段音频无处可去), 300ms 后重建。cloudActive 项
+         覆盖手动模式: arm 看门狗 teardown 后若不重建, 本段剩余
+         音频全丢且无人再建连 */
+      if (stOn && (S.handfree || S.ttsPlaying || cloudActive) && !S.hidden) {
+        setTimeout(function () {
+          if (stWS || !stOn) return;
+          streamConnect();
+        }, 300);
+      }
     }
     /* 孤儿 close: 本轮另有连接, 不触碰本轮状态 */
   };
   ws.onerror = function () { /* onclose 兜底处理 */ };
 }
 function streamTeardown() {
+  /* v126: 先置 null 会让随后的 onclose 判为孤儿(不复位协议态),
+     故此处一并清 stArmed/stSess——否则残留 true 使 streamArm()
+     在下一条连接上误发 arm(服务端等 arm 循环收到 arm 却没 armed
+     握手, 行为未定义) */
+  stArmed = false; stSess = false;
+  clearTimeout(stArmTo); stArmTo = null;
   if (stWS) { try { stWS.close(); } catch (e) {} stWS = null; }
 }
 /* 采集块(源采样率)→线性重采样 16k→攒 200ms 帧→Int16 发送
@@ -2283,10 +2374,18 @@ function streamFeed(f32) {
           gateGapRun++;
           if (rms > gateGapMax) gateGapMax = rms;
           if (rms > _micThr) {
-            /* 连续 2 块低参考(≈170ms)才承认是真间隙——单块可能只是
+            /* 连续 N 块低参考才承认是真间隙——单块可能只是
                ScriptProcessor 与 AnalyserNode 的采样窗错位(两者相差
-               约 1 个采集块), 伪间隙会让回声被当成插话 */
-            if (gateGapRun >= 2
+               约 1 个采集块), 伪间隙会让回声被当成插话。
+               v126 尾音窗内抬到 6 块(≈510ms): 播报刚停时外放混响
+               尾音让 _ref 掉 0 → _isGap 恒真, 而麦克被 AGC 放大的
+               残响 rms 0.06~0.23 远超 _micThr(钉死 0.04) → 3 块
+               (255ms)即误触发(双机 24h 日志 5/5 gate_mute 的 gap
+               占比 100%/100%/100%/99%/82% 实证)。混响尾物理窗约
+               300ms, 6 块跨过它; 播报中途的分句间隙仍是真间隙,
+               保持 2 块不损 barge-in 灵敏度 */
+            var _needGap = gateInTail() ? 6 : 2;
+            if (gateGapRun >= _needGap
                 && Date.now() - gateSince > BARGE_WARMUP_MS) { gateHot2++; }
           } else {
             gateHot2 = 0;
@@ -2313,6 +2412,13 @@ function streamFeed(f32) {
             at: Date.now() - gateSince
           });
           stopTtsNow();
+          /* v126 按需供能: 播报期连接常开但未 arm(无活跃会话),
+             命中插话此刻起会话。arm 是文本帧, WS 有序 → 服务端
+             先收 arm 跳出等 arm 循环建流, 再收本次 streamFeed 调用
+             稍后推出的二进制帧(含下面拼进 stAccum 的 400ms 回溯)
+             → arm→ready 约 1s 窗内音频全进服务端 _pending 缓冲,
+             _flush_pending 分块限速补投, 零丢字 */
+          streamArm();
           gateMute = false; gateHot = 0; gateProbe = 0;
           /* 跳过尾音窗: 回声源已被掐断, 无需再守 1.2s */
           gateWasPlaying = false; gateEndedAt = 0;
@@ -2445,7 +2551,18 @@ function streamFeed(f32) {
 /* cloudStop 流式优先收尾: finish→final→直接提交文本;
    final 空/超时(4s)→cb("") 回退整段 WAV 上传轨 */
 function streamFinish(cb) {
-  if (!stWS || stWS.readyState !== 1 || !stSent) { cb(""); return; }
+  if (!stWS || stWS.readyState !== 1 || !stSess || !stSent) {
+    /* v126: 无活跃会话(播报期不 arm)或本段零帧 → 不发 finish。
+       v2 服务端等 arm 循环只认 arm(收到 finish 不 break, 空等到
+       超时/断开), 零帧发 finish 必等 wait_for(_done,8) 超时→
+       error 白烧连败计数。若客户端已 arm 但一帧未发(会话在服务
+       端悬着), 关连接让服务端 websocket.disconnect → _seg_pump
+       返 True → finally → session.close() 释放 _ACTIVE 槽, 下一
+       段自动重建。只清 stSess 不关连接是死锁: 陈旧会话+新 arm
+       被服务端段内静默丢弃 → 永不回 ready */
+    if (stSess) streamTeardown();
+    cb(""); return;
+  }
   setMicStatus("整理语音…");
   /* v116: 免提模式收 final 后连接不关——服务端 v2 armed 态
      保活, 播报期继续识别供能(打断链); 手动模式照旧关闭 */
@@ -2455,7 +2572,17 @@ function streamFinish(cb) {
   }, 4000);
   stFinalCb = function (final) {
     clearTimeout(to);
-    if (stWS && !keep) { try { stWS.close(); } catch (e) {} stWS = null; }
+    /* v126 收段清态: 会话已终结, 允许同一连接上再 arm 下一段
+       (免提保活路径)。不清则 stSess 残留 true → 后续 streamArm
+       全被守卫拦住, 流式轨整页死亡 */
+    stSess = false;
+    if (stWS && !keep) {
+      try { stWS.close(); } catch (e) {}
+      stWS = null;
+      /* 先置 null 使随后的 onclose 判为孤儿(不复位协议态),
+         故此处自行清 armed */
+      stArmed = false;
+    }
     cb(final);
   };
   try { stWS.send(JSON.stringify({ type: "finish" })); }
@@ -3328,41 +3455,24 @@ function speakCloud(text, bubbleEl, mood) {
      执行期(提交→回复到达)无拾音不 arm——识别仅在播报期
      (回声判定链 B8~B22 已验证拦回声); 播报完 done→关段,
      窗口制正常接力 */
-  /* v121 复查修正(v120 协议错位): 面板 auth 不带 ver=2——
-     服务端判 ver!=2 走 v1(final 后立即关连接), speakCloud
-     时 stWS 常态已关; v120 的 arm 在 v1 是空操作(_seg_pump
-     无 arm 分支), armed 分支死代码, 重建全靠 1.2s 兜底→
-     播报前 2s 聋窗+手动模式零音频会话占 _ACTIVE 槽。
-     改: 免提+流式轨在——连接已关→立即重建供能(v1 每轮新建
-     常态, 零聋窗, 不埋点); 连接仍开(半死嫌疑)→arm+看门狗
-     (1.2s 无 ready 重发, 2.5s 仍无→重建+埋点)。手动模式
-     不重建(无采集链, 重建只占槽不供能) */
-  if (S.handfree && stOn) {
-    if (stWS && stWS.readyState === 1) {
-      try { stWS.send(JSON.stringify({ type: "arm" })); }
-      catch (e) { /* 连接死由续听重建 */ }
-      clearTimeout(S._armRetry);
-      S._armRetry = setTimeout(function () {
-        if (!S.ttsPlaying) { S._armRetry = null; return; }
-        if (stWS && stWS.readyState === 1) {
-          try { stWS.send(JSON.stringify({ type: "arm" })); }
-          catch (e) {}
-          S._armRetry = setTimeout(function () {
-            S._armRetry = null;
-            if (!S.ttsPlaying) { return; }
-            voice83Event("turn_drop", {
-              reason: "arm_rebuild" });
-            streamTeardown(); streamConnect();
-          }, 1300);
-        } else {
-          S._armRetry = null;
-          if (S.ttsPlaying) { streamConnect(); }
-        }
-      }, 1200);
-    } else {
-      clearTimeout(S._armRetry); S._armRetry = null;
-      streamTeardown(); streamConnect();
-    }
+  /* v126 播报期供能策略(取代 v121 arm 看门狗): 连接常开、
+     **不** arm。
+     ① 只要 stWS 活着, streamFeed 首行守卫就放行 → 门控逻辑照常
+        跑 → barge_local 可检测(消息 10"播报必须可打断"); v2 服务
+        端等 arm 循环对二进制帧 `if not t: continue` 直接丢弃, 故
+        播报期送门控静音帧既不出字也不占 _ACTIVE 槽。
+     ② 命中插话后 stopTtsNow()+streamArm() 按需起会话。
+     ③ 反之若播报开始即 arm: 门控持续送静音帧 → 百炼静音超时
+        task-finished → _done.set() → 真人音频送进死会话 →
+        finish 返 None → error+fallback:upload。
+     ④ v121 看门狗在 v1 语义下是死代码里的强制重建, 双机 24h 日志
+        6/6 turn_drop{reason:"arm_rebuild"} 全由它产生 → 删除;
+        半死连接改由 streamArm 的 3s arm 看门狗 teardown +
+        onclose 重连兜底(条件含 S.ttsPlaying)。
+     手动模式不建连: cloudStop 已拆 procNode, 播报期无采集帧,
+     建连只占资源 */
+  if (S.handfree && stOn && (!stWS || stWS.readyState !== 1)) {
+    streamConnect();
   }
   var all = String(text);
   /* 78号P1/P3: 情绪语调系数(cogtts speed 叠乘——缓存键
@@ -3894,8 +4004,12 @@ function cloudStart() {
      喇叭还嘴——连续对话时旧轮话音立即让位) */
   if (S.ttsPlaying || S.ttsAbort) stopTtsNow();
   /* P1 流式轨: 开麦即建 WS(百炼实时识别, 边说边出字);
-     建连失败本轮+后续自动回退整段上传轨 */
-  if (stOn) streamConnect();
+     建连失败本轮+后续自动回退整段上传轨
+     v126: 连接常开——活连接直接复用(省 0.2~0.5s 建连 + ~1s 服务
+     端建流, 消灭播报后聋窗主成分), 仅在连接不可用时新建。
+     arm 由 wireCloudCapture 的 cloudActive=true 处与 armed 应答
+     分支双向覆盖(任意先后都成立), 此处不重复发 */
+  if (stOn && (!stWS || stWS.readyState !== 1)) streamConnect();
   /* 免提续听流复用: 已授权流与上下文存活时直接重挂采集节点
      ——X5/微信重取 getUserMedia 耗时数秒, 每轮重取致句首
      丢字("小竹看新品"→"长期刚见"/唤醒词被裁) */
@@ -3912,9 +4026,27 @@ function cloudStart() {
   }
   /* 关 AEC: 开麦不切"通话模式"音频焦点——否则 X5 全程压制
      speechSynthesis 媒体音量致播报无声(真机实证 v23 流复用
-     麦克风常驻后 TTS 静音); 回环由文本层 isEchoOfTTS 兜底 */
+     麦克风常驻后 TTS 静音); 回环由文本层 isEchoOfTTS 兜底。
+     v126 一并关掉浏览器 AGC/NS(此前二者走默认 true):
+     ① AGC 是尾音窗 barge_local 假阳性的放大器——播报刚停外放
+        混响尾音本已衰减, AGC 把它拉回 0.06~0.23 rms, 远超门控
+        绝对门限 BARGE_MIC_ABS(0.04) → 3 块即误判"真人插话"
+        (双机 24h 日志 5/5 gate_mute 的 gap 占比 82%~100% 实证)。
+     ② 关掉后麦克水位回归真实声学量级, 门控阈值在各机型间可比。
+     ③ 真人语音电平不靠硬件 AGC 补: streamFeed 内已有 v3.1 段内
+        rms<0.10 线性软增益(在门控之后施加, 不污染检测量), 且百炼
+        ASR 自带前端归一。
+     ⚠️ 历史铁证: X5 无视 autoGainControl 约束(48号报告:39 /
+        bump_wake_widget.py:38,41 / voice_diag_qwen.py:49)——X5 上
+        此项可能无效, 故 Fix 2b 的尾音窗间隙门槛(2→6 块)是必需
+        的对偶防线, 不能只靠约束声明; 对非 X5 机型声明本身有效。
+     ⚠️ echoCancellation 绝不能改 true(v23 铁律: X5 播报无声) */
   navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: false }
+    audio: {
+      echoCancellation: false,
+      autoGainControl: false,
+      noiseSuppression: false
+    }
   }).then(function (stream) {
     recStream = stream;
     /* ctx 复用(20:54 修复对偶): 保留的实例携用户手势解锁态,
@@ -4064,6 +4196,19 @@ function wireCloudCapture() {
           if (S.wakeVadMute && now < S.wakeVadMute) {
             return;
           }
+          /* v126 服务端确认的说话判定: 客户端 VAD 阈值(宽限期
+             0.055/常态 0.035)在弱人声、远场上会漏判, 而百炼已出
+             partial = 确实收到了可识别语音。以 partial 为准补记
+             vadSpoke, 使随后的静音窗能正常断句提交——治"barge
+             命中后 1.2s 内说完→wireCloudCapture 清零 vadSpoke→
+             永不断句→整句丢弃"(占 _ACTIVE 槽直到 listenClose
+             5s 兜底)。回声 partial 由 isEchoOfTTS 在文本层拦,
+             不会因此提交指令; 混响尾假阳性时基本无 partial,
+             vadSpoke 保持 false → 5s 干净关窗, 不退化成"1.2s
+             静音断句提交空转写→没听清→4s TTS 回环轰炸" */
+          if (!S.vadSpoke && String(S.streamPartial || "").trim()) {
+            S.vadSpoke = true;
+          }
           var thr = (now - vadOpenAt < 1500) ? 0.055 : 0.035;
           /* v119 嘈杂自适应尾静音(状态机 LISTENING 阶段鲁棒性):
              非语音段慢速跟踪环境底噪(S.noiseFloor EMA), 底噪高
@@ -4107,6 +4252,11 @@ function wireCloudCapture() {
     })();
     recStart = Date.now();
     cloudActive = true;
+    /* v126 供能: 采集链就绪即起识别会话。与 onmessage 的 armed
+       分支构成双向覆盖——fresh 路径 getUserMedia 授权耗时数秒,
+       armed 必先到(由该分支 arm); reuse 路径同步完成, armed 后到
+       (由此处 arm)。streamArm 内 stSess 守卫保证只发一次 */
+    streamArm();
     /* 应答即就绪(2026-10-07): 采集链就绪即通知宿主——widget
        延后的「我在，请吩咐」此刻开播, 用户听到应答时面板已
        可收音(开麦真空期说话不再丢); 每轮续听同发, 宿主仅
