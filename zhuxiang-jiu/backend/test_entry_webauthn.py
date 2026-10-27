@@ -1,4 +1,4 @@
-﻿"""39号·WebAuthn 真实轨测试(协议层 + 业务链 + HTTP 面)
+"""39号·WebAuthn 真实轨测试(协议层 + 业务链 + HTTP 面)
 
 运行方式:
     python test_entry_webauthn.py

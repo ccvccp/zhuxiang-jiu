@@ -1,4 +1,4 @@
-﻿"""60号AI智能支付管理 P4 Docker 实机验收
+"""60号AI智能支付管理 P4 Docker 实机验收
 
 运行方式:
     python verify_pay60_p4_live.py [基址]

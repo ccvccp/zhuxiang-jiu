@@ -1,4 +1,4 @@
-﻿"""60号AI智能支付管理 P2 Docker 实机验收
+"""60号AI智能支付管理 P2 Docker 实机验收
 
 运行方式:
     # 容器以 assist 态启动(会员 confirm 面
