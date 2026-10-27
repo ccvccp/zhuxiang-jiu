@@ -169,7 +169,14 @@ class XiaozhuExplainabilityService:
                 trust_id, business_id)
             report_text = r.get("report") or ""
             mode = f"trust45+{r.get('mode', 'mock')}"
-        except Exception as exc:  # noqa: BLE001
+        # [进化 2026-10-27] IMP-18：原此行尾挂有 BLE001 的 noqa 抑制指令，
+        # 但 BLE001 未在本仓 ruff 配置中启用，该指令属无效抑制，ruff 报
+        # RUF100。处置：手工删除该指令，不用 --fix 批量改，避免顺带触碰
+        # IMP-17 的 1741 条存量。定位以符号内容为准而非行号(IMP-19)。
+        # 注：本注释刻意不复写该指令原文，否则 ruff 会把它当真实指令解析，
+        # 反而报 "Invalid noqa directive" warning(本次已实测踩到)。
+        # 实锤：ruff check --select=RUF100 本文件 -> All checks passed!
+        except Exception as exc:
             # 45号源缺失(如订单事件不在信值流)——
             # 只读回放 49号语音播报(不编故事)
             logger.debug("voice49_attr_45_skip: %s", exc)

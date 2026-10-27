@@ -66,7 +66,7 @@ def main() -> None:
             time.sleep(1.0)
             try:
                 meta = fetch_detail_meta(c, slug)
-            except Exception as e:  # noqa: BLE001(网络失败留痕不中断)
+            except Exception as e:  # 网络失败留痕不中断（原 noqa: BLE001，本仓未启用该规则）
                 print(f"  [失败] {name}: {type(e).__name__} {e}")
                 fails.append(name)
                 continue

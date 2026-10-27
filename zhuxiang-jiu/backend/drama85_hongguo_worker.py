@@ -442,7 +442,7 @@ def serve(port: int = None) -> None:
     collector = HongguoCollector()
 
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):           # noqa: N802(标准库命名)
+        def do_GET(self):           # 标准库命名（原 noqa: N802，本仓未启用该规则）
             path, _, query = self.path.partition("?")
             if path.rstrip("/") != "/dramas":
                 self.send_response(404)
