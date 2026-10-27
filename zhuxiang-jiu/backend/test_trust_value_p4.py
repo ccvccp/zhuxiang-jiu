@@ -18,6 +18,19 @@
       参数校验(域/类型)/补丁历史留痕/版本审计
     - HTTP 层: 申诉三连/归因/学习三连/补丁二连(鉴权)
 """
+# ---------------------------------------------------------------------------
+# [SCRIPT-STYLE TEST | 脚本式测试]  pytest 收集为 0 属预期（IMP-12 台账文件）。
+#   运行方式 : python test_trust_value_p4.py        （cwd 必须是 zhuxiang-jiu/backend）
+#   结果判定 : 看脚本尾部打印的 pass/fail 计数，不要看 pytest 输出。
+#   勿误判   : pytest --collect-only 对本文件收集 0 条并以退出码 5
+#              「no tests collected」结束——这是本文件的正常形态。
+#              禁止据此判定测试损坏，禁止把退出码 5 当失败上报。
+#   成因     : 用例以 record()/模块级计数函数组织，或 Test* 类内方法未命名
+#              为 test_*，不满足 pytest.ini 的 python_functions=test_* 规则。
+#   台账     : backend/scriptstyle_tests_manifest.json（机器可读）
+#   闸门     : backend/test_scriptstyle_gate.py 校验清单一致性与 banner 存在性
+# ---------------------------------------------------------------------------
+
 
 import asyncio
 import os
