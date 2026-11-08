@@ -1,12 +1,15 @@
 ﻿# t4-A 生产登录凭据注入(ECS 主机侧) —— 交互式, 必须在 ECS 的 RDP 会话里以【管理员】身份本地运行
-# 用法(ECS 上): powershell -ExecutionPolicy Bypass -File D:\zhuxiang\zhuxiang-jiu\deploy\setup-prod-creds-host.ps1
+# 用法: 先把本脚本拷到 ECS 任意目录(如 C:\release\), 再运行
+#   powershell -ExecutionPolicy Bypass -File C:\release\setup-prod-creds-host.ps1
+#   (2026-11-09 实测: ECS i-2zebz5dnx9903xdsbi7m 上【不存在】D:\zhuxiang 工作区,
+#    C:\backend 是发布产物副本且 .git=False, 故不能指望"在 ECS 上按仓库路径直接跑")
 # 【不可走云助手 RunCommand】本脚本含 Read-Host 交互; 且口令不得经云助手命令/OSS 中转/任何日志传输
 #   (依据 .trae/rules/security-hard-coded.md 一.2 + 用户裁定"口令不下发, 我自己在 ECS 上设")
 # 产物: 1) 仓外 JSON 凭据文件(ACL 收紧, 无 BOM)  2) 机器级环境变量 ZX_CRED_FILE / PROD_ADMIN_PHONE / ZX_API_PHONE / E2E_MEMBER_PHONE
 #   —— 注册表里只存"路径"与"号码", 口令绝不进注册表:
 #      setx /M 会让口令落 HKLM\...\Session Manager\Environment(同机任意管理员可读) + 1024 字符截断 + 进 shell 历史
 # 幂等: 可重复运行; 已存在的 JSON 覆盖前先备份(依据 二.4 备份先于写入)
-# 下一步: 跑完本脚本再跑 setup-prod-creds-container.ps1(B 段, 容器侧)
+# 下一步: 跑完本脚本再跑 setup-prod-creds-ecs-service.ps1(B 段, backend 服务侧)
 param(
     [string]$CredDir = 'D:\zhuxiang-secrets',
     [string]$CredFileName = 'sv73_cred.json'
@@ -135,9 +138,10 @@ foreach ($k in @('ZX_CRED_FILE', 'PROD_ADMIN_PHONE', 'ZX_API_PHONE', 'E2E_MEMBER
 $mp = [Environment]::GetEnvironmentVariable('ZX_CRED_FILE', 'Machine')
 Write-Host ('  [Machine] ZX_CRED_FILE 新进程可读: ' + [bool]$mp + '   指向文件存在: ' + (Test-Path $mp))
 
-Write-Host '== 6. 下一步(B 段 · 容器侧) =='
+Write-Host '== 6. 下一步(B 段 · backend 服务侧) =='
 Write-Host '  A 段完成。接着在 ECS 上运行:'
-Write-Host '    powershell -ExecutionPolicy Bypass -File D:\zhuxiang\zhuxiang-jiu\deploy\setup-prod-creds-container.ps1'
-Write-Host '  若 ECS 代码已同步到 b83ad7ae 但镜像仍是旧的(容器内无 prod_creds.py), 加 -Build:'
-Write-Host '    powershell -ExecutionPolicy Bypass -File D:\zhuxiang\zhuxiang-jiu\deploy\setup-prod-creds-container.ps1 -Build'
+Write-Host '    powershell -ExecutionPolicy Bypass -File C:\release\setup-prod-creds-ecs-service.ps1'
+Write-Host '  它把 PROD_ADMIN_* 写进 C:\backend\.env(uvicorn --env-file 的真实注入点)并重启 backend8147;'
+Write-Host '  只想写文件不重启时加 -NoRestart。'
+Write-Host '  注: setup-prod-creds-container.ps1 是容器形态版本, 本机【没有 Docker】故不适用(见其文件头)。'
 Write-Host 'HOST-CREDS-DONE'

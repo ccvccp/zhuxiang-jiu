@@ -1,7 +1,13 @@
 ﻿# t4-B 生产登录凭据注入(backend 容器侧) —— 在 ECS 主机上运行, 操作 docker
-# 用法(ECS 上): powershell -ExecutionPolicy Bypass -File D:\zhuxiang\zhuxiang-jiu\deploy\setup-prod-creds-container.ps1
-#   镜像仍是旧版(容器内无 prod_creds.py)时加 -Build:
-#   powershell -ExecutionPolicy Bypass -File D:\zhuxiang\zhuxiang-jiu\deploy\setup-prod-creds-container.ps1 -Build
+# ⚠️ 本脚本对生产 ECS i-2zebz5dnx9903xdsbi7m【不适用】: 2026-11-09 云助手实测该机没有 Docker
+#    (6 个 docker.exe 候选路径全 False / com.docker.service=ABSENT / 无 docker 进程 / PATH 无 docker),
+#    backend 是 nssm 托管的 Windows 服务 backend8147 直跑 C:\Python312\python.exe,
+#    env 注入点是 C:\backend\.env(uvicorn --env-file), 不是 compose 根 .env。
+#    ⇒ 生产请用同目录的 setup-prod-creds-ecs-service.ps1(B 段服务侧版)。
+#    本脚本仅保留给"确实用 docker compose 跑 backend"的环境(如本地开发机), 仓库根的
+#    docker-compose.yml 属本地开发形态, 不代表生产部署形态。
+# 用法: powershell -ExecutionPolicy Bypass -File <本脚本路径>
+#   镜像仍是旧版(容器内无 prod_creds.py)时加 -Build
 # 前置: 先跑 A 段 setup-prod-creds-host.ps1(建好 ZX_CRED_FILE); 本脚本读不到时会交互兜底
 # 为什么必须做: e2e_auth_helper.py 已改 fail-closed(commit b83ad7ae), 容器内无 PROD_ADMIN_*
 #   时所有验收脚本登录直接 raise => 全链路不发(依据 .trae/rules/security-hard-coded.md 二.3)
