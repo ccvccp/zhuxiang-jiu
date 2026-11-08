@@ -47,6 +47,13 @@ const DOUYIN_UPLOAD = 'https://creator.douyin.com/creator-micro/content/upload/v
   const loginPageLike = (url, text) =>
     /\/login|passport\.|sso\.douyin/.test(url) ||
     /扫码登录|扫码进入|登录抖音|验证码登录|密码登录|我是创作者|我是MCN机构/.test(text || '');
+  // 2026-11-08 事故修正: 判定登录态必须同时看 URL 和 body 文案。
+  // 抖音掉线后 URL 仍是 creator.douyin.com/(不带 passport), 只看 URL 会把
+  // 未登录首页当成已登录, 后续所有动作都在假登录上跑。
+  const readBody = async (page) => {
+    try { return await page.evaluate(() => (document.body.innerText || '').slice(0, 800)); } catch (e) { return ''; }
+  };
+  const loggedOutNow = async (page) => loginPageLike(page.url(), await readBody(page));
   const ensureLogin = async (page, waitMs) => {
     const deadline = Date.now() + waitMs;
     let lastUrl = '';
@@ -83,7 +90,8 @@ const DOUYIN_UPLOAD = 'https://creator.douyin.com/creator-micro/content/upload/v
       }
       await sleep(3000);
     }
-    return !loginPageLike(page.url(), '');
+    // fail-closed: 超时后重读 body 文案再判, 绝不靠 URL 放行
+    return !(await loggedOutNow(page));
   };
 
   if (!(await ensureLogin(page, (CFG.waitLoginMinutes || 8) * 60000))) {
@@ -161,7 +169,7 @@ const DOUYIN_UPLOAD = 'https://creator.douyin.com/creator-micro/content/upload/v
     // 内容管理页验证: dump 作品列表前几条(标题/日期/状态), 发布结果核对用
     await page.goto('https://creator.douyin.com/creator-micro/content/manage', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
     await sleep(8000);
-    if (loginPageLike(page.url(), '')) {
+    if (await loggedOutNow(page)) {
       if (!(await ensureLogin(page, 10 * 60000))) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
       await page.goto('https://creator.douyin.com/creator-micro/content/manage', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
       await sleep(8000);
@@ -190,7 +198,7 @@ const DOUYIN_UPLOAD = 'https://creator.douyin.com/creator-micro/content/upload/v
     // 定位 CFG.matchText 特征卡片 → 编辑作品 → 全选清空重填描述 → 保存
     await page.goto('https://creator.douyin.com/creator-micro/content/manage', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
     await sleep(8000);
-    if (loginPageLike(page.url(), '')) {
+    if (await loggedOutNow(page)) {
       if (!(await ensureLogin(page, 10 * 60000))) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
       await page.goto('https://creator.douyin.com/creator-micro/content/manage', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
       await sleep(8000);
@@ -297,7 +305,7 @@ const DOUYIN_UPLOAD = 'https://creator.douyin.com/creator-micro/content/upload/v
   if (CFG.action === 'publish') {
     await page.goto(DOUYIN_UPLOAD, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
     await sleep(6000);
-    if (loginPageLike(page.url(), '')) {
+    if (await loggedOutNow(page)) {
       LOG('SESSION_EXPIRED — 等扫码');
       if (!(await ensureLogin(page, 10 * 60000))) { LOG('RELOGIN_TIMEOUT'); await browser.close(); process.exit(4); }
       await page.goto(DOUYIN_UPLOAD, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
