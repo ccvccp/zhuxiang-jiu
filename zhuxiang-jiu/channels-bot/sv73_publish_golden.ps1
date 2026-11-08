@@ -1,4 +1,4 @@
-# sv73 黄金档 RPA 发布编排(通用参数版)——douyin/wechat_channels 双平台
+﻿# sv73 黄金档 RPA 发布编排(通用参数版)——douyin/wechat_channels 双平台
 # 时序: 18:01 计划任务(zxjiu-sv73-publish-process)自动转态 queued→rpa_pending
 #       → 本脚本 18:05+ 启动: ①核态(未转则补转) ②bot 发布 ③日志留档
 # 用法: powershell -File sv73_publish_golden.ps1 -Cid 75                 # 抖音(默认)
@@ -19,8 +19,14 @@ function Publish-Alert([int]$alertCid, [string]$alertPlat, [string]$reason) {
     $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $line = "[$stamp] cid=$alertCid plat=$alertPlat FAILED: $reason"
     Add-Content -Path 'PUBLISH_FAIL_ALERT.flag' -Value $line -Encoding UTF8
-    try { cmd /c "msg * /time:90 sv73 PUBLISH FAILED cid=$alertCid $alertPlat :: $reason :: see channels-bot\PUBLISH_FAIL_ALERT.flag" } catch {}
-    try { cmd /c "eventcreate /t ERROR /id 731 /l APPLICATION /d ""sv73 publish FAILED cid=$alertCid $alertPlat: $reason"" " } catch {}
+    # 2026-11-08 修阻塞(同 sv73_publish_process.ps1): cmd /c "msg ..." 会等子进程退出,
+    # 无交互会话时挂住父 PowerShell → 僵尸 → 计划任务单实例策略阻断次日运行。
+    # Start-Process 不带 -Wait = 发出即返回。另: 原 "$alertPlat:" 会被 PS 解析成
+    # 名为 alertPlat: 的变量(恒空), 改 ${alertPlat} 显式定界。
+    $aMsg = ("sv73 PUBLISH FAILED cid=$alertCid $alertPlat :: $reason :: see channels-bot\PUBLISH_FAIL_ALERT.flag") -replace '["\r\n]', ' '
+    $aEvt = ("sv73 publish FAILED cid=$alertCid ${alertPlat}: $reason") -replace '["\r\n]', ' '
+    try { Start-Process msg -ArgumentList @('*', '/time:90', $aMsg) -WindowStyle Hidden } catch {}
+    try { Start-Process eventcreate -ArgumentList @('/t', 'ERROR', '/id', '731', '/l', 'APPLICATION', '/d', $aEvt) -WindowStyle Hidden } catch {}
 }
 "===== sv73_publish_golden cid=$Cid plat=$platLabel $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ====="
 

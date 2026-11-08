@@ -53,7 +53,13 @@ try {
     # 失败告警钩子(2026-10-11): 桌面弹窗 + flag 文件 + 事件日志
     $stamp2 = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     Add-Content -Path (Join-Path (Split-Path $log -Parent) 'PUBLISH_FAIL_ALERT.flag') -Value "[$stamp2] process-task FAILED: $($_.Exception.Message)" -Encoding UTF8
-    try { cmd /c "msg * /time:90 sv73 TRANSITION FAILED :: $($_.Exception.Message)" } catch {}
-    try { cmd /c "eventcreate /t ERROR /id 731 /l APPLICATION /d ""sv73 transition FAILED: $($_.Exception.Message)"" " } catch {}
+    # 2026-11-08 修阻塞: `cmd /c "msg ..."` 会同步等子进程退出, 无交互会话时 msg.exe
+    # 挂住父 PowerShell → 僵尸进程 → 计划任务单实例策略(lastresult=267009)阻断次日运行;
+    # 且本脚本 Out-File 在 try/catch 之外, 一挂就连 publish_process.log 都写不出来。
+    # 改 Start-Process(不带 -Wait)= 发出即返回; -ArgumentList 数组传参, 免 cmd 引号地狱。
+    $aMsg = ('sv73 TRANSITION FAILED :: ' + $_.Exception.Message) -replace '["\r\n]', ' '
+    $aEvt = ('sv73 transition FAILED: ' + $_.Exception.Message) -replace '["\r\n]', ' '
+    try { Start-Process msg -ArgumentList @('*', '/time:90', $aMsg) -WindowStyle Hidden } catch {}
+    try { Start-Process eventcreate -ArgumentList @('/t', 'ERROR', '/id', '731', '/l', 'APPLICATION', '/d', $aEvt) -WindowStyle Hidden } catch {}
 }
 "$stamp`n$out" | Out-File -FilePath $log -Append -Encoding utf8
