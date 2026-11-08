@@ -29,6 +29,14 @@ def main():
     os.environ["LOCK_MODE"] = "asyncio"
     os.environ["STORE_MODE"] = "asyncio"
     os.environ["AUTH_MODE"] = "strict"
+    # 凭据经 env 注入(2026-11-08: e2e_auth_helper 不再有明文默认, 走
+    # prod_creds + fail-closed)。种子值单一事实源在 repositories.store,
+    # 本文件不写凭据字面量。
+    from repositories.store import (SEED_ADMIN_PHONE, SEED_MEMBER_PASSWORD,
+                                    SEED_MEMBER_PHONE)
+    os.environ["PROD_ADMIN_PHONE"] = SEED_ADMIN_PHONE
+    os.environ["E2E_MEMBER_PHONE"] = SEED_MEMBER_PHONE
+    os.environ["PROD_ADMIN_PASSWORD"] = SEED_MEMBER_PASSWORD
 
     from fastapi.testclient import TestClient
     from main import app

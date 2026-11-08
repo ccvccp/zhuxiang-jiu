@@ -19,6 +19,14 @@ def _hash_member_pwd(password: str) -> str:
     return hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
 
 
+# 本地内存夹具种子账号(单一事实源): 号码与口令仅供 STORE_MODE=asyncio 的
+# dev/测试进程使用, 不是生产凭据 —— 生产/验收脚本一律走 prod_creds(env 注入
+# + fail-closed), 生产 Redis 态真实账号由运维注入, 与本处无关。
+SEED_MEMBER_PHONE = "13800000001"     # member1 普通会员
+SEED_ADMIN_PHONE = "13800000002"      # member3 站点管理员(role=admin)
+SEED_MEMBER_PASSWORD = "test123456"   # 两个种子账号同口令(本地夹具口径)
+
+
 def _build_initial_products() -> dict:
     """构建 12 款产品初始数据字典(product_id → product)
 
@@ -493,7 +501,8 @@ _mock_store: dict = {
     # 会员模块(MemberRepository 自管理 seq, 此处仅初始数据)
     "members": {
         1: {
-            "id": 1, "phone": "13800000001", "password": _hash_member_pwd("test123456"),
+            "id": 1, "phone": SEED_MEMBER_PHONE,
+            "password": _hash_member_pwd(SEED_MEMBER_PASSWORD),
             "nickname": "测试会员小竹", "avatar": "", "gender": 1,
             "level": 1, "growth_value": 0, "points": 100,
             "status": 1, "reg_source": "phone", "role": "member",
@@ -501,7 +510,8 @@ _mock_store: dict = {
             "created_at": "2026-08-21T00:00:00+00:00", "last_login_at": "",
         },
         2: {
-            "id": 2, "phone": "13800000002", "password": _hash_member_pwd("test123456"),
+            "id": 2, "phone": SEED_ADMIN_PHONE,
+            "password": _hash_member_pwd(SEED_MEMBER_PASSWORD),
             "nickname": "站点管理员", "avatar": "", "gender": 1,
             "level": 3, "growth_value": 600, "points": 100,
             "status": 1, "reg_source": "phone", "role": "admin",
@@ -513,7 +523,8 @@ _mock_store: dict = {
         1: {
             "addr_seed_001": {
                 "id": "addr_seed_001", "user_id": 1, "name": "张三",
-                "phone": "13800000001", "province": "山东省", "city": "泰安市",
+                "phone": SEED_MEMBER_PHONE,
+                "province": "山东省", "city": "泰安市",
                 "district": "泰山区", "detail": "竹香路 1 号", "is_default": 1,
                 "created_at": "2026-08-21T00:00:00+00:00",
             },
@@ -558,7 +569,8 @@ def reset_store() -> dict:
         "shipping_claims": {},
         "members": {
             1: {
-                "id": 1, "phone": "13800000001", "password": _hash_member_pwd("test123456"),
+                "id": 1, "phone": SEED_MEMBER_PHONE,
+                "password": _hash_member_pwd(SEED_MEMBER_PASSWORD),
                 "nickname": "测试会员小竹", "avatar": "", "gender": 1,
                 "level": 1, "growth_value": 0, "points": 100,
                 "status": 1, "reg_source": "phone", "role": "member",
@@ -566,7 +578,8 @@ def reset_store() -> dict:
                 "created_at": "2026-08-21T00:00:00+00:00", "last_login_at": "",
             },
             2: {
-                "id": 2, "phone": "13800000002", "password": _hash_member_pwd("test123456"),
+                "id": 2, "phone": SEED_ADMIN_PHONE,
+                "password": _hash_member_pwd(SEED_MEMBER_PASSWORD),
                 "nickname": "站点管理员", "avatar": "", "gender": 1,
                 "level": 3, "growth_value": 600, "points": 100,
                 "status": 1, "reg_source": "phone", "role": "admin",
@@ -578,7 +591,8 @@ def reset_store() -> dict:
             1: {
                 "addr_seed_001": {
                     "id": "addr_seed_001", "user_id": 1, "name": "张三",
-                    "phone": "13800000001", "province": "山东省", "city": "泰安市",
+                    "phone": SEED_MEMBER_PHONE,
+                    "province": "山东省", "city": "泰安市",
                     "district": "泰山区", "detail": "竹香路 1 号", "is_default": 1,
                     "created_at": "2026-08-21T00:00:00+00:00",
                 },

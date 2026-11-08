@@ -2423,7 +2423,7 @@
     {
       "file": "test_e2e_auth_helper.py",
       "category": "SCRIPT_STYLE",
-      "lines": 80,
+      "lines": 88,
       "run_cmd": "python test_e2e_auth_helper.py",
       "cwd": "zhuxiang-jiu/backend",
       "collectable_by_pytest": 0,
