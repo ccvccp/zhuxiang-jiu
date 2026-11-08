@@ -4,6 +4,7 @@
 # 失败自动回执 mark_failed(防重发留痕, 人工修复后可重试)
 # 成功记日志待 manage 核验(URL 回执二版); 无视频跳过不回执(下轮再试)
 # 视频供给约定: $PSScriptRoot\videos\ 下按 shortCode 优先/contentId 兜底匹配 mp4
+#               (token 边界精确匹配, 见下方 $rxSc/$rxCid; 禁子串通配, 防哈希段误命中)
 # 用法: powershell -File sv73_autopublish.ps1
 $ErrorActionPreference = 'Continue'
 $dir = $PSScriptRoot
@@ -97,12 +98,19 @@ try {
         else { Log "[$cid/$pf] SKIP: 平台不在第一版自动范围"; continue }
 
         # 视频定位(shortCode 优先, contentId 兜底)
+        # 2026-11-08 修子串误匹配: 原 `-Filter "*$cid*.mp4"` 是子串语义, cid=64 会命中
+        # 哈希段 48f93"64"4010 → 64 号从 10-24 起连续拿 87 号的视频(实证文件名
+        # sv73_48f936644010_mix_A-6I0GBD_87.mp4), 且 11-08 已真实发布上线。
+        # 改为 token 边界精确匹配: 目标串必须被 _ - . 包围(或位于首尾), 数字/字母相邻不算。
         $sc = [string]$c.shortCode
         $vdir = Join-Path $dir 'videos'
+        $all = @(Get-ChildItem $vdir -File -Filter '*.mp4' -EA SilentlyContinue)
+        $rxSc = '(^|[_\-.])' + [regex]::Escape($sc) + '([_\-.]|$)'
+        $rxCid = '(^|[_\-.])' + [regex]::Escape([string]$cid) + '([_\-.]|$)'
         $mp4 = $null
-        if ($sc) { $mp4 = Get-ChildItem $vdir -Filter "*$sc*.mp4" -File -EA SilentlyContinue | Select-Object -First 1 }
-        if (-not $mp4) { $mp4 = Get-ChildItem $vdir -Filter "*$cid*.mp4" -File -EA SilentlyContinue | Select-Object -First 1 }
-        if (-not $mp4) { Log "[$cid/$pf] NO-VIDEO: videos\ 无匹配(shortCode=$sc), 留待下轮"; $noVideo += $cid; continue }
+        if ($sc) { $mp4 = $all | Where-Object { $_.Name -match $rxSc } | Select-Object -First 1 }
+        if (-not $mp4) { $mp4 = $all | Where-Object { $_.Name -match $rxCid } | Select-Object -First 1 }
+        if (-not $mp4) { Log "[$cid/$pf] NO-VIDEO: videos\ 无精确匹配(shortCode=$sc, cid=$cid, 候选$($all.Count)个), 留待下轮"; $noVideo += $cid; continue }
 
         # desc 组装(body + hashtags, 历史格式)
         $desc = "$($c.body) $($c.hashtags)".Trim()
