@@ -8,7 +8,8 @@
 本智能体的职责(每 10 分钟一轮, 计划任务驱动):
   ① 体检  —— 服务进程 / TTS 合成 / WS 唤醒协议 / 关键错误日志, 四道探针
   ② 自愈  —— 有界自动处置: 服务停止→拉起; 连续 3 轮探针失败→重启后端
-              (每小时最多 1 次, 防重启风暴); 调试残留清理(过期 wsdump)
+              (每小时最多 1 次, 防重启风暴); 上游依赖故障只告警不重启
+              (重启后端治不了上游欠费/网关不可用); 调试残留清理(过期 wsdump)
   ③ 留证  —— 每轮写 C:/backend/logs/voice-health.json(机器可读, 原子写)
               + voice-health.log(人读流水); 出问题先看这里, 不再盲猜
   ④ 防复发 —— 健康基准固化: 任何部署后首轮即校验, 回归当场暴露
@@ -37,6 +38,14 @@ SVC = "backend8147"
 MAX_FAIL_BEFORE_RESTART = 3
 RESTART_COOLDOWN_SEC = 3600
 WS_DUMP_DIR = Path(r"C:\tmp")
+# 重启判据白名单外的上游故障: 502/503/504 是网关/上游不可用的确定语义,
+# 重启 backend8147 治不了(2026-11-11 一天 9 次重启风暴的根因即 TTS 上游 503)。
+# 刻意不含 500: 500 可能是连接池僵尸死循环这类重启能治的本机状态。
+UPSTREAM_HTTP_STATUS = frozenset({502, 503, 504})
+# 只用 ASCII 标记识别上游计费错误(业务码 1113 + insufficient/arrear),
+# 不匹配中文字面量, 避免编码风险与假阳性。
+UPSTREAM_BODY_RE = re.compile(
+    r'(?i)("code"\s*:\s*1113(?!\d)|insufficient|arrear)')
 
 os.chdir(ROOT)
 sys.path.insert(0, str(ROOT))
@@ -99,8 +108,13 @@ def restart_backend(reason: str) -> str:
     return f"restart({reason}) -> {'ok' if ok else 'STILL-DOWN'}"
 
 
-def probe_tts(token: str) -> tuple[bool, str, bytes]:
-    """TTS 合成探针: 走真实 HTTP 路由(鉴权+合成+清洗)"""
+def probe_tts(token: str) -> tuple[bool, str, bytes, bool]:
+    """TTS 合成探针: 走真实 HTTP 路由(鉴权+合成+清洗)
+
+    第 4 个返回值 upstream=True 表示故障出在上游依赖(网关 5xx / 计费错误码),
+    这类故障不计入重启判据, 只告警。传输层异常(连接被拒/超时)属后端自身
+    不可达, upstream=False, 保留 restart 资格。
+    """
     import http.client
     try:
         c = http.client.HTTPConnection("127.0.0.1", 8000, timeout=30)
@@ -111,9 +125,14 @@ def probe_tts(token: str) -> tuple[bool, str, bytes]:
         data = r.read()
         c.close()
         ok = r.status == 200 and len(data) > 2000
-        return ok, f"http={r.status} bytes={len(data)}", data if ok else b""
+        upstream = (not ok) and (
+            r.status in UPSTREAM_HTTP_STATUS
+            or bool(UPSTREAM_BODY_RE.search(
+                data.decode("utf-8", "replace")[:512])))
+        return (ok, f"http={r.status} bytes={len(data)}",
+                data if ok else b"", upstream)
     except Exception as e:
-        return False, f"{type(e).__name__}: {str(e)[:80]}", b""
+        return False, f"{type(e).__name__}: {str(e)[:80]}", b"", False
 
 
 def probe_ws_wake(token: str, tts_wav: bytes) -> tuple[bool, str]:
@@ -226,10 +245,11 @@ def main() -> int:
         else:  # 探针退路: 用 .env 无密钥场景不阻塞其余探针
             checks["tts"] = {"ok": False, "msg": "jwt-secret-not-found"}
 
-    tts_ok, tts_msg, tts_wav = (False, "skipped", b"")
+    tts_ok, tts_msg, tts_wav, tts_upstream = (False, "skipped", b"", False)
     if ok_svc and token:
-        tts_ok, tts_msg, tts_wav = probe_tts(token)
-        checks["tts"] = {"ok": tts_ok, "msg": tts_msg}
+        tts_ok, tts_msg, tts_wav, tts_upstream = probe_tts(token)
+        checks["tts"] = {"ok": tts_ok, "msg": tts_msg,
+                         "upstream": tts_upstream}
 
     ws_ok, ws_msg = (False, "skipped")
     if ok_svc and token:
@@ -242,7 +262,13 @@ def main() -> int:
 
     # 有界自愈: 连续探针失败 → 冷却期内最多一次重启
     core_ok = ok_svc and tts_ok and ws_ok
-    if core_ok:
+    # 重启判据与上报健康度分离: 上游依赖故障(TTS 502/503/504 或上游计费
+    # 错误码)重启后端治不了, 只告警不重启; 后端自身不可达(连接失败/超时/
+    # 500/WS 打不开)才计入。status 仍由 core_ok 算 ⇒ 告警信号完整保留。
+    restart_core_ok = ok_svc and (tts_ok or tts_upstream) and ws_ok
+    if tts_upstream and not tts_ok:
+        actions.append("tts-upstream-fault(no-restart)")
+    if restart_core_ok:
         st["consec_fail"] = 0
     else:
         st["consec_fail"] = int(st.get("consec_fail", 0)) + 1
