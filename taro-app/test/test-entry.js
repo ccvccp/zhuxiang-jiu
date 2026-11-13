@@ -350,7 +350,7 @@ const textOf = (node) => {
   sessionCalls.length = 0;
   loginMockMode = 'authenticated';
   const lg = await EntryAPI.login({ mode: 'password', phone: '13800000001',
-    password: 'test123456' });
+    password: 'pw-fixture' });
   record('API-登录直发保存', lg.status === 'authenticated'
     && sessionCalls.length === 1
     && sessionCalls[0].memberId === '7'
@@ -360,7 +360,7 @@ const textOf = (node) => {
   sessionCalls.length = 0;
   loginMockMode = 'step_up';
   const lg2 = await EntryAPI.login({ mode: 'password', phone: '13800000001',
-    password: 'test123456' });
+    password: 'pw-fixture' });
   record('API-二次核验不签发', lg2.status === 'step_up_required'
     && lg2.memberId === 7 && sessionCalls.length === 0);
 
@@ -451,7 +451,7 @@ const textOf = (node) => {
   // ---------- [19] step_up 原位弹层(交互: 填表→点登录) ----------
   const inputs = findAll(el, n => n.props.onInput);
   inputs[0].props.onInput({ detail: { value: '13800000001' } });
-  inputs[1].props.onInput({ detail: { value: 'test123456' } });
+  inputs[1].props.onInput({ detail: { value: 'pw-fixture' } });
   await new Promise(r => setTimeout(r, 20));
   const elFilled = reactForPage.__test.rerender();
   const loginBtn = findAll(elFilled, n => n.props.onClick

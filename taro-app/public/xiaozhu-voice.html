@@ -346,7 +346,6 @@ body.talking .sbar{padding:3px 10px;font-size:11px;gap:6px}
   <input id="phone" placeholder="手机号" maxlength="11" inputmode="numeric">
   <input id="pwd" type="password" placeholder="密码">
   <button class="btn" id="loginBtn" onclick="doLogin()" style="width:100%">登录</button>
-  <button class="btn ghost" onclick="quickFill()" style="width:100%;margin-top:8px">体验账号快捷填充</button>
   <div class="hint" style="margin-top:10px">语音会话需登录（生产 strict 鉴权）；未登录可浏览页面框架与情景问候。</div>
 </div>
 
@@ -540,11 +539,6 @@ function doLogin() {
     showToast("网络异常, 请重试");
   });
 }
-function quickFill() {
-  document.getElementById("phone").value = "13800000001";
-  document.getElementById("pwd").value = "test123456";
-}
-
 /* apiFetch: 401 → refresh → retry 一次 */
 function apiFetch(path, opts) {
   opts = opts || {};
