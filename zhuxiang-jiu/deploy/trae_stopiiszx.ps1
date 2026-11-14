@@ -107,7 +107,11 @@ function Show-Native([string]$tag, $res) {
     }
 }
 
-# Port listeners via netstat only. The ':<port>$' tail anchor keeps :80 from matching :8080.
+# Port listeners via netstat only. The match is EndsWith(':' + $port) on the BARE local-address
+# token, so :80 cannot match :8080. It must not be a regex: $parts comes from
+# ($ln.Trim() -split '\s+'), so $parts[1] carries NO leading space, and the earlier
+# -notmatch (' :' + $port + '$') never matched anything -- the function returned empty for
+# every port, which made the [5/6] AFTER port-80 gate unconditionally true (false green).
 function Get-PortListeners([int]$port) {
     $rows = @()
     try {
@@ -116,7 +120,7 @@ function Get-PortListeners([int]$port) {
             if ($ln -notmatch 'LISTENING') { continue }
             $parts = @(($ln.Trim()) -split '\s+')
             if ($parts.Count -lt 5) { continue }
-            if ($parts[1] -notmatch (' :' + $port + '$')) { continue }
+            if (-not $parts[1].EndsWith(':' + $port)) { continue }
             $pname = 'UNKNOWN'
             try { $pname = (Get-Process -Id ([int]$parts[4]) -ErrorAction Stop).ProcessName } catch { $pname = 'NOACCESS' }
             $rows += @{ Proto = $parts[0]; Local = $parts[1]; ProcId = $parts[4]; ProcName = $pname }
