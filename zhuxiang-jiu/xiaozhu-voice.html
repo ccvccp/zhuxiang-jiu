@@ -1390,6 +1390,13 @@ function handleTurn(j, channel) {
   renderSuggest(bubble, j.suggest);
   /* 商品面板同步: 推荐款/清单态常驻展示(购物氛围入口) */
   try { renderPanel(j.card || null); } catch (e) { /* 面板 fail-soft */ }
+  /* v129 品名豁免参照: 记当前卡品名(subject 优先否则首件),
+     供用户复述品名选品时 isProdNameSay 豁免回声防线 */
+  var _vc = j.card || null;
+  if (_vc && (_vc.subject || (_vc.items || []).length)) {
+    S.lastProdSubject = _vc.subject
+      || ((_vc.items || [])[0] || {}).name || "";
+  }
   /* v112 立即购买第二步: buyNow 点"来一件"加购成功(cart_added)
      → 自动续发"结算"完成闭环; 任何其他卡型/失败即清标志防
      误触发(换款/聊天后再点结算不串) */
@@ -1799,7 +1806,9 @@ function postVoiceTranscript(text, durationSec, skipSelfCheck) {
       return String(s).replace(/[，。？！、,.?! ]/g, "");
     };
     var _t2 = _nz(text);
-    if (String(text).length <= 10) {
+    if (String(text).length <= 10 && !isCmdExact(text)) {
+      /* v129: 整句购物指令跳过 self_utter 子串误杀(播报引用
+         "加入购物车/换一款"→真指令被判自录静默丢=真机缺陷②③) */
       var _now = Date.now();
       for (var i = 0; i < (S.selfUtter || []).length; i++) {
         if (S.selfUtterAt && _now - (S.selfUtterAt[i] || 0) > 12000) { continue; }
@@ -2258,8 +2267,8 @@ function streamConnect() {
          非回声即直接提交(回声 bargeIsEcho 拦, ≥2 实义字) */
       if (!cb && _ft && !S.pending) {
         var _cut = S.ttsPlaying;
+        var _nz2 = _ft.replace(/[\s，。？！、,.?!…·]/g, "");
         if (!_cut) {
-          var _nz2 = _ft.replace(/[\s，。？！、,.?!…·]/g, "");
           _cut = _nz2.length >= 2 && !bargeIsEcho(_ft);
         } else { _cut = bargeShouldCut(_ft); }
         if (_cut) {
@@ -2271,6 +2280,13 @@ function streamConnect() {
           stopTtsNow();
           setMicStatus("🎙 已暂停播报——新任务收到");
           postVoiceTranscript(_ft, 1, true);
+        } else if (!S.ttsPlaying) {
+          /* v129 可观测: 空闲 final 被静默丢弃(此前零埋点零
+             气泡, 真机"说了没反应"无法追查)——回声/碎片分因 */
+          voice83Event("turn_drop", {
+            reason: _nz2.length >= 2
+              ? "idle_final_echo" : "idle_final_frag",
+            text: _ft.slice(0, 40) });
         }
       }
       if (cb) cb(m.text || "");
@@ -2694,7 +2710,31 @@ function streamFinish(cb) {
    回声经 ASR 多为短句, 16 字已覆盖整句回声, 再宽则"用户说的正好是
    小竹刚说过的话"这类真指令会被静默丢弃(此处是响应后路径, 丢弃=命令
    已执行却无任何反馈, 比漏判回声更伤体验), 故不取 24。 */
+/* v129 购物指令整句豁免+品名豁免(真机会话 #599 三杀点误杀
+   修复): 播报话术会引用短指令("想换说「换一款」"/引导枚举含
+   "加入购物车"), 用户真说这些指令时三层回声防线(空闲 final
+   门/selfUtter 子串/isEchoOfTTS)把"真指令"当播报参照的子串
+   静默丢弃(无气泡无动作=真机"停止了, 没有执行")。对策:
+   ①归一后整句全等购物指令白名单→一律非回声放行(真回声段
+   是长句, 不会整句全等于短指令短语; "结算"误放有 confirm
+   4 位码高敏闸兜底); ②归一话语与最近卡片品名互为子串
+   (3~16 字)→用户复述品名选品, 非回声。 */
+function isCmdExact(t) {
+  var s = String(t || "").replace(
+    /[\s，。？！、,.?!:：；;「」『』（）()\-—…·啊呢吧嘛哦嗯呀啦]/g, "");
+  return /^(小竹|你好小竹)?(帮我|请|我要|我想|给我|麻烦)?(加入购物车|加入购物清单|加购|放进购物车|放到购物车|换一款|换一个|换一瓶|下一款|下一个|还有吗|结算|结账|下单|提交订单|买下|来一件|来一个|要一件|要一个|买这个|就它了|就要这个|需要这款|要这款|就要这款|需要这个|来一瓶|来一箱|立即购买|看新品|看看新品|取消|不要了|算了)$/.test(s);
+}
+function isProdNameSay(t) {
+  var p = String(S.lastProdSubject || "").replace(
+    /[\s，。？！、,.?!:：；;「」『』（）()\-—…·]/g, "");
+  if (!p || p.length < 3) return false;
+  var s = String(t || "").replace(
+    /[\s，。？！、,.?!:：；;「」『』（）()\-—…·啊呢吧嘛哦嗯呀啦]/g, "");
+  if (!s || s.length < 3 || s.length > 16) return false;
+  return p.indexOf(s) !== -1 || s.indexOf(p) !== -1;
+}
 function isEchoOfTTS(t) {
+  if (isCmdExact(t) || isProdNameSay(t)) return false; /* v129 */
   var last = (S.ttsSpokenAll || "").slice(0, 160) || S.lastSpoken || "";
   if (!last || !t) return false;
   var norm = function (s) {
@@ -2721,6 +2761,7 @@ function isEchoOfTTS(t) {
    保守方向: 宁漏切断(播报继续续听补位)不误切断(自言自语);
    纠正词/「小竹」开头由 bargeShouldCut 强制放行 */
 function bargeIsEcho(t, playing) {
+  if (isCmdExact(t) || isProdNameSay(t)) return false; /* v129 */
   function cn2num(seg) { /* 中文数字段→阿拉伯: 四十二→42,
     二千四百六十→2460(万级简化); TTS 读"42"文本为阿拉伯,
     ASR 收音识回"四十二"——数字形态差异致 LCS 骤降是
