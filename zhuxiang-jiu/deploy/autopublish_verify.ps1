@@ -29,13 +29,25 @@ Write-Host '== 5. 队列余量(API) =='
 # ---- 生产 API 凭据(禁止硬编码; 依据 .trae/rules/security-hard-coded.md 一.2) ----
 # 环境变量 ZX_API_PHONE / ZX_API_PASSWORD, 或 ZX_CRED_FILE 指向的仓外 JSON。
 # 缺失即 throw, 由下方 catch 记为 "API fail"(fail-closed, 不打印口令)。
+# 读取顺序(2026-11-24 fix placeholder incident):
+#   (1) ZX_CRED_FILE -> external JSON with locked ACL (highest priority)
+#   (2) env ZX_API_PHONE / ZX_API_PASSWORD (only when neither is a template placeholder)
+# Background: services.exe caches the process env block; after clearing the registry,
+#   SYSTEM scheduled tasks could still read placeholders ("your phone/password"), which
+#   caused 12 consecutive days of login 404. File-first plus a placeholder guard removes
+#   that failure mode. fail-closed: never hardcode a secret; throw when no valid credential.
 function Get-Sv73Cred {
-    $ph = $env:ZX_API_PHONE; $pw = $env:ZX_API_PASSWORD
-    if (-not ($ph -and $pw) -and $env:ZX_CRED_FILE -and (Test-Path $env:ZX_CRED_FILE)) {
+    $ph = $null; $pw = $null
+    # Placeholder guard: empty value or template wording is treated as invalid
+    $isPlaceholder = { param($v) (-not $v) -or ($v -match '你的|手机号|密码|xxx|XXX') }
+    if ($env:ZX_CRED_FILE -and (Test-Path $env:ZX_CRED_FILE)) {
         $o = ([Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($env:ZX_CRED_FILE)) | ConvertFrom-Json)
         $ph = $o.phone; $pw = $o.password
     }
-    if (-not ($ph -and $pw)) { throw 'ZX_API_PHONE/ZX_API_PASSWORD 未配置(ZX_CRED_FILE 亦缺失)' }
+    if (-not ($ph -and $pw) -and -not (& $isPlaceholder $env:ZX_API_PHONE) -and -not (& $isPlaceholder $env:ZX_API_PASSWORD)) {
+        $ph = $env:ZX_API_PHONE; $pw = $env:ZX_API_PASSWORD
+    }
+    if (-not ($ph -and $pw)) { throw 'ZX_CRED_FILE missing or credential invalid (env is placeholder), fail-closed' }
     return @{ phone = $ph; password = $pw }
 }
 try {
