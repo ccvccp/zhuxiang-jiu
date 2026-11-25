@@ -1,0 +1,110 @@
+{
+  "version": "3.13.0",
+  "updated_at": "2026-11-23",
+  "pc_root": "D:\\网站架构设计",
+  "ecs_p_root": "C:\\网站架构设计",
+  "ecs_ops_root": "E:\\ops\\trae_agent",
+  "hosts": {
+    "IZX9903XDSBI7MZ": {
+      "ecs_p_root": "C:\\网站架构设计",
+      "ecs_ops_root": "E:\\ops\\trae_agent",
+      "mount_require_letters": [],
+      "mount_require_paths": ["C:\\网站架构设计"],
+      "note": "old box i-2zebz5dnx9903xdsbi7m: mount point C:\\网站架构设计 (rclone SFTP + WinFsp, --read-only, REPARSE self-built by WinFsp per D33; never pre-create the directory), ops on the local E: volume. Migrated from the retired W-drive volume on 2026-11-21 (design v2.4 section 10.3); the old pmount.ps1 V3.8 W-drive volume no longer exists. Directory mountpoint instead of a subst letter because subst letters are per-logon-session and invisible to the SYSTEM daemon."
+    },
+    "IZZ8LSLM2PPTXKZ": {
+      "ecs_p_root": "C:\\网站架构设计",
+      "ecs_ops_root": "C:\\ops\\trae_agent",
+      "mount_require_letters": [],
+      "mount_require_paths": ["C:\\网站架构设计"],
+      "note": "new box i-2zeffnv2z8lslm2pptxk: single 80GB C: volume, no E:. The mount point is used instead of D: because subst drive letters are per-logon-session and invisible to SYSTEM tasks. Shared-dir artifacts are host-suffixed (manifest-ecs-<COMPUTERNAME>.json, ack-<id>-<COMPUTERNAME>.txt), so both boxes run the daemon concurrently without overwriting each other. Daemon IS scheduled here (task tra_agent_daemon, every 5 min) as approved."
+    },
+    "IZ3X067LKWJJHAZ": {
+      "ecs_p_root": "C:\\网站架构设计",
+      "ecs_ops_root": "C:\\ops\\trae_agent",
+      "mount_require_letters": [],
+      "mount_require_paths": ["C:\\网站架构设计"],
+      "note": "box3 i-2zehgtof3x067lkwjjha: Windows Server 2022 (10.0.20348), single 79.9GB C: volume, no E:. Measured before onboarding: C:\\网站架构设计 exists, C:\\mnt\\rclone\\rclone.exe and C:\\mnt\\ecs2pc_key are present, rclone.conf is under the SYSTEM profile, sshd Running/Automatic, no tra_agent_daemon task yet. The rclone remote pc: must listen on loopback 2224 on this box. Mount point is the directory, not a subst letter, for the same reason as IZZ8LSLM2PPTXKZ: subst letters are per-logon-session and invisible to SYSTEM tasks. Shared-dir artifacts are host-suffixed, so all ECS daemons run concurrently without overwriting each other."
+    }
+  },
+  "sync_dir_name": ".trae-sync",
+  "services": [
+    {
+      "name": "postgresql-x64-18",
+      "monitor": true,
+      "auto_restart": false,
+      "note": "observe-only: postmaster uptime is audit-round gate evidence, never auto-restart"
+    }
+  ],
+  "probe": {
+    "strike_max": 3,
+    "backoff_sec": [5, 30, 120, 600],
+    "breaker_limit": 4,
+    "verify_delays_sec": [10, 30, 60],
+    "free_mem_min_mb": 800,
+    "cpu_max_pct": 80
+  },
+  "mount": {
+    "require_letters": [],
+    "require_paths": ["C:\\网站架构设计"],
+    "rclone_exe": "C:\\mnt\\rclone\\rclone.exe",
+    "note": "Checked via Win32_LogicalDisk, never Get-Volume: WinFsp/rclone volumes report MISSING to Get-Volume. The rclone mount process is the real server behind the letter."
+  },
+  "sync": {
+    "lag_sla_ms": 180000,
+    "canary_timeout_sec": 120,
+    "pc_manifest_max_age_min": 60,
+    "peer_manifest_max_age_min": 120,
+    "cross_host_visible_sec": 12,
+    "churn_globs": ["self-evolving-agent/artifacts/*"],
+    "stale_manifest_recheck": true,
+    "stale_manifest_max": 50,
+    "note": "Freshness thresholds: a silent PC outage or tunnel drop leaves the last manifest on disk, so mtime age is the only liveness signal. Age over SLA is WARN; a wedged channel already FAILs at pchannel. cross_host_visible_sec is measured (10.3s with --vfs-cache-mode full + --dir-cache-time 10s), so a write made on one host needs >=12s before another host may read it back. churn_globs lists high-frequency state files owned by other subsystems: Diff classifies them as CHURN (reported, never quarantined, never rc=1), so real drift is not buried in expected noise. stale_manifest_recheck makes Diff re-read the live file before calling a hash mismatch DIVERGED: the ECS snapshot is written on an earlier round than the PC snapshot, so a write that lands in between makes the two manifests disagree while the file is already correct. Such entries are classified STALE_MANIFEST (reported, never quarantined, never rc=1); stale_manifest_max bounds the extra hashing so a mass break degrades to plain DIVERGED instead of a full re-hash. The same live re-check also covers the mirror case: when the PC snapshot is older than a write that has already landed here, no snapshot can judge the pair, so it is classified PENDING_SNAPSHOT (reported, never quarantined, never rc=1) and the next PC manifest round settles it -- a mismatch that survives a fresh snapshot still falls through to DIVERGED, so real drift is never masked for more than one round."
+  },
+  "sync_remote": {
+    "remote_root": "pc:/D:/网站架构设计",
+    "rclone_path": "C:\\mnt\\rclone\\rclone.exe",
+    "timeout_sec": 120
+  },
+  "self_update": {
+    "enabled": true,
+    "src_subdir": "zhuxiang-jiu\\deploy\\trae_agent",
+    "files": ["ta_config.json", "ta_guard.ps1", "ta_probe.ps1", "ta_daemon.ps1"],
+    "note": "Step 0 of the daemon: compare the local toolchain with the PC mirror and pull newer copies, so a fix published once reaches every ECS box without manual work on the PC side. Fail-closed: a candidate must pass the PS parser (or be valid JSON) and byte-match after copy, the previous file is kept as .bak-<ts>, and any error silently skips the whole step."
+  },
+  "disk": {
+    "warn_pct": 80,
+    "crit_pct": 90
+  },
+  "guard": {
+    "max_file_bytes": 20971520,
+    "max_files": 20000,
+    "verify_sample": 100,
+    "scan_ext": [".ps1", ".py", ".md", ".json", ".sql", ".txt", ".html", ".css", ".js", ".yml", ".yaml", ".toml", ".cfg", ".ini"],
+    "exclude_dirs": [".git", ".trae-sync", "node_modules", "__pycache__", ".venv", "venv", ".uploads", ".lint_libs", ".pip_libs", ".home"],
+    "enum_shrink_ratio": 0.5,
+    "enum_shrink_min_files": 200,
+    "note": "enum_shrink_* guard RemoteManifest against a wrong or half-dead remote root: a round enumerating fewer files than min_files, or fewer than (previous published count x ratio), is REFUSED - nothing is published and the hash cache is not pruned - because rc=0 on an empty root used to fabricate a full pc_only/ecs_only drift report and wipe the coverage cache in one round. A legitimate bulk delete therefore needs either a tiny previous count or an explicit ratio change."
+  },
+  "ecs_hash": {
+    "enabled": true,
+    "files_per_run": 5000,
+    "bytes_per_run": 2147483648,
+    "time_budget_sec": 1500,
+    "cache_name": "ecs-hash-cache.json",
+    "note": "ECS-side SHA256 computed by actually reading the mount (SFTP lsjson returns no hashes). Bounded per run; the state cache fills coverage across daemon rounds."
+  },
+  "fleet": {
+    "enabled": true,
+    "min_sha_coverage": 0.95,
+    "manifest_max_age_min": 60,
+    "expected_nodes": 4,
+    "note": "Outside view across nodes: a node whose toolchain predates the daemon's step 0 self-update never upgrades, so it keeps publishing manifests without sha/md5 and without the stale/host fields, and its own Diff can only compare size/mtime while looking normal. Fleet reads every manifest-*.json in the shared dir and reports per node: generation (legacy = no stale/host field, or sha_coverage below min_sha_coverage), sha_coverage, and snapshot age. Results go to fleet-status.json plus TA-FLEET-ALERT lines in the ledger; exit 2 = at least one node legacy/stale/unreadable/missing, never a silent pass. expected_nodes is the fleet size to register (PC + 3 ECS); a shortfall is reported as MISSING_NODE, not as a failure of the nodes that did register."
+  },
+  "evolve_bounds": {
+    "strike_max": [2, 5],
+    "lag_sla_ms": [120000, 240000],
+    "warn_pct": [70, 85],
+    "free_mem_min_mb": [400, 2048]
+  }
+}
