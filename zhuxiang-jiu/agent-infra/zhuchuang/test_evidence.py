@@ -41,3 +41,42 @@ def test_sensitive_files_and_values_are_not_exported(tmp_path):
     assert "do-not-export" not in joined
     assert ".env" not in joined
     assert "[已脱敏]" in redact_text("Authorization: Bearer very-secret-token")
+
+
+def test_extended_secret_fields_and_quoted_values_are_not_exported(tmp_path):
+    registry = tmp_path / "docs" / "registry"
+    registry.mkdir(parents=True)
+    (registry / "README.md").write_text(
+        "配置 client_secret=top-secret\n"
+        '配置 SECRET_KEY="top-secret"\n'
+        '配置 api_key="quoted secret value"\n'
+        "配置 auth_token='quoted auth value'\n",
+        encoding="utf-8",
+    )
+    items = collect_evidence(tmp_path, "配置", "abc123")
+    joined = str(items)
+    assert "top-secret" not in joined
+    assert "quoted secret value" not in joined
+    assert "secret value" not in joined
+    assert "quoted auth value" not in joined
+    assert "auth value" not in joined
+
+
+def test_unreliably_redacted_sensitive_config_line_is_excluded(tmp_path):
+    registry = tmp_path / "docs" / "registry"
+    registry.mkdir(parents=True)
+    (registry / "README.md").write_text(
+        "配置 SECRET_KEY =\n配置 正常说明\n",
+        encoding="utf-8",
+    )
+    items = collect_evidence(tmp_path, "配置", "abc123")
+    assert items
+    assert all("SECRET_KEY" not in item["summary"] for item in items)
+
+
+def test_non_positive_limit_returns_no_evidence(tmp_path):
+    registry = tmp_path / "docs" / "registry"
+    registry.mkdir(parents=True)
+    (registry / "README.md").write_text("模块清单是项目事实。\n", encoding="utf-8")
+    assert collect_evidence(tmp_path, "模块", "abc123", 0) == []
+    assert collect_evidence(tmp_path, "模块", "abc123", -1) == []

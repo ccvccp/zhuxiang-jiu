@@ -12,8 +12,18 @@ CANDIDATES = (
     "docs/registry/红线标记.md",
     "backend/services/llm_client.py",
 )
+SECRET_FIELD = (
+    r"(?:authorization|proxy-authorization|authentication|api[_-]?key|client[_-]?secret|"
+    r"secret(?:[_-]?key)?|access[_-]?key|private[_-]?key|encryption[_-]?key|"
+    r"signing[_-]?key|session[_-]?key|password|passwd|pwd|access[_-]?token|"
+    r"refresh[_-]?token|id[_-]?token|auth[_-]?token|token|auth|credentials?)"
+)
+SECRET_VALUE = r"""(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?!["'])[^\r\n]+)"""
 SECRET_PATTERN = re.compile(
-    r"(?i)(authorization\s*:\s*bearer\s+\S+|api[_-]?key\s*[=:]\s*\S+|password\s*[=:]\s*\S+|token\s*[=:]\s*\S+)"
+    rf"(?i)(?:(?<![A-Za-z0-9])authorization(?![A-Za-z0-9])\s*:\s*bearer\s+{SECRET_VALUE}|(?<![A-Za-z0-9]){SECRET_FIELD}(?![A-Za-z0-9])\s*[=:]\s*{SECRET_VALUE})"
+)
+SENSITIVE_CONFIG_PATTERN = re.compile(
+    rf"(?i)(?<![A-Za-z0-9]){SECRET_FIELD}(?![A-Za-z0-9])\s*[=:]"
 )
 
 
@@ -31,10 +41,15 @@ def repository_state(repo_root):
 
 
 def redact_text(text):
-    return SECRET_PATTERN.sub("[已脱敏]", str(text))
+    redacted = SECRET_PATTERN.sub("[已脱敏]", str(text))
+    if SENSITIVE_CONFIG_PATTERN.search(redacted):
+        return ""
+    return redacted
 
 
 def collect_evidence(repo_root, topic, source_version, limit=40):
+    if limit <= 0:
+        return []
     repo_root = Path(repo_root).resolve()
     items = []
     candidates = list(CANDIDATES)
