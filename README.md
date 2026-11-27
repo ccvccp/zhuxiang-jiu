@@ -6,6 +6,10 @@
 
 竹香酒官网全栈架构设计，包含 27 大业务模块、CI/CD 流水线、并发控制框架、后端分层架构与 Redis 持久化迁移。
 
+## 受控多 Agent 协同开发
+
+Kimi Work 主 Agent 可按 [受控多 Agent 协同团队规程](docs/agent-team/README.md) 组织需求、架构、开发、测试、独立审查和 PR 交付。该流程不会自动合并 PR 或部署生产环境。
+
 ## 开发规范
 
 ### 1. Git 提交规范
@@ -157,7 +161,7 @@ sh scripts/bench-pre-commit.sh 10
 |------|----------|------|
 | [modules.js](zhuxiang-jiu/js/modules.js) | 修改 | 模块15重写(10个AI能力)·删除模块26·模块27引用更新 oemModule→cooperationModule |
 | [cooperation-module-test.js](zhuxiang-jiu/js/cooperation-module-test.js) | 新增 | 16用例(CTC1-CTC16)·含供应链闭环验证 |
-| [oem-module-test.js](zhuxiang-jiu/js/oem-module-test.js) | 删除 | 原16用例(OTC1-OTC16)已由 cooperation-module-test.js 替代 |
+| `oem-module-test.js` | 删除 | 原16用例(OTC1-OTC16)已由 cooperation-module-test.js 替代 |
 | [procurement-module-test.js](zhuxiang-jiu/js/procurement-module-test.js) | 修改 | PTC16 OEM闭环→合作闭环·oemModule→cooperationModule |
 | [module-test.html](zhuxiang-jiu/module-test.html) | 修改 | 标题28→27·OEM面板→合作面板·CI按钮251用例·模块数27·版本v6.0 |
 | [ai-ops-module-test.js](zhuxiang-jiu/js/ai-ops-module-test.js) | 修改 | CI-7 OEM→合作·CI-1 171→167·总计255→251 |
@@ -256,7 +260,7 @@ sh scripts/bench-pre-commit.sh 10
 
 ## 并发控制规范
 
-> 完整文档: [docs/并发锁实施规范.md](docs/并发锁实施规范.md)
+> 完整文档: [zhuxiang-jiu/docs/并发锁实施规范.md](zhuxiang-jiu/docs/并发锁实施规范.md)
 
 ### Mutex 锁 key 命名
 
@@ -283,7 +287,7 @@ sh scripts/bench-pre-commit.sh 10
 |------|------|
 | 并发控制与事务一致性 | `docs/并发控制与事务一致性技术文档.md` |
 | 超时竞争与防重入 | `docs/超时竞争与防重入机制技术设计文档.md` |
-| 并发锁实施规范 | `docs/并发锁实施规范.md` |
+| 并发锁实施规范 | `zhuxiang-jiu/docs/并发锁实施规范.md` |
 | AI 智能性能测试报告 | `docs/AI智能性能测试报告.md` |
 | 代码重构任务清单 | `docs/代码重构任务清单.md` |
 | Pre-commit 钩子测试报告 | `docs/pre-commit-钩子测试报告.md` |
@@ -497,7 +501,7 @@ py probe_concurrency_multiworker.py
 | Redis 持久化迁移方案 | `docs/redis-persistence-migration-plan.md` |
 | 并发控制与事务一致性 | `docs/并发控制与事务一致性技术文档.md` |
 | 超时竞争与防重入 | `docs/超时竞争与防重入机制技术设计文档.md` |
-| 并发锁实施规范 | `docs/并发锁实施规范.md` |
+| 并发锁实施规范 | `zhuxiang-jiu/docs/并发锁实施规范.md` |
 | AI 智能性能测试报告 | `docs/AI智能性能测试报告.md` |
 | 代码重构任务清单 | `docs/代码重构任务清单.md` |
 | Pre-commit 钩子测试报告 | `docs/pre-commit-钩子测试报告.md` |
