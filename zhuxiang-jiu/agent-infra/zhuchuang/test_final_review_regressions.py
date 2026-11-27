@@ -497,6 +497,26 @@ def test_round2_truth_plan_prefix_does_not_waive_later_chapter_claim():
     assert any("部署完成声明" in item for item in report["blockers"])
 
 
+def test_truth_negated_plan_only_prerequisite_is_not_an_actual_claim():
+    chapters, evidence = fixture()
+    chapters["deployment"]["content"]["prerequisites"] = [
+        "建议：确认规划章……已完成结构化源稿并通过独立审查硬门禁；"
+        "本部署章仅为方案文本，不表示任何环境已完成部署或已通过验收。"
+    ]
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is True, report["blockers"]
+
+
+def test_redline_confirmation_accepts_prefixed_independent_sentence():
+    chapters, evidence = fixture()
+    chapters["deployment"]["content"]["confirmation_gates"] = [
+        "建议：任何生产部署都必须由用户另行明确人工确认；"
+        "run/render/accept 三命令均无生产部署开关……"
+    ]
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is True, report["blockers"]
+
+
 # 第二轮 Important 2：容器类型必须先于枚举成员和字典索引校验。
 
 @pytest.mark.parametrize("location", ["component", "step", "case", "interface"])

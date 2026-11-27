@@ -20,7 +20,7 @@ _COMPLETION_CLAIM = re.compile(
 _ACCEPTANCE_PASS_CLAIM = re.compile(r"(?:所有验收均已通过|全部验收(?:均)?通过|验收已(?:经)?通过|已(?:经)?通过验收)")
 _PLANNING_MARKERS = (
     "计划", "待执行", "待部署", "不得", "禁止", "不允许", "不应", "不自动执行",
-    "尚未", "未部署", "建议", "未来", "规划", "等待",
+    "不表示", "不代表", "不意味着", "仅为方案", "尚未", "未部署", "建议", "未来", "规划", "等待",
 )
 _NON_STATEMENT_KEYS = {
     "id", "case_id", "type", "stage", "generation", "status", "mode", "conclusion", "result",
@@ -68,8 +68,10 @@ def _has_affirmative_confirmation_gate(gates):
     for gate in gates:
         if not isinstance(gate, str):
             continue
-        if any(pattern.fullmatch(gate.strip()) for pattern in _CONFIRMATION_GATE_PATTERNS):
-            return True
+        text = re.sub(r"^(?:建议|规划)\s*[：:]\s*", "", gate.strip())
+        for sentence in re.split(r"[。；;\n]+", text):
+            if any(pattern.fullmatch(sentence.strip()) for pattern in _CONFIRMATION_GATE_PATTERNS):
+                return True
     return False
 
 
