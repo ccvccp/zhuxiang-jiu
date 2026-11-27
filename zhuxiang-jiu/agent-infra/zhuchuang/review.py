@@ -1,16 +1,38 @@
 import copy
 import json
+import re
 
 from contracts import source_hash, validate_chapters
 
 
 SOURCE_EVIDENCE_FIELDS = ("id", "type", "path", "locator", "summary", "source_version")
+_REDLINE_SCOPE = r"(?:生产部署|支付回调|鉴权|模型门控|Redis|语音)"
+_CONFIRMATION_GATE_PATTERNS = (
+    re.compile(r"任何生产部署都必须由用户另行明确人工确认"),
+    re.compile(rf"(?:任何)?{_REDLINE_SCOPE}(?:操作|变更|发布|上线)?(?:前)?(?:必须|需要|须|需)(?:执行|保留)?人工确认"),
+    re.compile(r"(?:必须|需要|须|需)(?:执行|保留)?人工确认"),
+    re.compile(r"(?:必须)?保留人工确认"),
+    re.compile(rf"(?:经人工确认|人工确认)后方可(?:进行|执行)?{_REDLINE_SCOPE}"),
+)
+
+
+def _validate_string_fields(item, fields, label):
+    errors = []
+    for key in fields:
+        value = item.get(key)
+        if value is None:
+            errors.append(f"{label}缺少 {key}")
+        elif not isinstance(value, str):
+            errors.append(f"{label} {key} 类型必须为字符串")
+        elif not value.strip():
+            errors.append(f"{label}缺少 {key}")
+    return errors
 
 
 def _validate_source_evidence(item):
     if not isinstance(item, dict):
         return ["证据必须为对象"]
-    return [f"证据缺少 {key}" for key in SOURCE_EVIDENCE_FIELDS if not item.get(key)]
+    return _validate_string_fields(item, SOURCE_EVIDENCE_FIELDS, "证据")
 
 
 def _is_unknown_reference(ref, known_ids):
@@ -28,14 +50,10 @@ def _has_template_marker(value):
 
 
 def _has_affirmative_confirmation_gate(gates):
-    negative_terms = ("无需", "无须", "取消", "不再", "跳过", "不需要", "豁免")
-    affirmative_terms = ("必须", "需要", "须人工确认", "需人工确认", "经人工确认", "保留人工确认", "明确人工确认", "人工确认后方可", "人工确认后才能", "人工确认后执行")
     for gate in gates:
-        if not isinstance(gate, str) or "人工确认" not in gate:
+        if not isinstance(gate, str):
             continue
-        if any(term in gate for term in negative_terms):
-            continue
-        if any(term in gate for term in affirmative_terms):
+        if any(pattern.fullmatch(gate.strip()) for pattern in _CONFIRMATION_GATE_PATTERNS):
             return True
     return False
 
@@ -43,19 +61,21 @@ def _has_affirmative_confirmation_gate(gates):
 def validate_acceptance_evidence(item):
     if not isinstance(item, dict):
         return ["验收证据必须为对象"]
-    errors = []
-    for key in ("id", "case_id", "command", "environment", "executed_at", "result", "output_summary", "artifact"):
-        if not item.get(key):
-            errors.append(f"验收证据缺少 {key}")
-    if item.get("result") not in {"passed", "failed"}:
+    errors = _validate_string_fields(
+        item,
+        ("id", "case_id", "command", "environment", "executed_at", "result", "output_summary", "artifact"),
+        "验收证据",
+    )
+    result = item.get("result")
+    if not isinstance(result, str) or result not in {"passed", "failed"}:
         errors.append("验收证据 result 必须为 passed 或 failed")
     if "exit_code" not in item:
         errors.append("验收证据缺少 exit_code")
     elif type(item["exit_code"]) is not int:
         errors.append("验收证据 exit_code 必须为整数")
-    elif item.get("result") == "passed" and item["exit_code"] != 0:
+    elif result == "passed" and item["exit_code"] != 0:
         errors.append("通过证据的 exit_code 必须为 0")
-    elif item.get("result") == "failed" and item["exit_code"] == 0:
+    elif result == "failed" and item["exit_code"] == 0:
         errors.append("失败证据的 exit_code 不能为 0")
     return errors
 

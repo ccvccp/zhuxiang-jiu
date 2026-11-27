@@ -168,3 +168,68 @@ def test_template_markers_in_source_text_are_blocked(marker):
     report = review_chapters(chapters, evidence)
     assert report["word_ready"] is False
     assert "源稿仍含模板变量" in report["blockers"]
+
+
+@pytest.mark.parametrize("gate", [
+    "必须避免人工确认",
+    "必须暂不人工确认",
+    "需要讨论人工确认",
+])
+def test_redline_confirmation_rejects_adversarial_wording(gate):
+    chapters, evidence = fixture()
+    chapters["deployment"]["content"]["confirmation_gates"] = [gate]
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False
+    assert "红线内容缺少人工确认门" in report["blockers"]
+
+
+@pytest.mark.parametrize("gate", [
+    "任何生产部署都必须由用户另行明确人工确认",
+    "生产部署前必须人工确认",
+    "必须保留人工确认",
+    "经人工确认后方可生产部署",
+])
+def test_redline_confirmation_accepts_direct_actions(gate):
+    chapters, evidence = fixture()
+    chapters["deployment"]["content"]["confirmation_gates"] = [gate]
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is True
+
+
+def test_acceptance_result_must_be_a_string_enum():
+    item = passed_evidence("AC-001")
+    item["result"] = []
+    errors = validate_acceptance_evidence(item)
+    assert "验收证据 result 必须为 passed 或 failed" in errors
+
+
+def test_apply_acceptance_rejects_non_string_case_id():
+    chapters, _ = fixture()
+    item = passed_evidence("AC-001")
+    item["case_id"] = ["AC-001"]
+    with pytest.raises(ValueError, match="case_id 类型必须为字符串"):
+        apply_acceptance(chapters, [item])
+
+
+@pytest.mark.parametrize("field", [
+    "id",
+    "command",
+    "environment",
+    "executed_at",
+    "output_summary",
+    "artifact",
+])
+def test_acceptance_evidence_rejects_non_string_fields(field):
+    item = passed_evidence("AC-001")
+    item[field] = ["invalid"]
+    errors = validate_acceptance_evidence(item)
+    assert f"验收证据 {field} 类型必须为字符串" in errors
+
+
+@pytest.mark.parametrize("invalid_id", [123, True])
+def test_source_evidence_id_must_be_string(invalid_id):
+    chapters, evidence = fixture()
+    evidence[0]["id"] = invalid_id
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False
+    assert "证据 id 类型必须为字符串" in report["blockers"]
