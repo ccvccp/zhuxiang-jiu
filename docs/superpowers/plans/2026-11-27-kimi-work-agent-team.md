@@ -143,10 +143,13 @@ PY
 1. 检查仓库、文档、现有 Issue 和分支，避免重复工作。
 2. 形成可验证的验收标准，识别依赖、风险和回退方式。
 3. 创建或复用 Issue；一个开发 Issue 对应一个独立分支和责任 Agent。
-4. 无依赖且不共享文件的任务才可并行，其余任务串行。
-5. 实现后运行与变更匹配的测试，再由未参与主要实现的审查 Agent 独立复核。
-6. PR 关联 Issue，记录真实测试证据、风险、遗留事项和回退方法。
-7. CI 与独立审查通过后等待用户确认；合并和生产部署是两个独立的人工决策。
+4. 无共享状态、无依赖且不共享文件的任务才可并行，其余任务串行。
+5. 代码冲突时调整任务顺序／文件边界；业务语义冲突不强行自动解决，交由主 Agent 和用户确认。
+6. 需求阻塞时在 Issue 记录缺失信息和影响，暂停该任务，继续无依赖任务。
+7. 发现敏感信息或生产风险时立即停止相关操作，不提交、不输出秘密，向用户说明阻塞原因。
+8. 实现后运行与变更匹配的测试，再由未参与主要实现的审查 Agent 独立复核。
+9. PR 关联 Issue，记录真实测试证据、风险、遗留事项和回退方法。
+10. CI 与独立审查通过后等待用户确认；合并和生产部署是两个独立的人工决策。
 
 ## 权限边界
 
@@ -174,7 +177,7 @@ PY
 - 接收用户需求，检查仓库、文档、近期变更、现有 Issue 和分支。
 - 组织需求与架构分析，形成验收标准、任务依赖、测试和回退要求。
 - 创建或复用 Issue，并按 `agent/<Issue编号>-<简短英文名称>` 建立独立分支。
-- 使用 `handoff-template.md` 分派任务；只有无依赖且不共享文件的任务才可并行。
+- 使用 `handoff-template.md` 分派任务；无共享状态、无依赖且不共享文件的任务才可并行。
 - 集成测试结果和独立审查结论，向用户交付真实 Issue／PR 链接和证据。
 
 ## 输入
@@ -196,7 +199,10 @@ PY
 3. 子 Agent 只处理分配范围；需要扩大范围时先返回主 Agent。
 4. 测试失败先复现并区分既有失败与本次引入的失败。
 5. 审查未通过时退回责任 Agent；同一问题两轮修复仍未通过则停止。
-6. 工具或网络异常后先核对已有 Issue、分支、提交和 PR，再恢复，避免重复创建。
+6. 代码冲突时调整任务顺序／文件边界，并将相关任务改为串行；业务语义冲突不强行自动解决，交由主 Agent 和用户确认。
+7. 需求阻塞时在 Issue 记录缺失信息和影响，暂停该任务，继续无依赖任务。
+8. 发现敏感信息或生产风险时立即停止相关操作，不提交、不输出秘密，向用户说明阻塞原因。
+9. 工具或网络异常后先核对已有 Issue、分支、提交和 PR，再恢复，避免重复创建。
 
 ## 权限边界
 
@@ -522,6 +528,10 @@ for name, headings in required.items():
     text = p.read_text(encoding='utf-8')
     for heading in headings:
         assert heading in text, f'{name} 缺少 {heading}'
+handoff = '- 统一按以下四项返回：实际分析或修改、验证证据、风险与回退、阻塞事项；无修改、未执行验证或无阻塞时明确写“无”或“未执行及原因”。'
+for role in ['requirements', 'architecture', 'frontend', 'backend', 'testing', 'review', 'delivery']:
+    name = f'docs/agent-team/roles/{role}.md'
+    assert handoff in Path(name).read_text(encoding='utf-8'), f'{name} 缺少统一返回约定'
 print('质量、交付角色和 GitHub 模板校验通过')
 PY
 ```
@@ -552,6 +562,7 @@ PY
 - 测试计划及与验收标准的对应关系。
 - 实际执行的命令、退出状态、通过／失败数量和失败证据。
 - 未运行项目及原因、风险、回归结论和需要修复的事项。
+- 统一按以下四项返回：实际分析或修改、验证证据、风险与回退、阻塞事项；无修改、未执行验证或无阻塞时明确写“无”或“未执行及原因”。
 
 ## 权限边界
 
@@ -584,6 +595,7 @@ PY
 - `通过` 或 `需要修改` 的审查结论。
 - 按严重程度排列的发现、文件行号、修复建议和验证方式。
 - 测试证据缺口、剩余风险及是否满足等待用户确认的条件。
+- 统一按以下四项返回：实际分析或修改、验证证据、风险与回退、阻塞事项；无修改、未执行验证或无阻塞时明确写“无”或“未执行及原因”。
 
 ## 权限边界
 
@@ -616,6 +628,7 @@ PY
 - 完整 PR 描述和真实 PR URL。
 - 变更文件清单、测试证据、CI 状态和未解决事项。
 - 合并与生产部署均需用户单独确认的明确提示。
+- 统一按以下四项返回：实际分析或修改、验证证据、风险与回退、阻塞事项；无修改、未执行验证或无阻塞时明确写“无”或“未执行及原因”。
 
 ## 权限边界
 
@@ -788,10 +801,30 @@ expected = [
 for p in expected:
     assert p.is_file(), f'缺少文件: {p}'
     assert p.stat().st_size > 100, f'文件内容异常为空: {p}'
-for p in Path('docs/agent-team/roles').glob('*.md'):
+coordination_requirements = [
+    '无共享状态、无依赖且不共享文件的任务才可并行',
+    '代码冲突时调整任务顺序／文件边界',
+    '业务语义冲突不强行自动解决',
+    '需求阻塞时在 Issue 记录缺失信息和影响，暂停该任务，继续无依赖任务',
+    '敏感信息或生产风险时立即停止相关操作，不提交、不输出秘密，向用户说明阻塞原因',
+]
+for name in ['docs/agent-team/README.md', 'docs/agent-team/coordinator.md']:
+    text = Path(name).read_text(encoding='utf-8')
+    for required_text in coordination_requirements:
+        assert required_text in text, f'{name} 缺少协调约定: {required_text}'
+handoff = '- 统一按以下四项返回：实际分析或修改、验证证据、风险与回退、阻塞事项；无修改、未执行验证或无阻塞时明确写“无”或“未执行及原因”。'
+for name in role_names:
+    p = Path(f'docs/agent-team/roles/{name}.md')
     text = p.read_text(encoding='utf-8')
     for heading in ['## 职责', '## 输入', '## 输出', '## 权限边界']:
         assert heading in text, f'{p} 缺少 {heading}'
+    assert handoff in text, f'{p} 缺少统一返回约定'
+issue_text = Path('.github/ISSUE_TEMPLATE/agent-task.md').read_text(encoding='utf-8')
+for required_text in ['## 人工门禁', '不自动合并 PR', '不自动部署生产环境', '重大架构、数据迁移、权限或生产行为变化需用户单独确认']:
+    assert required_text in issue_text, f'Issue 模板缺少人工门禁: {required_text}'
+pr_text = Path('.github/PULL_REQUEST_TEMPLATE.md').read_text(encoding='utf-8')
+for required_text in ['## 人工门禁', '合并前等待用户明确批准', '生产部署需要用户另行明确批准']:
+    assert required_text in pr_text, f'PR 模板缺少人工门禁: {required_text}'
 markdown_files = expected + [Path('README.md'), Path('docs/superpowers/specs/2026-11-27-kimi-work-agent-team-design.md'), Path('docs/superpowers/plans/2026-11-27-kimi-work-agent-team.md')]
 for p in markdown_files:
     text = strip_fences(p.read_text(encoding='utf-8'))
