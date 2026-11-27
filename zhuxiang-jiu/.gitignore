@@ -1,3 +1,4 @@
 ﻿
 # 支付宝 Windows 手工沙箱受保护配置(密钥+沙箱账号, 严禁入库)
 /backend/.alipay-sandbox.json
+/output/zhuchuang/
