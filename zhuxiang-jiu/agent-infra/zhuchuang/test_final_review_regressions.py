@@ -431,3 +431,143 @@ def test_contract_cli_render_maps_malformed_review_to_5(tmp_path):
     assert result.returncode == 5
     assert "审查记录" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+# 第二轮 Important 1：所有进入 Word 的陈述型文本共享真实性门禁。
+
+@pytest.mark.parametrize("stage,field,claim", [
+    ("planning", "scope", "所有验收均已通过"),
+    ("design", "architecture", "生产环境已经部署完成"),
+    ("deployment", "verification", "部署完成"),
+])
+def test_round2_truth_scans_planning_design_and_deployment_non_steps(stage, field, claim):
+    chapters, evidence = fixture()
+    chapters[stage]["content"][field].append(claim)
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False
+    assert any(stage in item and ("声明" in item or "验证" in item) for item in report["blockers"])
+
+
+def test_round2_truth_scans_acceptance_case_statements_beyond_notes():
+    chapters, evidence = fixture()
+    chapters["acceptance"]["content"]["cases"][0]["title"] = "所有验收均已通过"
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False
+    assert any("验收通过声明" in item for item in report["blockers"])
+
+
+@pytest.mark.parametrize("claim", [
+    "部署完成",
+    "已经部署完成",
+    "生产环境部署完成",
+    "生产环境已经部署完成",
+    "部署已完成",
+    "已经完成生产环境部署",
+])
+def test_round2_truth_recognizes_common_deployment_completion_word_orders(claim):
+    chapters, evidence = fixture()
+    chapters["design"]["content"]["architecture"].append(claim)
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False
+    assert any("部署完成声明" in item for item in report["blockers"])
+
+
+def test_round2_truth_expected_plans_prohibitions_and_structural_values_are_not_claims():
+    chapters, evidence = fixture()
+    chapters["acceptance"]["content"]["cases"][0]["expected"] = "所有验收均已通过"
+    chapters["planning"]["content"]["scope"].append("计划在所有验收均已通过后归档")
+    chapters["design"]["content"]["architecture"].append("生产环境部署完成后，待执行人工复核")
+    chapters["deployment"]["content"]["verification"].append("禁止在完成前宣称部署完成；待执行")
+    chapters["design"]["content"]["components"][0]["metadata"] = {
+        "id": "所有验收均已通过",
+        "path": "docs/部署完成.md",
+        "hash": "已经部署完成",
+    }
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is True, report["blockers"]
+
+
+def test_round2_truth_plan_prefix_does_not_waive_later_chapter_claim():
+    chapters, evidence = fixture()
+    chapters["planning"]["content"]["scope"].append("计划后续验收，但所有验收均已通过")
+    chapters["design"]["content"]["architecture"].append("原方案待执行，但生产环境已经部署完成")
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False
+    assert any("验收通过声明" in item for item in report["blockers"])
+    assert any("部署完成声明" in item for item in report["blockers"])
+
+
+# 第二轮 Important 2：容器类型必须先于枚举成员和字典索引校验。
+
+@pytest.mark.parametrize("location", ["component", "step", "case", "interface"])
+@pytest.mark.parametrize("invalid", [[], {}, 1, True])
+def test_round2_optional_status_rejects_containers_and_scalars_without_raising(location, invalid):
+    chapters, evidence = structured_fixture()
+    targets = {
+        "component": chapters["design"]["content"]["components"][0],
+        "step": chapters["deployment"]["content"]["steps"][0],
+        "case": chapters["acceptance"]["content"]["cases"][0],
+        "interface": chapters["design"]["content"]["interfaces"][0],
+    }
+    targets[location]["status"] = invalid
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False
+    assert any("status" in item for item in report["blockers"])
+
+
+@pytest.mark.parametrize("field", ["generation", "mode", "conclusion"])
+@pytest.mark.parametrize("invalid", [[], {}, 1, True])
+def test_round2_required_enums_return_blockers_for_wrong_types(field, invalid):
+    chapters, evidence = fixture()
+    if field == "generation":
+        chapters["design"]["generation"] = invalid
+    else:
+        chapters["acceptance"]["content"][field] = invalid
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False
+    assert any(field in item for item in report["blockers"])
+
+
+@pytest.mark.parametrize("field", [
+    "id", "case_id", "command", "environment", "executed_at", "result", "output_summary", "artifact",
+])
+@pytest.mark.parametrize("invalid", [[], {}, 1, True])
+def test_round2_acceptance_evidence_string_fields_never_raise(field, invalid):
+    chapters, evidence = fixture()
+    chapters = apply_acceptance(chapters, all_passed_evidence())
+    chapters["acceptance"]["content"]["evidence"][0][field] = invalid
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False
+    assert any(field in item for item in report["blockers"])
+
+
+def test_round2_cli_accept_invalid_status_is_controlled(tmp_path):
+    _, run_dir = run_rule_pipeline(tmp_path)
+    chapters = load_json(run_dir / "chapters.json")
+    chapters["design"]["content"]["components"][0]["status"] = []
+    (run_dir / "chapters.json").write_text(json.dumps(chapters, ensure_ascii=False), encoding="utf-8")
+    evidence_path = tmp_path / "acceptance.json"
+    evidence_path.write_text(json.dumps(all_passed_evidence()), encoding="utf-8")
+    result = run_cli("accept", "--run-dir", str(run_dir), "--evidence", str(evidence_path))
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "status" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_round2_cli_render_invalid_evidence_id_is_controlled(tmp_path):
+    _, run_dir = run_rule_pipeline(tmp_path)
+    chapters = apply_acceptance(load_json(run_dir / "chapters.json"), all_passed_evidence())
+    chapters["acceptance"]["content"]["evidence"][0]["id"] = []
+    evidence = load_json(run_dir / "evidence.json")
+    review = {
+        "schema_version": "1.0", "word_ready": True, "blockers": [], "warnings": [],
+        "source_hash": source_hash(chapters), "evidence_hash": source_hash(evidence),
+    }
+    (run_dir / "chapters.json").write_text(json.dumps(chapters, ensure_ascii=False), encoding="utf-8")
+    (run_dir / "review.json").write_text(json.dumps(review, ensure_ascii=False), encoding="utf-8")
+    result = run_cli("render", "--run-dir", str(run_dir))
+    assert result.returncode == 5
+    assert result.stdout == ""
+    assert "id" in result.stderr
+    assert "Traceback" not in result.stderr

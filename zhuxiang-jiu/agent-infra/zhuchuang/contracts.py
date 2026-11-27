@@ -97,8 +97,10 @@ def _validate_optional_contract_fields(item, label, errors):
     for key in ("component_name", "interface_name"):
         if key in item:
             _validate_string(item[key], f"{label}.{key}", errors)
-    if "status" in item and item["status"] not in {"planned", "pending", "completed", "failed"}:
-        errors.append(f"{label}.status 必须为 planned、pending、completed 或 failed")
+    if "status" in item:
+        status = item["status"]
+        if not isinstance(status, str) or status not in {"planned", "pending", "completed", "failed"}:
+            errors.append(f"{label}.status 必须为 planned、pending、completed 或 failed 字符串")
     if "port" in item and (type(item["port"]) is not int or not 1 <= item["port"] <= 65535):
         errors.append(f"{label}.port 必须为 1 到 65535 的整数")
     if "environment_switches" in item:
@@ -193,15 +195,16 @@ def _validate_no_null(value, path, errors):
 
 def validate_chapter(stage, chapter):
     errors = []
-    if stage not in CHAPTER_FIELDS:
+    if not isinstance(stage, str) or stage not in CHAPTER_FIELDS:
         return [f"未知阶段：{stage}"]
     if not isinstance(chapter, dict):
         return [f"{stage} 必须为对象"]
     _validate_no_null(chapter, stage, errors)
     if chapter.get("stage") != stage:
         errors.append(f"{stage} 的 stage 不一致")
-    if chapter.get("generation") not in {"external", "rule"}:
-        errors.append(f"{stage} 缺少有效 generation")
+    generation = chapter.get("generation")
+    if not isinstance(generation, str) or generation not in {"external", "rule"}:
+        errors.append(f"{stage} 缺少有效 generation 字符串")
     for key in ("evidence_refs", "open_questions"):
         _validate_string_list(chapter.get(key), f"{stage}.{key}", errors)
     content = chapter.get("content")
@@ -229,10 +232,12 @@ def validate_chapter(stage, chapter):
     if stage == "design":
         _validate_interfaces(content.get("interfaces"), errors)
     if stage == "acceptance":
-        if content.get("mode") not in {"plan", "result"}:
-            errors.append("验收 mode 必须为 plan 或 result")
-        if content.get("conclusion") not in {"pending", "passed", "failed"}:
-            errors.append("验收结论必须为 pending、passed 或 failed")
+        mode = content.get("mode")
+        conclusion = content.get("conclusion")
+        if not isinstance(mode, str) or mode not in {"plan", "result"}:
+            errors.append("验收 mode 必须为 plan 或 result 字符串")
+        if not isinstance(conclusion, str) or conclusion not in {"pending", "passed", "failed"}:
+            errors.append("验收结论必须为 pending、passed 或 failed 字符串")
         evidence = content.get("evidence")
         if isinstance(evidence, list):
             for index, item in enumerate(evidence):
