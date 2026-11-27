@@ -32,7 +32,7 @@ def _save_review_and_render(run_dir, manifest, chapters, evidence):
     return manifest
 
 
-def run_pipeline(topic="", request="", repo_root=None, output_root=None, generation="auto", model="", client=None, resume_dir=None, run_id=""):
+def run_pipeline(topic="", request="", repo_root=None, output_root=None, generation="auto", model="", client=None, resume_dir=None, run_id="", adapter_factory=ModelAdapter):
     repo_root = Path(repo_root or Path(__file__).resolve().parents[2]).resolve()
     state = repository_state(repo_root)
     if resume_dir:
@@ -60,7 +60,15 @@ def run_pipeline(topic="", request="", repo_root=None, output_root=None, generat
         chapters = build_chapters(topic, request, evidence)
         atomic_write_json(run_dir / "evidence.json", evidence)
         atomic_write_json(run_dir / "manifest.json", manifest)
-    adapter = ModelAdapter(generation, model, client)
+    try:
+        adapter = adapter_factory(generation, model, client)
+    except Exception as exc:
+        failed_stage = next((name for name in STAGES if manifest["stages"][name]["status"] != "completed"), None)
+        if failed_stage is not None:
+            manifest["stages"][failed_stage]["status"] = "failed"
+            manifest["stages"][failed_stage]["warning"] = type(exc).__name__
+            atomic_write_json(run_dir / "manifest.json", manifest)
+        raise
     for stage in STAGES:
         if manifest["stages"][stage]["status"] == "completed":
             continue
