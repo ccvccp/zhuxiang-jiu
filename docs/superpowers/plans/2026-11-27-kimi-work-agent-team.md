@@ -755,6 +755,27 @@ python - <<'PY'
 from pathlib import Path
 import re
 root = Path.cwd()
+def strip_fences(text):
+    stripped = []
+    fence_char = None
+    fence_length = 0
+    for line in text.splitlines():
+        opening = re.match(r'^[ ]{0,3}(`{3,}|~{3,})', line)
+        if fence_char is None:
+            if opening:
+                fence = opening.group(1)
+                fence_char = fence[0]
+                fence_length = len(fence)
+                continue
+            stripped.append(line)
+            continue
+        closing = re.fullmatch(r'[ ]{0,3}(`{3,}|~{3,})[ \t]*', line)
+        if closing:
+            fence = closing.group(1)
+            if fence[0] == fence_char and len(fence) >= fence_length:
+                fence_char = None
+                fence_length = 0
+    return '\n'.join(stripped)
 role_names = ['requirements', 'architecture', 'frontend', 'backend', 'testing', 'review', 'delivery']
 expected = [
     Path('docs/agent-team/README.md'),
@@ -773,7 +794,7 @@ for p in Path('docs/agent-team/roles').glob('*.md'):
         assert heading in text, f'{p} 缺少 {heading}'
 markdown_files = expected + [Path('README.md'), Path('docs/superpowers/specs/2026-11-27-kimi-work-agent-team-design.md'), Path('docs/superpowers/plans/2026-11-27-kimi-work-agent-team.md')]
 for p in markdown_files:
-    text = p.read_text(encoding='utf-8')
+    text = strip_fences(p.read_text(encoding='utf-8'))
     for target in re.findall(r'\[[^\]]+\]\(([^)]+)\)', text):
         if '://' in target or target.startswith('#') or target.startswith('mailto:'):
             continue
