@@ -135,10 +135,16 @@ def render_document(run_dir):
     field.set(qn("w:instr"), "PAGE")
     footer._p.append(field)
     path = run_dir / "创新规划设计部署验收.docx"
-    document.save(path)
-    errors = validate_docx(path)
-    if errors:
-        raise RenderError("；".join(errors))
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    try:
+        document.save(temporary)
+        errors = validate_docx(temporary)
+        if errors:
+            raise RenderError("；".join(errors))
+        temporary.replace(path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
     manifest["artifacts"]["docx"] = str(path)
     from contracts import atomic_write_json
     atomic_write_json(run_dir / "manifest.json", manifest)
@@ -150,11 +156,17 @@ def validate_docx(path):
     path = Path(path)
     if not path.is_file() or path.stat().st_size == 0:
         return ["DOCX 不存在或为空"]
-    with zipfile.ZipFile(path) as package:
-        if package.testzip() is not None:
-            errors.append("DOCX ZIP 包损坏")
-    document = Document(path)
-    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    try:
+        with zipfile.ZipFile(path) as package:
+            if package.testzip() is not None:
+                return ["DOCX ZIP 包损坏"]
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile):
+        return ["DOCX ZIP 包损坏或格式无效"]
+    try:
+        document = Document(path)
+        text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    except Exception:
+        return ["DOCX OOXML 无效或无法打开"]
     for _, title in TITLES:
         if title not in text:
             errors.append(f"缺少 {title}")
