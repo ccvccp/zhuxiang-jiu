@@ -6,7 +6,7 @@ from contracts import STAGES, atomic_write_json, load_json, make_manifest, valid
 from evidence import collect_evidence, redact_text, repository_state
 from fallback import build_chapters
 from model_adapter import ModelAdapter
-from render_docx import render_document, write_markdown
+from render_docx import invalidate_delivery, render_document, write_markdown
 from review import apply_acceptance, review_chapters
 
 INSTRUCTIONS = {
@@ -17,6 +17,18 @@ INSTRUCTIONS = {
 }
 
 
+def _migrate_manifest(manifest):
+    requested = manifest.get("requested_generation")
+    if requested not in {"auto", "external", "rule"}:
+        # 旧版本只有 auto 能产生 mixed；其余值可直接作为原请求模式恢复。
+        requested = manifest.get("generation") if manifest.get("generation") in {"auto", "external", "rule"} else "auto"
+        manifest["requested_generation"] = requested
+    manifest.setdefault("delivery", {
+        "status": "not_delivered", "docx": "", "source_hash": "", "evidence_hash": "", "error": "",
+    })
+    return manifest
+
+
 def _save_review_and_render(run_dir, manifest, chapters, evidence):
     report = review_chapters(chapters, evidence)
     atomic_write_json(run_dir / "chapters.json", chapters)
@@ -24,12 +36,40 @@ def _save_review_and_render(run_dir, manifest, chapters, evidence):
     manifest["review"] = {"word_ready": report["word_ready"], "blockers": report["blockers"]}
     manifest["artifacts"]["run_dir"] = str(run_dir)
     atomic_write_json(run_dir / "manifest.json", manifest)
-    write_markdown(run_dir)
-    if report["word_ready"]:
+    if not report["word_ready"]:
+        invalidate_delivery(run_dir, manifest, "not_delivered", "审查存在阻断项")
+        return manifest
+    try:
+        write_markdown(run_dir)
         render_document(run_dir)
         manifest = load_json(run_dir / "manifest.json")
+    except Exception as exc:
+        invalidate_delivery(run_dir, manifest, "failed", f"{type(exc).__name__}: {exc}")
+        manifest["delivery"]["source_hash"] = report["source_hash"]
+        manifest["delivery"]["evidence_hash"] = report["evidence_hash"]
+        atomic_write_json(run_dir / "manifest.json", manifest)
+        raise
     atomic_write_json(run_dir / "manifest.json", manifest)
     return manifest
+
+
+def _check_resume_tracks(generation, manifest, chapters):
+    completed = [stage for stage in STAGES if manifest["stages"][stage]["status"] == "completed"]
+    completed_generations = set()
+    for stage in completed:
+        if stage not in chapters or not isinstance(chapters[stage], dict):
+            raise ValueError(f"恢复源稿缺少已完成章节：{stage}")
+        errors = validate_chapter(stage, chapters[stage])
+        if errors:
+            raise ValueError("恢复源稿校验失败：" + "；".join(errors))
+        completed_generations.add(chapters[stage].get("generation"))
+    if generation == "external" and "rule" in completed_generations:
+        raise ValueError("external 恢复遇到既有规则章节，必须停止；请新建运行或改用 auto")
+    if generation == "rule" and "external" in completed_generations:
+        raise ValueError("rule 恢复遇到既有外部模型章节，不能静默混轨；请新建规则运行或改用 auto")
+    unknown = completed_generations - {"external", "rule"}
+    if unknown:
+        raise ValueError("恢复章节缺少可识别的实际生成方式")
 
 
 def run_pipeline(topic="", request="", repo_root=None, output_root=None, generation="auto", model="", client=None, resume_dir=None, run_id="", adapter_factory=ModelAdapter):
@@ -37,7 +77,7 @@ def run_pipeline(topic="", request="", repo_root=None, output_root=None, generat
     state = repository_state(repo_root)
     if resume_dir:
         run_dir = Path(resume_dir).resolve()
-        manifest = load_json(run_dir / "manifest.json")
+        manifest = _migrate_manifest(load_json(run_dir / "manifest.json"))
         if manifest["repo_commit"] != state["commit"]:
             raise ValueError("仓库提交已变化，请新建运行以重新采集证据")
         topic = manifest["topic"]
@@ -45,6 +85,9 @@ def run_pipeline(topic="", request="", repo_root=None, output_root=None, generat
         evidence = load_json(run_dir / "evidence.json")
         chapter_path = run_dir / "chapters.json"
         chapters = load_json(chapter_path) if chapter_path.is_file() else build_chapters(topic, request, evidence)
+        _check_resume_tracks(generation, manifest, chapters)
+        manifest["requested_generation"] = generation
+        atomic_write_json(run_dir / "manifest.json", manifest)
     else:
         if not topic.strip():
             raise ValueError("创新主题不能为空")
@@ -88,7 +131,13 @@ def run_pipeline(topic="", request="", repo_root=None, output_root=None, generat
             atomic_write_json(run_dir / "manifest.json", manifest)
             raise
     actual = {manifest["stages"][stage]["generation"] for stage in STAGES}
+    if not actual <= {"external", "rule"}:
+        raise ValueError("四个阶段的实际生成方式必须明确为 external 或 rule")
     manifest["generation"] = next(iter(actual)) if len(actual) == 1 else "mixed"
+    if len(actual) > 1:
+        warning = "auto 受控降级产生混轨；各章实际生成方式已保留"
+        if warning not in manifest["warnings"]:
+            manifest["warnings"].append(warning)
     manifest["model"] = adapter.model if "external" in actual else ""
     atomic_write_json(run_dir / "manifest.json", manifest)
     return _save_review_and_render(run_dir, manifest, chapters, evidence)
@@ -96,11 +145,12 @@ def run_pipeline(topic="", request="", repo_root=None, output_root=None, generat
 
 def accept_run(run_dir, evidence_path):
     run_dir = Path(run_dir)
-    manifest = load_json(run_dir / "manifest.json")
+    manifest = _migrate_manifest(load_json(run_dir / "manifest.json"))
     evidence = load_json(run_dir / "evidence.json")
     chapters = load_json(run_dir / "chapters.json")
     acceptance_evidence = load_json(evidence_path)
     if not isinstance(acceptance_evidence, list):
         raise ValueError("验收证据文件必须是 JSON 数组")
     updated = apply_acceptance(chapters, acceptance_evidence)
+    invalidate_delivery(run_dir, manifest, "not_delivered", "已接受新证据，旧正式 Word 与新源稿不再对应")
     return _save_review_and_render(run_dir, manifest, updated, evidence)

@@ -159,7 +159,10 @@ def test_resume_skips_completed_stages_after_partial_failure(tmp_path):
             repo_root=repo,
             output_root=tmp_path / "out",
             generation="external",
-            client=DesignUnavailableClient([]),
+            client=DesignUnavailableClient([{
+                "id": "EV-001", "type": "registry", "path": "docs/registry/README.md",
+                "locator": "line=2", "summary": "项目已有模块清单", "source_version": "fixture",
+            }]),
             run_id="partial-run",
         )
     run_dir = tmp_path / "out" / "partial-run"

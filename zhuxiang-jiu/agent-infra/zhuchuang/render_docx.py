@@ -8,13 +8,33 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
-from contracts import load_json, source_hash
+from contracts import atomic_write_json, load_json, source_hash
+from review import review_chapters
 
 TITLES = (("planning", "第一章　创新规划"), ("design", "第二章　设计"), ("deployment", "第三章　部署方案"), ("acceptance", "第四章　验收计划／报告"))
+DOCX_NAME = "创新规划设计部署验收.docx"
 
 
 class RenderError(RuntimeError):
     pass
+
+
+def invalidate_delivery(run_dir, manifest, status="not_delivered", error=""):
+    """使旧正式交付立即失效，并只操作当前运行目录内的正式 DOCX。"""
+    run_dir = Path(run_dir)
+    path = run_dir / DOCX_NAME
+    path.unlink(missing_ok=True)
+    path.with_suffix(path.suffix + ".tmp").unlink(missing_ok=True)
+    manifest.setdefault("artifacts", {})["docx"] = ""
+    manifest["delivery"] = {
+        "status": status,
+        "docx": "",
+        "source_hash": "",
+        "evidence_hash": "",
+        "error": error,
+    }
+    atomic_write_json(run_dir / "manifest.json", manifest)
+    return manifest
 
 
 def _flatten(value):
@@ -90,10 +110,22 @@ def render_document(run_dir):
     evidence = load_json(run_dir / "evidence.json")
     chapters = load_json(run_dir / "chapters.json")
     review = load_json(run_dir / "review.json")
+    if not isinstance(review, dict):
+        invalidate_delivery(run_dir, manifest, "not_delivered", "审查记录必须为对象")
+        raise RenderError("审查记录必须为对象，必须重新审查")
     if not review.get("word_ready") or review.get("blockers"):
+        invalidate_delivery(run_dir, manifest, "not_delivered", "审查存在阻断项")
         raise RenderError("审查存在阻断项，不生成正式 Word")
     if review.get("source_hash") != source_hash(chapters):
+        invalidate_delivery(run_dir, manifest, "not_delivered", "源稿已变化，原许可失效")
         raise RenderError("源稿已变化，必须重新审查")
+    if not review.get("evidence_hash") or review.get("evidence_hash") != source_hash(evidence):
+        invalidate_delivery(run_dir, manifest, "not_delivered", "证据已变化或许可缺少证据指纹")
+        raise RenderError("证据已变化或旧审查缺少证据指纹，必须重新审查")
+    current_review = review_chapters(chapters, evidence)
+    if current_review["blockers"]:
+        invalidate_delivery(run_dir, manifest, "not_delivered", "当前源稿或证据未通过审查")
+        raise RenderError("当前源稿或证据未通过审查：" + "；".join(current_review["blockers"]))
     write_markdown(run_dir)
     document = Document()
     section = document.sections[0]
@@ -134,7 +166,7 @@ def render_document(run_dir):
     field = OxmlElement("w:fldSimple")
     field.set(qn("w:instr"), "PAGE")
     footer._p.append(field)
-    path = run_dir / "创新规划设计部署验收.docx"
+    path = run_dir / DOCX_NAME
     temporary = path.with_suffix(path.suffix + ".tmp")
     try:
         document.save(temporary)
@@ -146,7 +178,13 @@ def render_document(run_dir):
         temporary.unlink(missing_ok=True)
         raise
     manifest["artifacts"]["docx"] = str(path)
-    from contracts import atomic_write_json
+    manifest["delivery"] = {
+        "status": "delivered",
+        "docx": str(path),
+        "source_hash": review["source_hash"],
+        "evidence_hash": review["evidence_hash"],
+        "error": "",
+    }
     atomic_write_json(run_dir / "manifest.json", manifest)
     return path
 
