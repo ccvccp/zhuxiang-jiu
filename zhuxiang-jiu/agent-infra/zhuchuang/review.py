@@ -92,11 +92,8 @@ def _iter_statements(value, parent_key=""):
 
 
 def _is_actual_claim(text, pattern):
-    for match in pattern.finditer(text):
-        start = max(text.rfind("。", 0, match.start()), text.rfind("；", 0, match.start()), text.rfind("\n", 0, match.start()), text.rfind("，", 0, match.start())) + 1
-        end_candidates = [index for index in (text.find("。", match.end()), text.find("；", match.end()), text.find("\n", match.end()), text.find("，", match.end())) if index >= 0]
-        clause = text[start:min(end_candidates) if end_candidates else len(text)]
-        if not any(marker in clause for marker in _PLANNING_MARKERS):
+    for clause in re.split(r"[。；\n，]|但|然而", text):
+        if pattern.search(clause) and not any(marker in clause for marker in _PLANNING_MARKERS):
             return True
     return False
 
