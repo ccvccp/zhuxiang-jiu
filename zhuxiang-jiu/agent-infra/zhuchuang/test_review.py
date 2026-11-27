@@ -1,4 +1,3 @@
-import copy
 import os
 import sys
 
@@ -57,3 +56,115 @@ def test_failed_and_invalid_evidence_are_truthful():
     assert validate_acceptance_evidence(invalid) == []
     with pytest.raises(ValueError, match="未知验收用例"):
         apply_acceptance(chapters, [invalid])
+
+
+def test_source_evidence_requires_all_fields():
+    chapters, _ = fixture()
+    report = review_chapters(chapters, [{"id": "EV-001"}])
+    assert report["word_ready"] is False
+    for field in ("type", "path", "locator", "summary", "source_version"):
+        assert any(f"证据缺少 {field}" in item for item in report["blockers"])
+
+
+def test_duplicate_source_evidence_ids_are_blocked():
+    chapters, evidence = fixture()
+    evidence.append(dict(evidence[0]))
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False
+    assert any("证据 ID 重复" in item and "EV-001" in item for item in report["blockers"])
+
+
+def test_acceptance_exit_code_is_required():
+    item = passed_evidence("AC-001")
+    item.update(result="failed", output_summary="1 failed")
+    del item["exit_code"]
+    assert "验收证据缺少 exit_code" in validate_acceptance_evidence(item)
+
+
+@pytest.mark.parametrize("result,exit_code", [
+    ("passed", False),
+    ("passed", True),
+    ("passed", "0"),
+    ("failed", True),
+])
+def test_acceptance_exit_code_must_be_integer_not_boolean(result, exit_code):
+    item = passed_evidence("AC-001")
+    item.update(result=result, exit_code=exit_code)
+    assert "验收证据 exit_code 必须为整数" in validate_acceptance_evidence(item)
+
+
+@pytest.mark.parametrize("gate", [
+    "无需人工确认",
+    "已取消人工确认",
+    "不再需要人工确认",
+    "跳过人工确认",
+])
+def test_redline_confirmation_rejects_negative_wording(gate):
+    chapters, evidence = fixture()
+    chapters["deployment"]["content"]["confirmation_gates"] = [gate]
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False
+    assert "红线内容缺少人工确认门" in report["blockers"]
+
+
+@pytest.mark.parametrize("gate", ["人工确认", "人工确认需求"])
+def test_redline_confirmation_requires_affirmative_wording(gate):
+    chapters, evidence = fixture()
+    chapters["deployment"]["content"]["confirmation_gates"] = [gate]
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False
+    assert "红线内容缺少人工确认门" in report["blockers"]
+
+
+def test_malformed_acceptance_case_id_returns_blocker():
+    chapters, evidence = fixture()
+    chapters["acceptance"]["content"]["cases"][0]["id"] = ["AC-001"]
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False
+    assert any("验收用例编号必须唯一" in item for item in report["blockers"])
+
+
+def test_duplicate_and_wrong_prefix_ids_are_blocked():
+    chapters, evidence = fixture()
+    collections = (
+        ("planning", "objectives", "目标", "OBJ-"),
+        ("design", "components", "组件", "CMP-"),
+        ("deployment", "steps", "部署步骤", "DEP-"),
+        ("acceptance", "cases", "验收用例", "AC-"),
+    )
+    for stage, key, _, _ in collections:
+        items = chapters[stage]["content"][key]
+        items[1]["id"] = items[0]["id"]
+    report = review_chapters(chapters, evidence)
+    for _, _, label, _ in collections:
+        assert any(f"{label}编号必须唯一" in item for item in report["blockers"])
+
+    chapters, evidence = fixture()
+    for stage, key, _, _ in collections:
+        chapters[stage]["content"][key][0]["id"] = "BAD-001"
+    report = review_chapters(chapters, evidence)
+    for _, _, label, prefix in collections:
+        assert f"{label}编号必须唯一且以 {prefix} 开头" in report["blockers"]
+
+
+def test_deployment_and_acceptance_reference_closure():
+    chapters, evidence = fixture()
+    chapters["deployment"]["content"]["steps"][0]["component_refs"] = ["CMP-999"]
+    case = chapters["acceptance"]["content"]["cases"][0]
+    case["objective_refs"] = ["OBJ-999"]
+    case["component_refs"] = ["CMP-999"]
+    chapters["acceptance"]["content"]["evidence"] = [passed_evidence("AC-404")]
+    report = review_chapters(chapters, evidence)
+    assert "部署步骤引用了未知组件 CMP-999" in report["blockers"]
+    assert "验收用例 AC-001 引用了未知目标" in report["blockers"]
+    assert "验收用例 AC-001 引用了未知组件" in report["blockers"]
+    assert "验收证据引用了未知用例 AC-404" in report["blockers"]
+
+
+@pytest.mark.parametrize("marker", ["{{ topic }}", "topic }}"])
+def test_template_markers_in_source_text_are_blocked(marker):
+    chapters, evidence = fixture()
+    chapters["planning"]["content"]["scope"].append(marker)
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False
+    assert "源稿仍含模板变量" in report["blockers"]
