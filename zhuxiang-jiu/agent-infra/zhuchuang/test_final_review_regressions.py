@@ -520,6 +520,21 @@ def test_truth_negation_before_contrast_does_not_waive_actual_claim(stage, field
     assert any(blocker in item for item in report["blockers"])
 
 
+@pytest.mark.parametrize("stage,field,claim,blocker", [
+    ("deployment", "prerequisites", "本说明不表示测试结论不过已完成生产部署", "部署完成声明"),
+    ("deployment", "prerequisites", "本说明不表示测试结论可是已完成生产部署", "部署完成声明"),
+    ("acceptance", "notes", "本说明不表示验收结论不过所有验收均已通过", "验收通过声明"),
+    ("acceptance", "notes", "不表示任何环境已完成部署不过所有验收均已通过", "验收通过声明"),
+    ("deployment", "prerequisites", "本部署章仅为方案文本不过已完成生产部署", "部署完成声明"),
+])
+def test_truth_explicit_negation_is_bound_to_negated_claim(stage, field, claim, blocker):
+    chapters, evidence = fixture()
+    chapters[stage]["content"][field] = [claim]
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False, report
+    assert any(blocker in item for item in report["blockers"])
+
+
 def test_redline_confirmation_accepts_prefixed_independent_sentence():
     chapters, evidence = fixture()
     chapters["deployment"]["content"]["confirmation_gates"] = [

@@ -18,9 +18,13 @@ _COMPLETION_CLAIM = re.compile(
     r"(?:已(?:经)?完成[^。；\n]*部署|已(?:经)?部署(?:完成|成功)|部署(?:已|已经)(?:完成|成功)|部署完成(?!后)|已(?:经)?上线|已(?:经)?发布)"
 )
 _ACCEPTANCE_PASS_CLAIM = re.compile(r"(?:所有验收均已通过|全部验收(?:均)?通过|验收已(?:经)?通过|已(?:经)?通过验收)")
+_CLAIM_PATTERN = rf"(?:{_COMPLETION_CLAIM.pattern}|{_ACCEPTANCE_PASS_CLAIM.pattern})"
+_EXPLICIT_NEGATION_SPAN = re.compile(
+    rf"(?:不表示|不代表|不意味着)(?:任何环境)?{_CLAIM_PATTERN}(?:或{_CLAIM_PATTERN})*"
+)
 _PLANNING_MARKERS = (
     "计划", "待执行", "待部署", "不得", "禁止", "不允许", "不应", "不自动执行",
-    "不表示", "不代表", "不意味着", "仅为方案", "尚未", "未部署", "建议", "未来", "规划", "等待",
+    "尚未", "未部署", "建议", "未来", "规划", "等待",
 )
 _NON_STATEMENT_KEYS = {
     "id", "case_id", "type", "stage", "generation", "status", "mode", "conclusion", "result",
@@ -92,8 +96,14 @@ def _iter_statements(value, parent_key=""):
 
 
 def _is_actual_claim(text, pattern):
-    for clause in re.split(r"[。；\n，]|但|然而", text):
-        if pattern.search(clause) and not any(marker in clause for marker in _PLANNING_MARKERS):
+    negation_spans = [match.span() for match in _EXPLICIT_NEGATION_SPAN.finditer(text)]
+    for match in pattern.finditer(text):
+        if any(start <= match.start() and match.end() <= end for start, end in negation_spans):
+            continue
+        start = max(text.rfind("。", 0, match.start()), text.rfind("；", 0, match.start()), text.rfind("\n", 0, match.start()), text.rfind("，", 0, match.start())) + 1
+        end_candidates = [index for index in (text.find("。", match.end()), text.find("；", match.end()), text.find("\n", match.end()), text.find("，", match.end())) if index >= 0]
+        clause = text[start:min(end_candidates) if end_candidates else len(text)]
+        if not any(marker in clause for marker in _PLANNING_MARKERS):
             return True
     return False
 
