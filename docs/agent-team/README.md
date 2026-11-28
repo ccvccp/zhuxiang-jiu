@@ -17,6 +17,7 @@
 - [测试 Agent](roles/testing.md)
 - [审查 Agent](roles/review.md)
 - [交付 Agent](roles/delivery.md)
+- [部署 Agent](roles/deployment.md)
 
 ## 工作流程
 
@@ -30,6 +31,7 @@
 8. 实现后运行与变更匹配的测试，再由未参与主要实现的审查 Agent 独立复核。
 9. PR 关联 Issue，记录真实测试证据、风险、遗留事项和回退方法。
 10. CI 与独立审查通过后等待用户确认；合并和生产部署是两个独立的人工决策。
+11. 使用同一 run_id 将开发、PR、部署和验收证据同步到四章；文档失效后必须重新审查，不能沿用旧 Word。
 
 ## 权限边界
 
