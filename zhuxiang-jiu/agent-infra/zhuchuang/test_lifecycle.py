@@ -48,3 +48,43 @@ def test_set_lifecycle_records_single_waiting_gate():
     set_lifecycle(manifest, "awaiting_merge", "awaiting_confirmation", awaiting="merge")
     assert manifest["lifecycle"]["awaiting"] == "merge"
     assert manifest["lifecycle"]["blocker"] == ""
+
+
+def test_validate_lifecycle_rejects_non_string_enum_fields_without_raising():
+    for field, value in (("stage", []), ("status", {}), ("awaiting", [])):
+        manifest = ensure_lifecycle(old_manifest())
+        manifest["lifecycle"][field] = value
+        errors = validate_lifecycle(manifest)
+        assert f"lifecycle.{field} 必须为字符串" in errors
+
+
+def test_validate_lifecycle_rejects_unhashable_milestone_name_without_raising():
+    manifest = ensure_lifecycle(old_manifest())
+    manifest["milestones"] = [{"name": []}]
+    errors = validate_lifecycle(manifest)
+    assert "milestones.name 必须为字符串" in errors
+
+
+def test_set_lifecycle_invalid_input_preserves_original_lifecycle():
+    manifest = ensure_lifecycle(old_manifest())
+    original = manifest["lifecycle"].copy()
+    try:
+        set_lifecycle(manifest, [], "in_progress")
+    except ValueError as exc:
+        assert "lifecycle.stage" in str(exc)
+    else:
+        raise AssertionError("invalid lifecycle stage must be rejected")
+    assert manifest["lifecycle"] == original
+
+
+def test_set_lifecycle_unrelated_validation_failure_preserves_original_lifecycle():
+    manifest = ensure_lifecycle(old_manifest())
+    original = manifest["lifecycle"].copy()
+    manifest["document"]["status"] = "passed"
+    try:
+        set_lifecycle(manifest, "review", "in_progress")
+    except ValueError as exc:
+        assert "document.status" in str(exc)
+    else:
+        raise AssertionError("invalid document status must be rejected")
+    assert manifest["lifecycle"] == original

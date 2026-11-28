@@ -21,14 +21,21 @@ def validate_lifecycle(manifest):
     if not isinstance(lifecycle, dict):
         errors.append("lifecycle 必须为对象")
     else:
-        if lifecycle.get("stage") not in LIFECYCLE_STAGES:
+        stage = lifecycle.get("stage")
+        if not isinstance(stage, str):
+            errors.append("lifecycle.stage 必须为字符串")
+        elif stage not in LIFECYCLE_STAGES:
             errors.append("lifecycle.stage 无效")
-        if lifecycle.get("status") not in LIFECYCLE_STATUSES:
+        status = lifecycle.get("status")
+        if not isinstance(status, str):
+            errors.append("lifecycle.status 必须为字符串")
+        elif status not in LIFECYCLE_STATUSES:
             errors.append("lifecycle.status 无效")
         for key in ("awaiting", "blocker"):
             if not isinstance(lifecycle.get(key), str):
                 errors.append(f"lifecycle.{key} 必须为字符串")
-        if lifecycle.get("awaiting") not in {"", "merge", "deployment"}:
+        awaiting = lifecycle.get("awaiting")
+        if isinstance(awaiting, str) and awaiting not in {"", "merge", "deployment"}:
             errors.append("lifecycle.awaiting 只能为空、merge 或 deployment")
     document = manifest.get("document")
     if not isinstance(document, dict):
@@ -55,9 +62,12 @@ def validate_lifecycle(manifest):
         errors.append("milestones 必须为数组")
     else:
         names = [item.get("name") if isinstance(item, dict) else None for item in milestones]
-        if any(name not in MILESTONES for name in names):
+        if any(not isinstance(name, str) for name in names):
+            errors.append("milestones.name 必须为字符串")
+        string_names = [name for name in names if isinstance(name, str)]
+        if any(name not in MILESTONES for name in string_names):
             errors.append("milestones 含未知名称")
-        if len(names) != len(set(names)):
+        if len(string_names) != len(set(string_names)):
             errors.append("milestones 名称不能重复")
     return errors
 
@@ -94,7 +104,9 @@ def ensure_lifecycle(manifest):
 
 
 def set_lifecycle(manifest, stage, status, *, awaiting="", blocker=""):
-    manifest["lifecycle"] = {"stage": stage, "status": status, "awaiting": awaiting, "blocker": blocker}
-    errors = validate_lifecycle(manifest)
+    candidate = copy.deepcopy(manifest)
+    candidate["lifecycle"] = {"stage": stage, "status": status, "awaiting": awaiting, "blocker": blocker}
+    errors = validate_lifecycle(candidate)
     if errors:
         raise ValueError("生命周期契约无效：" + "；".join(errors))
+    manifest["lifecycle"] = candidate["lifecycle"]
