@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 
 from contracts import DOCX_NAME, load_json
+from lifecycle import lifecycle_lock
 
 
 SNAPSHOT_FILES = ("manifest.json", "chapters.json", "review.json", "document.md", DOCX_NAME)
@@ -18,6 +19,12 @@ def _snapshot_files_match(left, right):
 
 
 def snapshot_delivered_revision(run_dir):
+    run_dir = Path(run_dir)
+    with lifecycle_lock(run_dir):
+        return _snapshot_delivered_revision_unlocked(run_dir)
+
+
+def _snapshot_delivered_revision_unlocked(run_dir):
     run_dir = Path(run_dir)
     manifest = load_json(run_dir / "manifest.json")
     document = manifest.get("document", {})

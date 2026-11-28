@@ -227,8 +227,13 @@ def test_accept_run_recalculates_reviews_and_rerenders_real_evidence(tmp_path):
     assert load_json(run_dir / "manifest.json")["artifacts"]["docx"] == original_artifact
 
 
-def test_sync_and_revalidate_do_not_construct_model_adapter(tmp_path):
+def test_sync_and_revalidate_do_not_construct_model_adapter(tmp_path, monkeypatch):
     _, run_dir = run_rule_pipeline(tmp_path)
+
+    def raising_adapter(*args, **kwargs):
+        raise AssertionError("确定性同步不得构造模型 adapter")
+
+    monkeypatch.setattr("orchestrator.ModelAdapter", raising_adapter)
     before = status_run(run_dir)
     update = tmp_path / "sync.json"
     update.write_text(json.dumps({

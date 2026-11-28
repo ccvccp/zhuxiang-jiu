@@ -8,7 +8,8 @@ from evidence import collect_evidence, redact_text, repository_state
 from fallback import build_chapters
 from lifecycle import ensure_lifecycle, lifecycle_lock, record_milestone, set_lifecycle
 from model_adapter import ModelAdapter
-from render_docx import invalidate_delivery, render_document, write_markdown
+from render_docx import _render_document_unlocked as render_document
+from render_docx import invalidate_delivery, write_markdown
 from review import apply_acceptance, review_chapters
 
 INSTRUCTIONS = {
@@ -51,6 +52,11 @@ def _save_review_and_render(run_dir, manifest, chapters, evidence):
         record_milestone(manifest, "initial_review", {
             "source": "review", "reference": report["source_hash"], "summary": "四章初版通过确定性审查",
         }, datetime.now().astimezone().isoformat())
+    if manifest["lifecycle"]["stage"] in {"intake", "planning"}:
+        if report["word_ready"]:
+            set_lifecycle(manifest, "planning", "completed")
+        else:
+            set_lifecycle(manifest, "planning", "blocked", blocker="；".join(report["blockers"]))
     atomic_write_json(run_dir / "chapters.json", chapters)
     atomic_write_json(run_dir / "review.json", report)
     manifest["review"] = {"word_ready": report["word_ready"], "blockers": report["blockers"]}
@@ -169,16 +175,15 @@ def _run_pipeline_impl(topic="", request="", repo_root=None, output_root=None, g
 
 
 def run_pipeline(topic="", request="", repo_root=None, output_root=None, generation="auto", model="", client=None, resume_dir=None, run_id="", adapter_factory=ModelAdapter):
-    lock_dir = None
     if resume_dir:
         lock_dir = Path(resume_dir)
-    elif run_id:
+    else:
+        if not run_id:
+            run_id = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
         base = Path(repo_root or Path(__file__).resolve().parents[2]).resolve()
         lock_dir = Path(output_root or base / "output" / "zhuchuang") / run_id
-    if lock_dir is not None:
-        with lifecycle_lock(lock_dir):
-            return _run_pipeline_impl(topic, request, repo_root, output_root, generation, model, client, resume_dir, run_id, adapter_factory)
-    return _run_pipeline_impl(topic, request, repo_root, output_root, generation, model, client, resume_dir, run_id, adapter_factory)
+    with lifecycle_lock(lock_dir):
+        return _run_pipeline_impl(topic, request, repo_root, output_root, generation, model, client, resume_dir, run_id, adapter_factory)
 
 
 def accept_run(run_dir, evidence_path):
@@ -194,8 +199,8 @@ def accept_run(run_dir, evidence_path):
         if (
             source_hash(updated) == source_hash(chapters)
             and manifest["document"]["status"] == "delivered"
-            and Path(manifest["document"]["docx"]).is_file()
         ):
+            render_document(run_dir)
             return manifest
         conclusion = updated["acceptance"]["content"]["conclusion"]
         if conclusion == "passed":

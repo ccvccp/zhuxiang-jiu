@@ -82,6 +82,20 @@ def ensure_lifecycle(manifest):
     if not isinstance(manifest, dict):
         raise ValueError("manifest 必须为对象")
     migrated = copy.deepcopy(manifest)
+    for key in ("lifecycle", "document", "development", "authorization"):
+        if key in migrated and not isinstance(migrated[key], dict):
+            raise ValueError(f"{key} 必须为对象")
+    if "milestones" in migrated and not isinstance(migrated["milestones"], list):
+        raise ValueError("milestones 必须为数组")
+    authorization = migrated.get("authorization", {})
+    for key in ("merge", "deployment"):
+        if key in authorization and not isinstance(authorization[key], dict):
+            raise ValueError(f"authorization.{key} 必须为对象")
+    if "deployment" in migrated:
+        if not isinstance(migrated["deployment"], dict):
+            raise ValueError("deployment 必须为对象")
+        if "records" in migrated["deployment"] and not isinstance(migrated["deployment"]["records"], list):
+            raise ValueError("deployment.records 必须为数组")
     review = migrated.get("review") if isinstance(migrated.get("review"), dict) else {}
     delivery = migrated.get("delivery") if isinstance(migrated.get("delivery"), dict) else {}
     artifacts = migrated.get("artifacts") if isinstance(migrated.get("artifacts"), dict) else {}
@@ -102,7 +116,11 @@ def ensure_lifecycle(manifest):
         development.setdefault(key, [])
     development.setdefault("merge_commit", "")
     migrated.setdefault("milestones", [])
-    migrated.setdefault("authorization", {"merge": {}, "deployment": {}})
+    authorization = migrated.setdefault("authorization", {})
+    authorization.setdefault("merge", {})
+    authorization.setdefault("deployment", {})
+    if "deployment" in migrated:
+        migrated["deployment"].setdefault("records", [])
     errors = validate_lifecycle(migrated)
     if errors:
         raise ValueError("生命周期契约无效：" + "；".join(errors))
@@ -128,14 +146,19 @@ def record_milestone(manifest, name, evidence, now):
             raise ValueError(f"里程碑证据 {key} 必须为非空字符串")
     if not isinstance(now, str) or not now.strip():
         raise ValueError("里程碑 recorded_at 必须为非空字符串")
-    if any(item["name"] == name for item in manifest["milestones"]):
-        return
     candidate = copy.deepcopy(manifest)
-    candidate["milestones"].append({
-        "name": name,
-        "recorded_at": now,
-        "evidence": copy.deepcopy(evidence),
-    })
+    existing = next((item for item in candidate["milestones"] if item["name"] == name), None)
+    if existing is not None:
+        if name != "acceptance_recorded" or existing["evidence"] == evidence:
+            return
+        existing["recorded_at"] = now
+        existing["evidence"] = copy.deepcopy(evidence)
+    else:
+        candidate["milestones"].append({
+            "name": name,
+            "recorded_at": now,
+            "evidence": copy.deepcopy(evidence),
+        })
     errors = validate_lifecycle(candidate)
     if errors:
         raise ValueError("生命周期契约无效：" + "；".join(errors))

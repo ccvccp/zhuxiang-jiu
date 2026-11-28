@@ -158,7 +158,10 @@ def apply_acceptance(chapters, evidence_items):
     else:
         conclusion = "pending"
     acceptance["conclusion"] = conclusion
-    acceptance["notes"] = [f"结论由 {len(evidence_items)} 条执行证据计算，不接受手工覆盖"]
+    summary_pattern = re.compile(r"^结论由 \d+ 条执行证据计算，不接受手工覆盖$")
+    preserved_notes = [note for note in acceptance["notes"] if not summary_pattern.fullmatch(note)]
+    preserved_notes.append(f"结论由 {len(evidence_items)} 条执行证据计算，不接受手工覆盖")
+    acceptance["notes"] = preserved_notes
     return updated
 
 

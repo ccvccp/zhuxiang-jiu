@@ -10,9 +10,9 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
 from contracts import DOCX_NAME, atomic_write_json, load_json, source_hash
-from lifecycle import ensure_lifecycle
+from lifecycle import ensure_lifecycle, lifecycle_lock, set_lifecycle
 from review import review_chapters
-from revisions import snapshot_delivered_revision
+from revisions import _snapshot_delivered_revision_unlocked
 
 TITLES = (("planning", "第一章　创新规划"), ("design", "第二章　设计"), ("deployment", "第三章　部署方案"), ("acceptance", "第四章　验收计划／报告"))
 RENDERER_FILES = ("render_docx.py", "revisions.py")
@@ -118,7 +118,21 @@ def _add_value(document, value):
         _font(paragraph.add_run(str(value)))
 
 
+def _invalidate_render_delivery(run_dir, manifest, status, error):
+    invalidate_delivery(run_dir, manifest, status, error)
+    if manifest["lifecycle"]["stage"] == "delivered":
+        set_lifecycle(manifest, "acceptance", "blocked", blocker=error)
+        atomic_write_json(run_dir / "manifest.json", manifest)
+    return manifest
+
+
 def render_document(run_dir):
+    run_dir = Path(run_dir)
+    with lifecycle_lock(run_dir):
+        return _render_document_unlocked(run_dir)
+
+
+def _render_document_unlocked(run_dir):
     run_dir = Path(run_dir)
     manifest = load_json(run_dir / "manifest.json")
     manifest = ensure_lifecycle(manifest)
@@ -126,20 +140,20 @@ def render_document(run_dir):
     chapters = load_json(run_dir / "chapters.json")
     review = load_json(run_dir / "review.json")
     if not isinstance(review, dict):
-        invalidate_delivery(run_dir, manifest, "not_delivered", "审查记录必须为对象")
+        _invalidate_render_delivery(run_dir, manifest, "not_delivered", "审查记录必须为对象")
         raise RenderError("审查记录必须为对象，必须重新审查")
     if not review.get("word_ready") or review.get("blockers"):
-        invalidate_delivery(run_dir, manifest, "not_delivered", "审查存在阻断项")
+        _invalidate_render_delivery(run_dir, manifest, "not_delivered", "审查存在阻断项")
         raise RenderError("审查存在阻断项，不生成正式 Word")
     if review.get("source_hash") != source_hash(chapters):
-        invalidate_delivery(run_dir, manifest, "not_delivered", "源稿已变化，原许可失效")
+        _invalidate_render_delivery(run_dir, manifest, "not_delivered", "源稿已变化，原许可失效")
         raise RenderError("源稿已变化，必须重新审查")
     if not review.get("evidence_hash") or review.get("evidence_hash") != source_hash(evidence):
-        invalidate_delivery(run_dir, manifest, "not_delivered", "证据已变化或许可缺少证据指纹")
+        _invalidate_render_delivery(run_dir, manifest, "not_delivered", "证据已变化或许可缺少证据指纹")
         raise RenderError("证据已变化或旧审查缺少证据指纹，必须重新审查")
     current_review = review_chapters(chapters, evidence)
     if current_review["blockers"]:
-        invalidate_delivery(run_dir, manifest, "not_delivered", "当前源稿或证据未通过审查")
+        _invalidate_render_delivery(run_dir, manifest, "not_delivered", "当前源稿或证据未通过审查")
         raise RenderError("当前源稿或证据未通过审查：" + "；".join(current_review["blockers"]))
     render_fingerprint = _render_fingerprint(manifest["repo_commit"])
     current_docx = run_dir / DOCX_NAME
@@ -147,7 +161,6 @@ def render_document(run_dir):
         manifest["document"]["status"] == "delivered"
         and manifest["document"]["source_hash"] == review["source_hash"]
         and manifest["document"]["evidence_hash"] == review["evidence_hash"]
-        and current_docx.is_file()
     ):
         try:
             if manifest["document"].get("render_fingerprint") != render_fingerprint:
@@ -155,16 +168,21 @@ def render_document(run_dir):
             errors = validate_docx(current_docx)
             if errors:
                 raise RenderError("当前正式 DOCX 校验失败：" + "；".join(errors))
-            snapshot_delivered_revision(run_dir)
+            _snapshot_delivered_revision_unlocked(run_dir)
         except Exception as exc:
             error = str(exc) if isinstance(exc, RenderError) else f"当前交付完整性校验失败：{type(exc).__name__}: {exc}"
-            invalidate_delivery(run_dir, manifest, "stale", error)
+            _invalidate_render_delivery(run_dir, manifest, "stale", error)
             if isinstance(exc, RenderError):
                 raise
             raise RenderError(error) from exc
         return current_docx
     write_markdown(run_dir)
     document = Document()
+    zoom = document.settings.element.find(qn("w:zoom"))
+    if zoom is None:
+        zoom = OxmlElement("w:zoom")
+        document.settings.element.insert(0, zoom)
+    zoom.set(qn("w:percent"), "100")
     section = document.sections[0]
     section.page_width, section.page_height = Cm(21), Cm(29.7)
     section.top_margin = section.bottom_margin = Cm(2.5)
@@ -228,9 +246,9 @@ def render_document(run_dir):
     }
     try:
         atomic_write_json(run_dir / "manifest.json", manifest)
-        snapshot_delivered_revision(run_dir)
+        _snapshot_delivered_revision_unlocked(run_dir)
     except Exception as exc:
-        invalidate_delivery(run_dir, manifest, "failed", f"版本快照失败：{type(exc).__name__}: {exc}")
+        _invalidate_render_delivery(run_dir, manifest, "failed", f"版本快照失败：{type(exc).__name__}: {exc}")
         raise
     return path
 

@@ -36,6 +36,13 @@ def test_coordinator_requires_single_writer_and_no_model_facts():
     assert "不得自动或未经授权访问或变更生产数据或服务" in coordinator
 
 
+def test_coordinator_distinguishes_sync_and_acceptance_evidence_entrypoints():
+    coordinator = (ROOT / "docs/agent-team/coordinator.md").read_text(encoding="utf-8")
+    assert "代码测试、PR、合并、部署通过 `sync` 回流" in coordinator
+    assert "验收证据通过 `accept` 导入" in coordinator
+    assert "代码测试、PR、合并、部署和验收里程碑通过 `sync` 回流" not in coordinator
+
+
 def test_readme_production_rules_preserve_authorized_main_agent_path():
     readme = (ROOT / "docs/agent-team/README.md").read_text(encoding="utf-8")
     assert "不自动部署生产环境" in readme

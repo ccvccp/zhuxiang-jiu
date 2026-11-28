@@ -145,7 +145,11 @@ def apply_development_update(manifest, chapters, update):
             record["state"] = "closed"
             record["merged"] = True
         _upsert(development["pull_requests"], record, "number")
-        note = f"PR #{number}：state={record['state']}，review={record['review']}，ci={record['ci']}；{record['url']}"
+        note_state = "closed" if (
+            (existing is not None and existing["merged"])
+            or (merge is not None and merge.get("pull_request") == number)
+        ) else record["state"]
+        note = f"PR #{number}：state={note_state}，review={record['review']}，ci={record['ci']}；{record['url']}"
         _append_unique(updated["acceptance"]["content"]["notes"], note)
         if record["state"] == "open" and record["review"] == "approved" and record["ci"] == "passed" and not record["merged"]:
             _append_unique(milestones, "pr_reviewed")
@@ -297,13 +301,16 @@ def apply_deployment_update(manifest, chapters, update):
     notes = updated["acceptance"]["content"]["notes"]
     _append_unique(verification, summary)
     _append_unique(notes, summary + "；不代表全部验收通过")
+    current_stage = synced["lifecycle"]["stage"]
     if succeeded:
         synced["authorization"]["deployment"] = {
             "run_id": deployment["run_id"],
             "scope": deployment["scope"],
             "confirmed": True,
         }
-        set_lifecycle(synced, "acceptance", "in_progress")
+        if current_stage not in {"acceptance", "delivered"}:
+            set_lifecycle(synced, "acceptance", "in_progress")
         return synced, updated, ["deployed"]
-    set_lifecycle(synced, "deployment", "failed", blocker=summary)
+    failed_stage = current_stage if current_stage in {"acceptance", "delivered"} else "deployment"
+    set_lifecycle(synced, failed_stage, "failed", blocker=summary)
     return synced, updated, []
