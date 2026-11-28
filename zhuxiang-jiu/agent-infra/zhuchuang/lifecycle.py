@@ -43,7 +43,10 @@ def validate_lifecycle(manifest):
     else:
         if type(document.get("revision")) is not int or document.get("revision") < 0:
             errors.append("document.revision 必须为非负整数")
-        if document.get("status") not in DOCUMENT_STATUSES:
+        document_status = document.get("status")
+        if not isinstance(document_status, str):
+            errors.append("document.status 必须为字符串")
+        elif document_status not in DOCUMENT_STATUSES:
             errors.append("document.status 无效")
         for key in ("source_hash", "evidence_hash", "docx"):
             if not isinstance(document.get(key), str):

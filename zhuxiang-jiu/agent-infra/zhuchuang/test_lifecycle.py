@@ -58,6 +58,14 @@ def test_validate_lifecycle_rejects_non_string_enum_fields_without_raising():
         assert f"lifecycle.{field} 必须为字符串" in errors
 
 
+def test_validate_lifecycle_rejects_unhashable_document_status_without_raising():
+    for value in ([], {}):
+        manifest = ensure_lifecycle(old_manifest())
+        manifest["document"]["status"] = value
+        errors = validate_lifecycle(manifest)
+        assert "document.status 必须为字符串" in errors
+
+
 def test_validate_lifecycle_rejects_unhashable_milestone_name_without_raising():
     manifest = ensure_lifecycle(old_manifest())
     manifest["milestones"] = [{"name": []}]
