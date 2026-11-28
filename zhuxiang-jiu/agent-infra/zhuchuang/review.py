@@ -19,8 +19,15 @@ _COMPLETION_CLAIM = re.compile(
 )
 _ACCEPTANCE_PASS_CLAIM = re.compile(r"(?:所有验收均已通过|全部验收(?:均)?通过|验收已(?:经)?通过|已(?:经)?通过验收)")
 _CLAIM_PATTERN = rf"(?:{_COMPLETION_CLAIM.pattern}|{_ACCEPTANCE_PASS_CLAIM.pattern})"
+_USER_REVIEW_COMPLETION_CLAIM = re.compile(
+    r"^(?:【[^】]+】\s*)?(?:规划章(?:与|和)设计章|本次四章|当前四章)"
+    r"(?:(?!尚未|未|须|是否|待核对|待|如|若)[^。；，,\n])*"
+    r"已(?:经)?(?:由用户业务校对|获用户(?:业务)?校对|通过独立审查)",
+    re.MULTILINE,
+)
 _EXPLICIT_NEGATION_SPAN = re.compile(
     rf"(?:不表示|不代表|不意味着)(?:任何环境)?{_CLAIM_PATTERN}(?:或{_CLAIM_PATTERN})*"
+    rf"|不构成[^。；\n]*?(?:的)?声明"
 )
 _PLANNING_MARKERS = (
     "计划", "待执行", "待部署", "不得", "禁止", "不允许", "不应", "不自动执行",
@@ -158,7 +165,10 @@ def apply_acceptance(chapters, evidence_items):
     else:
         conclusion = "pending"
     acceptance["conclusion"] = conclusion
-    acceptance["notes"] = [f"结论由 {len(evidence_items)} 条执行证据计算，不接受手工覆盖"]
+    summary_pattern = re.compile(r"^结论由 \d+ 条执行证据计算，不接受手工覆盖$")
+    preserved_notes = [note for note in acceptance["notes"] if not summary_pattern.fullmatch(note)]
+    preserved_notes.append(f"结论由 {len(evidence_items)} 条执行证据计算，不接受手工覆盖")
+    acceptance["notes"] = preserved_notes
     return updated
 
 
@@ -291,6 +301,8 @@ def _validate_truthfulness(chapters, expected_conclusion, valid_evidence_by_id, 
         for field, text in _iter_statements(chapter["content"]):
             if "无需进一步验证" in text:
                 blockers.append(f"{stage}.{field} 不得声明无需进一步验证，验证与证据要求不能被省略")
+            if _USER_REVIEW_COMPLETION_CLAIM.search(text):
+                blockers.append(f"{stage}.{field} 用户校对或独立审查完成声明缺少真实用户确认记录")
             if expected_conclusion != "passed" and _is_actual_claim(text, _ACCEPTANCE_PASS_CLAIM):
                 blockers.append(f"{stage}.{field} 验收通过声明缺少全部用例的真实通过证据")
 

@@ -8,7 +8,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from model_adapter import ModelUnavailable
-from orchestrator import accept_run, run_pipeline
+from orchestrator import accept_run, revalidate_run, run_pipeline, status_run, sync_run
 from render_docx import RenderError, render_document
 
 
@@ -28,6 +28,13 @@ def build_parser():
     accept = sub.add_parser("accept", help="导入真实验收证据并重新审查")
     accept.add_argument("--run-dir", required=True)
     accept.add_argument("--evidence", required=True)
+    sync = sub.add_parser("sync", help="同步真实开发或部署证据并重新审查")
+    sync.add_argument("--run-dir", required=True)
+    sync.add_argument("--update", required=True)
+    status = sub.add_parser("status", help="只读查看统一运行状态")
+    status.add_argument("--run-dir", required=True)
+    revalidate = sub.add_parser("revalidate", help="不调用模型，重新审查当前源稿")
+    revalidate.add_argument("--run-dir", required=True)
     return parser
 
 
@@ -56,6 +63,17 @@ def main(argv=None):
             return 0
         if args.command == "accept":
             manifest = accept_run(args.run_dir, args.evidence)
+            print(json.dumps(manifest, ensure_ascii=False))
+            return 0 if manifest["review"]["word_ready"] else 4
+        if args.command == "sync":
+            manifest = sync_run(args.run_dir, args.update)
+            print(json.dumps(manifest, ensure_ascii=False))
+            return 0 if manifest["review"]["word_ready"] else 4
+        if args.command == "status":
+            print(json.dumps(status_run(args.run_dir), ensure_ascii=False))
+            return 0
+        if args.command == "revalidate":
+            manifest = revalidate_run(args.run_dir)
             print(json.dumps(manifest, ensure_ascii=False))
             return 0 if manifest["review"]["word_ready"] else 4
     except ModelUnavailable as exc:

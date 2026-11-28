@@ -1,3 +1,4 @@
+import hashlib
 import json
 import zipfile
 from pathlib import Path
@@ -8,11 +9,26 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
-from contracts import atomic_write_json, load_json, source_hash
+from contracts import DOCX_NAME, atomic_write_json, load_json, source_hash
+from lifecycle import ensure_lifecycle, lifecycle_lock, set_lifecycle
 from review import review_chapters
+from revisions import _snapshot_delivered_revision_unlocked
 
 TITLES = (("planning", "第一章　创新规划"), ("design", "第二章　设计"), ("deployment", "第三章　部署方案"), ("acceptance", "第四章　验收计划／报告"))
-DOCX_NAME = "创新规划设计部署验收.docx"
+RENDERER_FILES = ("render_docx.py", "revisions.py")
+
+
+def _render_fingerprint(repo_commit):
+    digest = hashlib.sha256()
+    commit_bytes = repo_commit.encode("utf-8")
+    digest.update(len(commit_bytes).to_bytes(8, "big"))
+    digest.update(commit_bytes)
+    for name in RENDERER_FILES:
+        content = Path(__file__).with_name(name).read_bytes()
+        digest.update(name.encode("utf-8"))
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+    return digest.hexdigest()
 
 
 class RenderError(RuntimeError):
@@ -20,19 +36,17 @@ class RenderError(RuntimeError):
 
 
 def invalidate_delivery(run_dir, manifest, status="not_delivered", error=""):
-    """使旧正式交付立即失效，并只操作当前运行目录内的正式 DOCX。"""
     run_dir = Path(run_dir)
+    normalized = ensure_lifecycle(manifest)
+    manifest.clear()
+    manifest.update(normalized)
     path = run_dir / DOCX_NAME
     path.unlink(missing_ok=True)
     path.with_suffix(path.suffix + ".tmp").unlink(missing_ok=True)
     manifest.setdefault("artifacts", {})["docx"] = ""
-    manifest["delivery"] = {
-        "status": status,
-        "docx": "",
-        "source_hash": "",
-        "evidence_hash": "",
-        "error": error,
-    }
+    manifest["document"]["status"] = "stale"
+    manifest["document"]["docx"] = ""
+    manifest["delivery"] = {"status": status, "docx": "", "source_hash": "", "evidence_hash": "", "error": error}
     atomic_write_json(run_dir / "manifest.json", manifest)
     return manifest
 
@@ -104,30 +118,71 @@ def _add_value(document, value):
         _font(paragraph.add_run(str(value)))
 
 
+def _invalidate_render_delivery(run_dir, manifest, status, error):
+    invalidate_delivery(run_dir, manifest, status, error)
+    if manifest["lifecycle"]["stage"] == "delivered":
+        set_lifecycle(manifest, "acceptance", "blocked", blocker=error)
+        atomic_write_json(run_dir / "manifest.json", manifest)
+    return manifest
+
+
 def render_document(run_dir):
     run_dir = Path(run_dir)
+    with lifecycle_lock(run_dir):
+        return _render_document_unlocked(run_dir)
+
+
+def _render_document_unlocked(run_dir):
+    run_dir = Path(run_dir)
     manifest = load_json(run_dir / "manifest.json")
+    manifest = ensure_lifecycle(manifest)
     evidence = load_json(run_dir / "evidence.json")
     chapters = load_json(run_dir / "chapters.json")
     review = load_json(run_dir / "review.json")
     if not isinstance(review, dict):
-        invalidate_delivery(run_dir, manifest, "not_delivered", "审查记录必须为对象")
+        _invalidate_render_delivery(run_dir, manifest, "not_delivered", "审查记录必须为对象")
         raise RenderError("审查记录必须为对象，必须重新审查")
     if not review.get("word_ready") or review.get("blockers"):
-        invalidate_delivery(run_dir, manifest, "not_delivered", "审查存在阻断项")
+        _invalidate_render_delivery(run_dir, manifest, "not_delivered", "审查存在阻断项")
         raise RenderError("审查存在阻断项，不生成正式 Word")
     if review.get("source_hash") != source_hash(chapters):
-        invalidate_delivery(run_dir, manifest, "not_delivered", "源稿已变化，原许可失效")
+        _invalidate_render_delivery(run_dir, manifest, "not_delivered", "源稿已变化，原许可失效")
         raise RenderError("源稿已变化，必须重新审查")
     if not review.get("evidence_hash") or review.get("evidence_hash") != source_hash(evidence):
-        invalidate_delivery(run_dir, manifest, "not_delivered", "证据已变化或许可缺少证据指纹")
+        _invalidate_render_delivery(run_dir, manifest, "not_delivered", "证据已变化或许可缺少证据指纹")
         raise RenderError("证据已变化或旧审查缺少证据指纹，必须重新审查")
     current_review = review_chapters(chapters, evidence)
     if current_review["blockers"]:
-        invalidate_delivery(run_dir, manifest, "not_delivered", "当前源稿或证据未通过审查")
+        _invalidate_render_delivery(run_dir, manifest, "not_delivered", "当前源稿或证据未通过审查")
         raise RenderError("当前源稿或证据未通过审查：" + "；".join(current_review["blockers"]))
+    render_fingerprint = _render_fingerprint(manifest["repo_commit"])
+    current_docx = run_dir / DOCX_NAME
+    if (
+        manifest["document"]["status"] == "delivered"
+        and manifest["document"]["source_hash"] == review["source_hash"]
+        and manifest["document"]["evidence_hash"] == review["evidence_hash"]
+    ):
+        try:
+            if manifest["document"].get("render_fingerprint") != render_fingerprint:
+                raise RenderError("仓库提交或渲染代码指纹已变化，当前交付失效")
+            errors = validate_docx(current_docx)
+            if errors:
+                raise RenderError("当前正式 DOCX 校验失败：" + "；".join(errors))
+            _snapshot_delivered_revision_unlocked(run_dir)
+        except Exception as exc:
+            error = str(exc) if isinstance(exc, RenderError) else f"当前交付完整性校验失败：{type(exc).__name__}: {exc}"
+            _invalidate_render_delivery(run_dir, manifest, "stale", error)
+            if isinstance(exc, RenderError):
+                raise
+            raise RenderError(error) from exc
+        return current_docx
     write_markdown(run_dir)
     document = Document()
+    zoom = document.settings.element.find(qn("w:zoom"))
+    if zoom is None:
+        zoom = OxmlElement("w:zoom")
+        document.settings.element.insert(0, zoom)
+    zoom.set(qn("w:percent"), "100")
     section = document.sections[0]
     section.page_width, section.page_height = Cm(21), Cm(29.7)
     section.top_margin = section.bottom_margin = Cm(2.5)
@@ -177,15 +232,24 @@ def render_document(run_dir):
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
+    document_state = manifest["document"]
+    document_state["revision"] += 1
+    document_state["status"] = "delivered"
+    document_state["source_hash"] = review["source_hash"]
+    document_state["evidence_hash"] = review["evidence_hash"]
+    document_state["render_fingerprint"] = render_fingerprint
+    document_state["docx"] = str(path)
     manifest["artifacts"]["docx"] = str(path)
     manifest["delivery"] = {
-        "status": "delivered",
-        "docx": str(path),
-        "source_hash": review["source_hash"],
-        "evidence_hash": review["evidence_hash"],
-        "error": "",
+        "status": "delivered", "docx": str(path),
+        "source_hash": review["source_hash"], "evidence_hash": review["evidence_hash"], "error": "",
     }
-    atomic_write_json(run_dir / "manifest.json", manifest)
+    try:
+        atomic_write_json(run_dir / "manifest.json", manifest)
+        _snapshot_delivered_revision_unlocked(run_dir)
+    except Exception as exc:
+        _invalidate_render_delivery(run_dir, manifest, "failed", f"版本快照失败：{type(exc).__name__}: {exc}")
+        raise
     return path
 
 
