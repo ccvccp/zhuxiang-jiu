@@ -1,3 +1,4 @@
+import hashlib
 import json
 import zipfile
 from pathlib import Path
@@ -14,6 +15,20 @@ from review import review_chapters
 from revisions import snapshot_delivered_revision
 
 TITLES = (("planning", "第一章　创新规划"), ("design", "第二章　设计"), ("deployment", "第三章　部署方案"), ("acceptance", "第四章　验收计划／报告"))
+RENDERER_FILES = ("render_docx.py", "revisions.py")
+
+
+def _render_fingerprint(repo_commit):
+    digest = hashlib.sha256()
+    commit_bytes = repo_commit.encode("utf-8")
+    digest.update(len(commit_bytes).to_bytes(8, "big"))
+    digest.update(commit_bytes)
+    for name in RENDERER_FILES:
+        content = Path(__file__).with_name(name).read_bytes()
+        digest.update(name.encode("utf-8"))
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+    return digest.hexdigest()
 
 
 class RenderError(RuntimeError):
@@ -126,6 +141,7 @@ def render_document(run_dir):
     if current_review["blockers"]:
         invalidate_delivery(run_dir, manifest, "not_delivered", "当前源稿或证据未通过审查")
         raise RenderError("当前源稿或证据未通过审查：" + "；".join(current_review["blockers"]))
+    render_fingerprint = _render_fingerprint(manifest["repo_commit"])
     current_docx = run_dir / DOCX_NAME
     if (
         manifest["document"]["status"] == "delivered"
@@ -133,6 +149,19 @@ def render_document(run_dir):
         and manifest["document"]["evidence_hash"] == review["evidence_hash"]
         and current_docx.is_file()
     ):
+        try:
+            if manifest["document"].get("render_fingerprint") != render_fingerprint:
+                raise RenderError("仓库提交或渲染代码指纹已变化，当前交付失效")
+            errors = validate_docx(current_docx)
+            if errors:
+                raise RenderError("当前正式 DOCX 校验失败：" + "；".join(errors))
+            snapshot_delivered_revision(run_dir)
+        except Exception as exc:
+            error = str(exc) if isinstance(exc, RenderError) else f"当前交付完整性校验失败：{type(exc).__name__}: {exc}"
+            invalidate_delivery(run_dir, manifest, "stale", error)
+            if isinstance(exc, RenderError):
+                raise
+            raise RenderError(error) from exc
         return current_docx
     write_markdown(run_dir)
     document = Document()
@@ -190,6 +219,7 @@ def render_document(run_dir):
     document_state["status"] = "delivered"
     document_state["source_hash"] = review["source_hash"]
     document_state["evidence_hash"] = review["evidence_hash"]
+    document_state["render_fingerprint"] = render_fingerprint
     document_state["docx"] = str(path)
     manifest["artifacts"]["docx"] = str(path)
     manifest["delivery"] = {
