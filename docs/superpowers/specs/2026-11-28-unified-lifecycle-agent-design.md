@@ -127,7 +127,7 @@
 
 ### 7.1 存储位置
 
-沿用 `output/zhuchuang/<run-id>/`，不新增数据库。运行产物继续不默认进入 Git。
+沿用 `zhuxiang-jiu/output/zhuchuang/<run-id>/`，不新增数据库。运行产物继续不默认进入 Git。
 
 现有文件继续保留：
 
