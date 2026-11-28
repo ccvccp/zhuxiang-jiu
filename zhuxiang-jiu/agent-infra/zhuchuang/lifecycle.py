@@ -121,8 +121,6 @@ def set_lifecycle(manifest, stage, status, *, awaiting="", blocker=""):
 def record_milestone(manifest, name, evidence, now):
     if name not in MILESTONES:
         raise ValueError(f"未知里程碑：{name}")
-    if any(item["name"] == name for item in manifest["milestones"]):
-        return
     if not isinstance(evidence, dict):
         raise ValueError("里程碑证据必须为对象")
     for key in ("source", "reference", "summary"):
@@ -130,14 +128,18 @@ def record_milestone(manifest, name, evidence, now):
             raise ValueError(f"里程碑证据 {key} 必须为非空字符串")
     if not isinstance(now, str) or not now.strip():
         raise ValueError("里程碑 recorded_at 必须为非空字符串")
-    manifest["milestones"].append({
+    if any(item["name"] == name for item in manifest["milestones"]):
+        return
+    candidate = copy.deepcopy(manifest)
+    candidate["milestones"].append({
         "name": name,
         "recorded_at": now,
         "evidence": copy.deepcopy(evidence),
     })
-    errors = validate_lifecycle(manifest)
+    errors = validate_lifecycle(candidate)
     if errors:
         raise ValueError("生命周期契约无效：" + "；".join(errors))
+    manifest["milestones"] = candidate["milestones"]
 
 
 @contextmanager
