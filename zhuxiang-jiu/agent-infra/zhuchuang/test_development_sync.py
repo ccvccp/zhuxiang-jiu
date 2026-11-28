@@ -8,7 +8,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 from contracts import make_manifest
-from development_sync import apply_development_update
+from development_sync import apply_deployment_update, apply_development_update
 from fallback import build_chapters
 from lifecycle import ensure_lifecycle
 
@@ -322,3 +322,85 @@ def test_closed_unmerged_merge_gate_beats_successful_test_review_progress():
         "awaiting": "",
         "blocker": "PR 已关闭或不再满足合并条件",
     }
+
+
+def merged_inputs():
+    manifest, chapters = inputs()
+    synced, updated, _ = apply_development_update(manifest, chapters, update())
+    return apply_development_update(synced, updated, {"merge": merge_payload()})
+
+
+def deployment_update():
+    return {"deployment": {
+        "authorized": True,
+        "run_id": "run-1",
+        "scope": f"deployment:production@{'c' * 40}",
+        "environment": "production",
+        "merge_commit": "c" * 40,
+        "commands": [{"command": "docker compose up -d", "executed_at": "2026-11-28T11:00:00+08:00", "exit_code": 0, "output_summary": "containers started"}],
+        "health_checks": [{"name": "api-health", "result": "passed", "output_summary": "HTTP 200"}],
+        "rollback": "restore previous approved container image",
+    }}
+
+
+def test_deployment_record_requires_authorization_and_matching_commit():
+    manifest, chapters, _ = merged_inputs()
+    unauthorized = deployment_update()
+    unauthorized["deployment"]["authorized"] = False
+    with pytest.raises(ValueError, match="部署授权"):
+        apply_deployment_update(manifest, chapters, unauthorized)
+    mismatch = deployment_update()
+    mismatch["deployment"]["merge_commit"] = "d" * 40
+    mismatch["deployment"]["scope"] = f"deployment:production@{'d' * 40}"
+    with pytest.raises(ValueError, match="合并提交"):
+        apply_deployment_update(manifest, chapters, mismatch)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("run_id", None),
+    ("run_id", "run-2"),
+    ("scope", None),
+    ("scope", "deployment:staging@" + "c" * 40),
+    ("scope", "deployment@cccccccccccc"),
+])
+def test_deployment_rejects_missing_or_foreign_run_id_and_wrong_scope(field, value):
+    manifest, chapters, _ = merged_inputs()
+    payload = deployment_update()
+    if value is None:
+        del payload["deployment"][field]
+    else:
+        payload["deployment"][field] = value
+    with pytest.raises(ValueError, match=field):
+        apply_deployment_update(manifest, chapters, payload)
+
+
+def test_deployment_success_is_not_acceptance_pass():
+    manifest, chapters, _ = merged_inputs()
+    synced, updated, milestones = apply_deployment_update(manifest, chapters, deployment_update())
+    assert milestones == ["deployed"]
+    assert synced["authorization"]["deployment"] == {
+        "run_id": "run-1",
+        "scope": f"deployment:production@{'c' * 40}",
+        "confirmed": True,
+    }
+    assert synced["lifecycle"]["stage"] == "acceptance"
+    assert updated["acceptance"]["content"]["conclusion"] == "pending"
+    assert any("不代表全部验收通过" in item for item in updated["acceptance"]["content"]["notes"])
+    synced["lifecycle"] = {"stage": "delivered", "status": "completed", "awaiting": "", "blocker": ""}
+    repeated, repeated_chapters, milestones = apply_deployment_update(synced, updated, deployment_update())
+    assert milestones == []
+    assert repeated["lifecycle"]["stage"] == "delivered"
+    assert repeated["deployment"]["records"] == synced["deployment"]["records"]
+    assert len(repeated["deployment"]["records"]) == 1
+    assert repeated_chapters == updated
+
+
+def test_failed_health_check_fails_closed_without_deployed_milestone():
+    manifest, chapters, _ = merged_inputs()
+    failed = deployment_update()
+    failed["deployment"]["health_checks"][0]["result"] = "failed"
+    failed["deployment"]["health_checks"][0]["output_summary"] = "HTTP 503"
+    synced, updated, milestones = apply_deployment_update(manifest, chapters, failed)
+    assert milestones == []
+    assert synced["lifecycle"]["status"] == "failed"
+    assert updated["acceptance"]["content"]["conclusion"] == "pending"

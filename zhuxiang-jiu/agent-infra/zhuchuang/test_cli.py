@@ -25,7 +25,7 @@ def make_repo(root):
 def test_help_and_empty_topic():
     help_result = run("--help")
     assert help_result.returncode == 0
-    assert all(name in help_result.stdout for name in ("run", "render", "accept"))
+    assert all(name in help_result.stdout for name in ("run", "render", "accept", "sync", "status", "revalidate"))
     assert run("run", "--topic", " ").returncode == 2
 
 
@@ -70,3 +70,32 @@ def test_changed_source_invalidates_review_and_returns_5(tmp_path):
     result = run("render", "--run-dir", run_dir)
     assert result.returncode == 5
     assert "重新审查" in result.stderr
+
+
+def test_status_sync_and_revalidate_commands(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    make_repo(repo)
+    created = run("run", "--topic", "智能验收", "--repo-root", str(repo), "--output-dir", str(tmp_path / "out"), "--generation", "rule")
+    assert created.returncode == 0, created.stderr
+    run_dir = json.loads(created.stdout)["artifacts"]["run_dir"]
+    manifest_path = os.path.join(run_dir, "manifest.json")
+    with open(manifest_path, "rb") as handle:
+        before_status = handle.read()
+    status = run("status", "--run-dir", run_dir)
+    assert status.returncode == 0, status.stderr
+    assert json.loads(status.stdout)["run_id"] == os.path.basename(run_dir)
+    with open(manifest_path, "rb") as handle:
+        assert handle.read() == before_status
+
+    update = tmp_path / "sync.json"
+    update.write_text("{}", encoding="utf-8")
+    synced = run("sync", "--run-dir", run_dir, "--update", str(update))
+    assert synced.returncode == 0, synced.stderr
+    synced_manifest = json.loads(synced.stdout)
+    revalidated = run("revalidate", "--run-dir", run_dir)
+    assert revalidated.returncode == 0, revalidated.stderr
+    revalidated_manifest = json.loads(revalidated.stdout)
+    assert revalidated_manifest["generation"] == synced_manifest["generation"]
+    assert revalidated_manifest["document"]["revision"] == synced_manifest["document"]["revision"]
+    assert not os.path.exists(os.path.join(run_dir, ".lifecycle.lock"))

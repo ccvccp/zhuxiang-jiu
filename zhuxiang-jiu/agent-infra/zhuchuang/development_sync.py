@@ -2,6 +2,7 @@ import copy
 import re
 from urllib.parse import urlparse
 
+from evidence import redact_text
 from lifecycle import ensure_lifecycle, set_lifecycle
 
 
@@ -220,3 +221,87 @@ def apply_development_update(manifest, chapters, update):
         elif milestones:
             set_lifecycle(synced, "development", "in_progress")
     return synced, updated, milestones
+
+
+def _clean_text(value):
+    if isinstance(value, str):
+        return redact_text(value)
+    if isinstance(value, list):
+        return [_clean_text(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _clean_text(item) for key, item in value.items()}
+    return value
+
+
+def apply_deployment_update(manifest, chapters, update):
+    if not isinstance(update, dict):
+        raise ValueError("部署同步输入必须为对象")
+    synced = ensure_lifecycle(manifest)
+    updated = copy.deepcopy(chapters)
+    deployment = update.get("deployment")
+    if deployment is None:
+        return synced, updated, []
+    if not isinstance(deployment, dict):
+        raise ValueError("deployment 必须为对象")
+    if deployment.get("authorized") is not True:
+        raise ValueError("缺少当次运行的部署授权")
+    if deployment.get("run_id") != synced["run_id"]:
+        raise ValueError("部署授权 run_id 必须匹配当次运行")
+    environment = deployment.get("environment")
+    if not isinstance(environment, str) or not environment.strip():
+        raise ValueError("部署 environment 不能为空")
+    merge_commit = _commit(deployment.get("merge_commit"))
+    if merge_commit != synced["development"]["merge_commit"]:
+        raise ValueError("部署合并提交与当前运行不一致")
+    expected_scope = f"deployment:{environment}@{merge_commit}"
+    if deployment.get("scope") != expected_scope:
+        raise ValueError(f"部署授权 scope 必须为 {expected_scope}")
+    commands = deployment.get("commands")
+    checks = deployment.get("health_checks")
+    rollback = deployment.get("rollback")
+    if not isinstance(commands, list) or not commands:
+        raise ValueError("部署 commands 必须为非空数组")
+    if not isinstance(checks, list) or not checks:
+        raise ValueError("部署 health_checks 必须为非空数组")
+    if not isinstance(rollback, str) or not rollback.strip():
+        raise ValueError("部署 rollback 不能为空")
+    for command in commands:
+        if not isinstance(command.get("command"), str) or not command["command"].strip():
+            raise ValueError("部署命令文本不能为空")
+        if not isinstance(command.get("executed_at"), str) or not command["executed_at"].strip():
+            raise ValueError("部署 executed_at 不能为空")
+        if type(command.get("exit_code")) is not int:
+            raise ValueError("部署 exit_code 必须为整数")
+        if not isinstance(command.get("output_summary"), str) or not command["output_summary"].strip():
+            raise ValueError("部署 output_summary 不能为空")
+    for check in checks:
+        if not isinstance(check.get("name"), str) or not check["name"].strip():
+            raise ValueError("健康检查 name 不能为空")
+        if check.get("result") not in {"passed", "failed"}:
+            raise ValueError("健康检查 result 必须为 passed 或 failed")
+        if not isinstance(check.get("output_summary"), str) or not check["output_summary"].strip():
+            raise ValueError("健康检查 output_summary 不能为空")
+    record = _clean_text(copy.deepcopy(deployment))
+    record.pop("authorized", None)
+    records = synced.setdefault("deployment", {"records": []})["records"]
+    is_new_record = record not in records
+    _append_unique(records, record)
+    succeeded = all(item["exit_code"] == 0 for item in commands) and all(item["result"] == "passed" for item in checks)
+    summary = f"部署记录：environment={environment}；merge_commit={merge_commit}；健康检查={'passed' if succeeded else 'failed'}；证据见 manifest.deployment"
+    verification = updated["deployment"]["content"]["verification"]
+    notes = updated["acceptance"]["content"]["notes"]
+    is_new_text = summary not in verification or summary + "；不代表全部验收通过" not in notes
+    _append_unique(verification, summary)
+    _append_unique(notes, summary + "；不代表全部验收通过")
+    if not is_new_record and not is_new_text:
+        return synced, updated, []
+    if succeeded:
+        synced["authorization"]["deployment"] = {
+            "run_id": deployment["run_id"],
+            "scope": deployment["scope"],
+            "confirmed": True,
+        }
+        set_lifecycle(synced, "acceptance", "in_progress")
+        return synced, updated, ["deployed"]
+    set_lifecycle(synced, "deployment", "failed", blocker=summary)
+    return synced, updated, []

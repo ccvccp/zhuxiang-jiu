@@ -12,7 +12,7 @@ sys.path.insert(0, HERE)
 from contracts import STAGES, load_json, source_hash
 from fallback import build_chapters
 from model_adapter import ModelUnavailable
-from orchestrator import accept_run, run_pipeline
+from orchestrator import accept_run, revalidate_run, run_pipeline, status_run, sync_run
 
 
 def make_repo(root):
@@ -225,3 +225,87 @@ def test_accept_run_recalculates_reviews_and_rerenders_real_evidence(tmp_path):
     assert docx.is_file()
     assert manifest["artifacts"]["docx"] == original_artifact
     assert load_json(run_dir / "manifest.json")["artifacts"]["docx"] == original_artifact
+
+
+def test_sync_and_revalidate_do_not_construct_model_adapter(tmp_path):
+    _, run_dir = run_rule_pipeline(tmp_path)
+    before = status_run(run_dir)
+    update = tmp_path / "sync.json"
+    update.write_text(json.dumps({
+        "issues": [{"number": 8, "title": "统一智能 Agent", "url": "https://github.com/ccvccp/zhuxiang-jiu/issues/8"}],
+        "branches": [{"name": "agent/8-unified", "commit": "b" * 40}],
+        "code_tested": {"commit": "b" * 40, "command": "pytest -q", "exit_code": 0, "output_summary": "8 passed"},
+    }), encoding="utf-8")
+    synced = sync_run(run_dir, update)
+    assert synced["development"]["issues"][0]["number"] == 8
+    assert [item["name"] for item in synced["milestones"]][-2:] == ["development_tasks", "code_tested"]
+    assert synced["generation"] == before["generation"]
+    assert synced["document"]["revision"] == before["document"]["revision"] + 1
+    repeated = sync_run(run_dir, update)
+    assert repeated == synced
+    assert repeated["document"]["revision"] == synced["document"]["revision"]
+    revalidated = revalidate_run(run_dir)
+    assert revalidated["document"]["revision"] == synced["document"]["revision"]
+
+
+def test_acceptance_lifecycle_preserves_pending_and_failed_conclusions(tmp_path):
+    _, run_dir = run_rule_pipeline(tmp_path)
+    items = local_acceptance_evidence(run_dir)
+    pending_path = tmp_path / "pending-acceptance.json"
+    pending_path.write_text(json.dumps([items[0]]), encoding="utf-8")
+    pending = accept_run(run_dir, pending_path)
+    assert pending["lifecycle"]["stage"] == "acceptance"
+    assert pending["lifecycle"]["status"] == "in_progress"
+    assert load_json(run_dir / "chapters.json")["acceptance"]["content"]["conclusion"] == "pending"
+    failed_items = local_acceptance_evidence(run_dir)
+    failed_items[0].update(result="failed", exit_code=1, output_summary="模拟失败证据")
+    failed_path = tmp_path / "failed-acceptance.json"
+    failed_path.write_text(json.dumps(failed_items), encoding="utf-8")
+    failed = accept_run(run_dir, failed_path)
+    assert failed["lifecycle"]["stage"] == "acceptance"
+    assert failed["lifecycle"]["status"] == "failed"
+    assert load_json(run_dir / "chapters.json")["acceptance"]["content"]["conclusion"] == "failed"
+
+
+def test_status_does_not_write_manifest(tmp_path):
+    _, run_dir = run_rule_pipeline(tmp_path)
+    path = run_dir / "manifest.json"
+    before = path.read_bytes()
+    manifest = status_run(run_dir)
+    assert manifest["run_id"] == run_dir.name
+    assert path.read_bytes() == before
+
+
+def test_explicit_run_and_resume_use_lifecycle_lock(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    make_repo(repo)
+    output = tmp_path / "out"
+    locked_run = output / "explicit-run"
+    locked_run.mkdir(parents=True)
+    (locked_run / ".lifecycle.lock").write_text("other", encoding="utf-8")
+    with pytest.raises(ValueError, match="另一个生命周期写入者"):
+        run_pipeline(topic="智能验收", repo_root=repo, output_root=output, generation="rule", run_id="explicit-run")
+    assert not (locked_run / "manifest.json").exists()
+
+    created = run_pipeline(topic="智能验收", repo_root=repo, output_root=output, generation="rule", run_id="resume-run")
+    run_dir = output / created["run_id"]
+    (run_dir / ".lifecycle.lock").write_text("other", encoding="utf-8")
+    with pytest.raises(ValueError, match="另一个生命周期写入者"):
+        run_pipeline(repo_root=repo, generation="rule", resume_dir=run_dir)
+
+
+def test_sync_revalidate_and_accept_reject_existing_lifecycle_lock(tmp_path):
+    _, run_dir = run_rule_pipeline(tmp_path)
+    update = tmp_path / "sync.json"
+    update.write_text("{}", encoding="utf-8")
+    acceptance = tmp_path / "acceptance.json"
+    acceptance.write_text("[]", encoding="utf-8")
+    (run_dir / ".lifecycle.lock").write_text("other", encoding="utf-8")
+    for operation in (
+        lambda: sync_run(run_dir, update),
+        lambda: revalidate_run(run_dir),
+        lambda: accept_run(run_dir, acceptance),
+    ):
+        with pytest.raises(ValueError, match="另一个生命周期写入者"):
+            operation()

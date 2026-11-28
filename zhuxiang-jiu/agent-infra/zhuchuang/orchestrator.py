@@ -2,9 +2,11 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from contracts import STAGES, atomic_write_json, load_json, make_manifest, validate_chapter
+from contracts import STAGES, atomic_write_json, load_json, make_manifest, source_hash, validate_chapter
+from development_sync import apply_deployment_update, apply_development_update
 from evidence import collect_evidence, redact_text, repository_state
 from fallback import build_chapters
+from lifecycle import ensure_lifecycle, lifecycle_lock, record_milestone, set_lifecycle
 from model_adapter import ModelAdapter
 from render_docx import invalidate_delivery, render_document, write_markdown
 from review import apply_acceptance, review_chapters
@@ -26,11 +28,18 @@ def _migrate_manifest(manifest):
     manifest.setdefault("delivery", {
         "status": "not_delivered", "docx": "", "source_hash": "", "evidence_hash": "", "error": "",
     })
-    return manifest
+    return ensure_lifecycle(manifest)
 
 
 def _save_review_and_render(run_dir, manifest, chapters, evidence):
     report = review_chapters(chapters, evidence)
+    record_milestone(manifest, "evidence", {
+        "source": "repository", "reference": manifest["repo_commit"], "summary": "固定项目证据基线",
+    }, datetime.now().astimezone().isoformat())
+    if report["word_ready"]:
+        record_milestone(manifest, "initial_review", {
+            "source": "review", "reference": report["source_hash"], "summary": "四章初版通过确定性审查",
+        }, datetime.now().astimezone().isoformat())
     atomic_write_json(run_dir / "chapters.json", chapters)
     atomic_write_json(run_dir / "review.json", report)
     manifest["review"] = {"word_ready": report["word_ready"], "blockers": report["blockers"]}
@@ -72,7 +81,7 @@ def _check_resume_tracks(generation, manifest, chapters):
         raise ValueError("恢复章节缺少可识别的实际生成方式")
 
 
-def run_pipeline(topic="", request="", repo_root=None, output_root=None, generation="auto", model="", client=None, resume_dir=None, run_id="", adapter_factory=ModelAdapter):
+def _run_pipeline_impl(topic="", request="", repo_root=None, output_root=None, generation="auto", model="", client=None, resume_dir=None, run_id="", adapter_factory=ModelAdapter):
     repo_root = Path(repo_root or Path(__file__).resolve().parents[2]).resolve()
     state = repository_state(repo_root)
     if resume_dir:
@@ -97,7 +106,7 @@ def run_pipeline(topic="", request="", repo_root=None, output_root=None, generat
         run_dir = output_root / run_id
         request = redact_text(request)
         evidence = collect_evidence(repo_root, topic, state["commit"])
-        manifest = make_manifest(topic, state["commit"], state["dirty"], generation, model, run_id, now.isoformat())
+        manifest = ensure_lifecycle(make_manifest(topic, state["commit"], state["dirty"], generation, model, run_id, now.isoformat()))
         manifest["request"] = request
         manifest["artifacts"]["run_dir"] = str(run_dir)
         chapters = build_chapters(topic, request, evidence)
@@ -143,14 +152,90 @@ def run_pipeline(topic="", request="", repo_root=None, output_root=None, generat
     return _save_review_and_render(run_dir, manifest, chapters, evidence)
 
 
+def run_pipeline(topic="", request="", repo_root=None, output_root=None, generation="auto", model="", client=None, resume_dir=None, run_id="", adapter_factory=ModelAdapter):
+    lock_dir = None
+    if resume_dir:
+        lock_dir = Path(resume_dir)
+    elif run_id:
+        base = Path(repo_root or Path(__file__).resolve().parents[2]).resolve()
+        lock_dir = Path(output_root or base / "output" / "zhuchuang") / run_id
+    if lock_dir is not None:
+        with lifecycle_lock(lock_dir):
+            return _run_pipeline_impl(topic, request, repo_root, output_root, generation, model, client, resume_dir, run_id, adapter_factory)
+    return _run_pipeline_impl(topic, request, repo_root, output_root, generation, model, client, resume_dir, run_id, adapter_factory)
+
+
 def accept_run(run_dir, evidence_path):
     run_dir = Path(run_dir)
-    manifest = _migrate_manifest(load_json(run_dir / "manifest.json"))
-    evidence = load_json(run_dir / "evidence.json")
-    chapters = load_json(run_dir / "chapters.json")
-    acceptance_evidence = load_json(evidence_path)
-    if not isinstance(acceptance_evidence, list):
-        raise ValueError("验收证据文件必须是 JSON 数组")
-    updated = apply_acceptance(chapters, acceptance_evidence)
-    invalidate_delivery(run_dir, manifest, "not_delivered", "已接受新证据，旧正式 Word 与新源稿不再对应")
-    return _save_review_and_render(run_dir, manifest, updated, evidence)
+    with lifecycle_lock(run_dir):
+        manifest = _migrate_manifest(load_json(run_dir / "manifest.json"))
+        evidence = load_json(run_dir / "evidence.json")
+        chapters = load_json(run_dir / "chapters.json")
+        acceptance_evidence = load_json(evidence_path)
+        if not isinstance(acceptance_evidence, list):
+            raise ValueError("验收证据文件必须是 JSON 数组")
+        updated = apply_acceptance(chapters, acceptance_evidence)
+        if (
+            source_hash(updated) == source_hash(chapters)
+            and manifest["document"]["status"] == "delivered"
+            and Path(manifest["document"]["docx"]).is_file()
+        ):
+            return manifest
+        conclusion = updated["acceptance"]["content"]["conclusion"]
+        if conclusion == "passed":
+            set_lifecycle(manifest, "delivered", "completed")
+        elif conclusion == "failed":
+            set_lifecycle(manifest, "acceptance", "failed", blocker="真实验收证据包含失败结果")
+        else:
+            set_lifecycle(manifest, "acceptance", "in_progress", blocker="验收证据尚未覆盖全部用例")
+        record_milestone(manifest, "acceptance_recorded", {
+            "source": "acceptance", "reference": str(evidence_path), "summary": f"已导入真实验收证据，结论为 {conclusion}",
+        }, datetime.now().astimezone().isoformat())
+        invalidate_delivery(run_dir, manifest, "not_delivered", "已接受新证据，旧正式 Word 与新源稿不再对应")
+        manifest = _save_review_and_render(run_dir, manifest, updated, evidence)
+        if not manifest["review"]["word_ready"]:
+            set_lifecycle(manifest, "acceptance", "blocked", blocker="；".join(manifest["review"]["blockers"]))
+            atomic_write_json(run_dir / "manifest.json", manifest)
+        return manifest
+
+
+def status_run(run_dir):
+    return ensure_lifecycle(load_json(Path(run_dir) / "manifest.json"))
+
+
+def revalidate_run(run_dir):
+    run_dir = Path(run_dir)
+    with lifecycle_lock(run_dir):
+        manifest = ensure_lifecycle(load_json(run_dir / "manifest.json"))
+        chapters = load_json(run_dir / "chapters.json")
+        evidence = load_json(run_dir / "evidence.json")
+        return _save_review_and_render(run_dir, manifest, chapters, evidence)
+
+
+def sync_run(run_dir, update_path):
+    run_dir = Path(run_dir)
+    update = load_json(update_path)
+    if not isinstance(update, dict):
+        raise ValueError("同步输入必须为 JSON 对象")
+    allowed = {"issues", "branches", "code_tested", "pull_requests", "merge", "deployment"}
+    unknown = set(update) - allowed
+    if unknown:
+        raise ValueError("同步输入含未知字段：" + "、".join(sorted(unknown)))
+    with lifecycle_lock(run_dir):
+        manifest = ensure_lifecycle(load_json(run_dir / "manifest.json"))
+        chapters = load_json(run_dir / "chapters.json")
+        evidence = load_json(run_dir / "evidence.json")
+        before_manifest = source_hash(manifest)
+        before_chapters = source_hash(chapters)
+        manifest, chapters, milestones = apply_development_update(manifest, chapters, update)
+        manifest, chapters, deployment_milestones = apply_deployment_update(manifest, chapters, update)
+        milestones.extend(deployment_milestones)
+        if source_hash(manifest) == before_manifest and source_hash(chapters) == before_chapters:
+            return manifest
+        invalidate_delivery(run_dir, manifest, "stale", "开发、部署或证据状态已同步，必须重新审查")
+        now = datetime.now().astimezone().isoformat()
+        for name in milestones:
+            record_milestone(manifest, name, {
+                "source": "development_sync", "reference": str(update_path), "summary": f"同步里程碑：{name}",
+            }, now)
+        return _save_review_and_render(run_dir, manifest, chapters, evidence)
