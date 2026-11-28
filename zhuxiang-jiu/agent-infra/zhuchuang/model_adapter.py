@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,39 @@ class ModelResult:
     generation: str
     model: str
     warning: str = ""
+
+
+_STAGE_SELF_LABELS = {
+    "planning": ("本规划章", "本规划产物"),
+    "design": ("本设计章", "本设计产物"),
+    "deployment": ("本部署章", "本部署产物"),
+    "acceptance": ("本验收章", "本验收产物"),
+}
+
+
+def _iter_strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _iter_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_strings(item)
+
+
+def _external_self_description_errors(stage, data):
+    labels = _STAGE_SELF_LABELS[stage] + ("本章", "本章节")
+    self_assertion = re.compile(
+        rf"^(?:{'|'.join(re.escape(label) for label in labels)})\s*"
+        rf"(?:为|是|采用)?\s*(?:规则生成|generation\s*=\s*rule|未经外部模型推理|未经过外部模型推理)"
+    )
+    for text in _iter_strings(data):
+        for clause in re.split(r"[。；\n]+", text):
+            clause = re.sub(r"^\s*【[^】]+】\s*", "", clause)
+            if self_assertion.match(clause):
+                return ["当前章节自述与 external 生成方式矛盾，不得自述规则生成或未经外部模型推理"]
+    return []
 
 
 class ModelAdapter:
@@ -72,7 +106,8 @@ class ModelAdapter:
                 correction = "上次输出解析失败：" + last_warning + "。请修正完整 JSON 对象。"
                 continue
             data["generation"] = "external"
-            errors = list(validator(data))
+            errors = _external_self_description_errors(stage, data)
+            errors.extend(validator(data))
             if not errors:
                 return ModelResult(data, "external", self.model)
             last_warning = "；".join(errors)

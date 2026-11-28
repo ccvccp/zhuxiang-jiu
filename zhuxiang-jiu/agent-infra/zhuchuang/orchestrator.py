@@ -12,11 +12,27 @@ from render_docx import _render_document_unlocked as render_document
 from render_docx import invalidate_delivery, write_markdown
 from review import apply_acceptance, review_chapters
 
+_EXTERNAL_TRUTHFULNESS = (
+    "不得将当前章节自述为规则生成或未经外部模型推理；"
+    "不得宣称本次四章已获用户校对或审查通过。"
+)
 INSTRUCTIONS = {
-    "planning": "输出 planning StageArtifact，content 含 background、objectives、scope、non_goals、decisions、reuse、tasks。",
-    "design": "输出 design StageArtifact，content 含 architecture、components、interfaces、data_contracts、security、error_handling、test_strategy。",
-    "deployment": "输出 deployment StageArtifact，content 含 prerequisites、steps、confirmation_gates、verification、rollback；只出方案。",
-    "acceptance": "输出 acceptance StageArtifact，content 含 mode、conclusion、cases、evidence、notes；无执行证据时 conclusion=pending。",
+    "planning": (
+        "输出 planning StageArtifact，content 含 background、objectives、scope、non_goals、decisions、reuse、tasks。"
+        "所有 background 现状事实必须提供有效输入 EV 引用。" + _EXTERNAL_TRUTHFULNESS
+    ),
+    "design": (
+        "输出 design StageArtifact，content 含 architecture、components、interfaces、data_contracts、security、error_handling、test_strategy。"
+        + _EXTERNAL_TRUTHFULNESS
+    ),
+    "deployment": (
+        "输出 deployment StageArtifact，content 含 prerequisites、steps、confirmation_gates、verification、rollback；只出方案。"
+        "任何生产部署都必须由用户另行明确人工确认。" + _EXTERNAL_TRUTHFULNESS
+    ),
+    "acceptance": (
+        "输出 acceptance StageArtifact，content 含 mode、conclusion、cases、evidence、notes；无执行证据时 conclusion=pending。"
+        + _EXTERNAL_TRUTHFULNESS
+    ),
 }
 
 
