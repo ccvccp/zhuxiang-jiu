@@ -60,17 +60,23 @@ class ModelAdapter:
             user = json.dumps({"payload": payload, "correction": correction}, ensure_ascii=False)
             try:
                 raw = self.client.chat(system, user, temperature=0.2, model=self.model)
-                if raw is None:
-                    break
-                data = self._parse(raw)
-                errors = list(validator(data))
-                if not errors:
-                    return ModelResult(data, "external", self.model)
-                last_warning = "；".join(errors)
-                correction = "上次输出校验失败：" + last_warning + "。请修正完整 JSON 对象。"
             except Exception as exc:
                 last_warning = f"模型调用或解析失败：{type(exc).__name__}"
                 break
+            if raw is None:
+                break
+            try:
+                data = self._parse(raw)
+            except (json.JSONDecodeError, ValueError) as exc:
+                last_warning = f"模型调用或解析失败：{type(exc).__name__}"
+                correction = "上次输出解析失败：" + last_warning + "。请修正完整 JSON 对象。"
+                continue
+            data["generation"] = "external"
+            errors = list(validator(data))
+            if not errors:
+                return ModelResult(data, "external", self.model)
+            last_warning = "；".join(errors)
+            correction = "上次输出校验失败：" + last_warning + "。请修正完整 JSON 对象。"
         if self.mode == "external":
             raise ModelUnavailable(last_warning)
         return ModelResult(None, "rule", self.model, last_warning)
