@@ -62,6 +62,9 @@ def test_long_confirmation_sentence_does_not_replace_precise_independent_gate():
     ("design", "【说明】本设计章为规则生成（generation=rule），未经外部模型推理。"),
     ("deployment", "【说明】本部署章为规则生成，未经外部模型推理。"),
     ("acceptance", "本验收章为规则生成（generation=rule），未经外部模型推理。"),
+    ("design", "本设计章由规则模板生成。"),
+    ("design", "本设计章未使用外部模型推理。"),
+    ("design", "  本设计章为规则生成。"),
 ])
 def test_external_current_chapter_rule_self_description_gets_one_correction(stage, claim):
     client = FakeClient([
@@ -79,6 +82,8 @@ def test_external_current_chapter_rule_self_description_gets_one_correction(stag
     "实现 rule 降级：外部模型不可用时使用规则模板。",
     "rule 降级时，本设计章为规则生成，这是备用路径说明。",
     "本章讨论 rule 降级机制，不表示当前章节采用规则轨。",
+    "若外部模型不可用，本设计章由规则模板生成。",
+    "假设本设计章未使用外部模型推理，仅用于说明备用路径。",
 ])
 def test_external_technical_rule_fallback_discussion_is_not_self_contradiction(note):
     client = FakeClient([json.dumps({"ok": True, "note": note}, ensure_ascii=False)])
@@ -87,21 +92,31 @@ def test_external_technical_rule_fallback_discussion_is_not_self_contradiction(n
     assert len(client.calls) == 1
 
 
-def test_current_chapter_user_review_or_approval_claim_is_blocked():
+@pytest.mark.parametrize("claim", [
+    "【建议】规划章与设计章已由用户业务校对并通过独立审查，无阻断项。",
+    "本次四章已经通过独立审查。",
+    "规划章和设计章已由用户业务校对。",
+])
+def test_current_chapter_user_review_or_approval_claim_is_blocked(claim):
     chapters, evidence = fixture()
-    chapters["deployment"]["content"]["prerequisites"] = [
-        "【建议】规划章与设计章已由用户业务校对并通过独立审查，无阻断项。"
-    ]
+    chapters["deployment"]["content"]["prerequisites"] = [claim]
     report = __import__("review").review_chapters(chapters, evidence)
     assert report["word_ready"] is False
     assert any("用户校对或独立审查" in item for item in report["blockers"])
 
 
-def test_future_user_review_requirement_is_not_an_actual_completion_claim():
+@pytest.mark.parametrize("statement", [
+    "【建议】规划章与设计章须由用户业务校对并通过独立审查。",
+    "本次四章须核对是否已获用户校对。",
+    "本次四章待用户校对，历史版本已由用户业务校对。",
+    "本次四章尚未通过独立审查。",
+    "本次四章未获用户校对。",
+    "本次四章待核对是否已获用户校对。",
+    "本次四章如已获用户校对，须留存确认记录。",
+])
+def test_future_user_review_requirement_is_not_an_actual_completion_claim(statement):
     chapters, evidence = fixture()
-    chapters["deployment"]["content"]["prerequisites"] = [
-        "【建议】规划章与设计章须由用户业务校对并通过独立审查。"
-    ]
+    chapters["deployment"]["content"]["prerequisites"] = [statement]
     report = __import__("review").review_chapters(chapters, evidence)
     assert report["word_ready"] is True, report["blockers"]
 

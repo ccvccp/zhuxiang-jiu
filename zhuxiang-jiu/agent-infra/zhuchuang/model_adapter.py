@@ -41,11 +41,11 @@ def _external_self_description_errors(stage, data):
     labels = _STAGE_SELF_LABELS[stage] + ("本章", "本章节")
     self_assertion = re.compile(
         rf"^(?:{'|'.join(re.escape(label) for label in labels)})\s*"
-        rf"(?:为|是|采用)?\s*(?:规则生成|generation\s*=\s*rule|未经外部模型推理|未经过外部模型推理)"
+        rf"(?:为|是|采用)?\s*(?:规则生成|由规则模板生成|generation\s*=\s*rule|未经外部模型推理|未经过外部模型推理|未使用外部模型推理)"
     )
     for text in _iter_strings(data):
         for clause in re.split(r"[。；\n]+", text):
-            clause = re.sub(r"^\s*【[^】]+】\s*", "", clause)
+            clause = re.sub(r"^【[^】]+】\s*", "", clause.lstrip())
             if self_assertion.match(clause):
                 return ["当前章节自述与 external 生成方式矛盾，不得自述规则生成或未经外部模型推理"]
     return []

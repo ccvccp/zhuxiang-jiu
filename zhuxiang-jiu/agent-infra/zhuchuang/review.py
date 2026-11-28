@@ -20,8 +20,9 @@ _COMPLETION_CLAIM = re.compile(
 _ACCEPTANCE_PASS_CLAIM = re.compile(r"(?:所有验收均已通过|全部验收(?:均)?通过|验收已(?:经)?通过|已(?:经)?通过验收)")
 _CLAIM_PATTERN = rf"(?:{_COMPLETION_CLAIM.pattern}|{_ACCEPTANCE_PASS_CLAIM.pattern})"
 _USER_REVIEW_COMPLETION_CLAIM = re.compile(
-    r"^(?:【[^】]+】\s*)?(?:规划章与设计章|本次四章|当前四章)"
-    r"[^。；\n]*已(?:由用户业务校对|获用户(?:业务)?校对|通过独立审查)",
+    r"^(?:【[^】]+】\s*)?(?:规划章(?:与|和)设计章|本次四章|当前四章)"
+    r"(?:(?!尚未|未|须|是否|待核对|待|如|若)[^。；，,\n])*"
+    r"已(?:经)?(?:由用户业务校对|获用户(?:业务)?校对|通过独立审查)",
     re.MULTILINE,
 )
 _EXPLICIT_NEGATION_SPAN = re.compile(
