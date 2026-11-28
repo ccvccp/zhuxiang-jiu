@@ -1,4 +1,7 @@
 import copy
+import os
+from contextlib import contextmanager
+from pathlib import Path
 
 
 LIFECYCLE_STAGES = {
@@ -113,3 +116,45 @@ def set_lifecycle(manifest, stage, status, *, awaiting="", blocker=""):
     if errors:
         raise ValueError("生命周期契约无效：" + "；".join(errors))
     manifest["lifecycle"] = candidate["lifecycle"]
+
+
+def record_milestone(manifest, name, evidence, now):
+    if name not in MILESTONES:
+        raise ValueError(f"未知里程碑：{name}")
+    if any(item["name"] == name for item in manifest["milestones"]):
+        return
+    if not isinstance(evidence, dict):
+        raise ValueError("里程碑证据必须为对象")
+    for key in ("source", "reference", "summary"):
+        if not isinstance(evidence.get(key), str) or not evidence[key].strip():
+            raise ValueError(f"里程碑证据 {key} 必须为非空字符串")
+    if not isinstance(now, str) or not now.strip():
+        raise ValueError("里程碑 recorded_at 必须为非空字符串")
+    manifest["milestones"].append({
+        "name": name,
+        "recorded_at": now,
+        "evidence": copy.deepcopy(evidence),
+    })
+    errors = validate_lifecycle(manifest)
+    if errors:
+        raise ValueError("生命周期契约无效：" + "；".join(errors))
+
+
+@contextmanager
+def lifecycle_lock(run_dir):
+    run_dir = Path(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    path = run_dir / ".lifecycle.lock"
+    try:
+        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError as exc:
+        raise ValueError(f"另一个生命周期写入者正在使用运行目录：{run_dir}") from exc
+    try:
+        os.write(descriptor, str(os.getpid()).encode("ascii"))
+        os.close(descriptor)
+        descriptor = None
+        yield
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        path.unlink(missing_ok=True)
