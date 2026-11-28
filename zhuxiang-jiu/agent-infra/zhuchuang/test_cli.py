@@ -99,3 +99,36 @@ def test_status_sync_and_revalidate_commands(tmp_path):
     assert revalidated_manifest["generation"] == synced_manifest["generation"]
     assert revalidated_manifest["document"]["revision"] == synced_manifest["document"]["revision"]
     assert not os.path.exists(os.path.join(run_dir, ".lifecycle.lock"))
+
+
+def test_malformed_deployment_entries_return_validation_exit_code(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    make_repo(repo)
+    created = run("run", "--topic", "智能验收", "--repo-root", str(repo), "--output-dir", str(tmp_path / "out"), "--generation", "rule")
+    assert created.returncode == 0, created.stderr
+    run_dir = json.loads(created.stdout)["artifacts"]["run_dir"]
+    run_id = json.loads(created.stdout)["run_id"]
+    for field in ("commands", "health_checks"):
+        for entry in (None, "bad"):
+            payload = {
+                "pull_requests": [{"number": 9, "url": "https://github.com/ccvccp/zhuxiang-jiu/pull/9", "state": "open", "merged": False, "review": "approved", "ci": "passed"}],
+                "merge": {"pull_request": 9, "commit": "c" * 40, "authorized": True, "run_id": run_id, "scope": "PR #9"},
+                "deployment": {
+                    "authorized": True,
+                    "run_id": run_id,
+                    "scope": f"deployment:production@{'c' * 40}",
+                    "environment": "production",
+                    "merge_commit": "c" * 40,
+                    "commands": [{"command": "docker compose up -d", "executed_at": "2026-11-28T11:00:00+08:00", "exit_code": 0, "output_summary": "containers started"}],
+                    "health_checks": [{"name": "api-health", "result": "passed", "output_summary": "HTTP 200"}],
+                    "rollback": "restore previous approved container image",
+                },
+            }
+            payload["deployment"][field] = [entry]
+            update = tmp_path / "malformed-deployment.json"
+            update.write_text(json.dumps(payload), encoding="utf-8")
+            result = run("sync", "--run-dir", run_dir, "--update", str(update))
+            assert result.returncode == 2, result.stderr
+            assert field in result.stderr
+            assert "Traceback" not in result.stderr

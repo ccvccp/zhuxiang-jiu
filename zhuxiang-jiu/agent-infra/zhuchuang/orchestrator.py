@@ -31,6 +31,17 @@ def _migrate_manifest(manifest):
     return ensure_lifecycle(manifest)
 
 
+def _reconcile_lifecycle_failure(manifest, blocker, *, render_failed=False):
+    current = manifest["lifecycle"]
+    if current["stage"] == "delivered":
+        set_lifecycle(manifest, "acceptance", "blocked", blocker=blocker)
+    elif current["stage"] == "acceptance" or render_failed:
+        set_lifecycle(
+            manifest, current["stage"], "blocked",
+            awaiting=current["awaiting"], blocker=blocker,
+        )
+
+
 def _save_review_and_render(run_dir, manifest, chapters, evidence):
     report = review_chapters(chapters, evidence)
     record_milestone(manifest, "evidence", {
@@ -46,16 +57,21 @@ def _save_review_and_render(run_dir, manifest, chapters, evidence):
     manifest["artifacts"]["run_dir"] = str(run_dir)
     atomic_write_json(run_dir / "manifest.json", manifest)
     if not report["word_ready"]:
+        blocker = "；".join(report["blockers"])
         invalidate_delivery(run_dir, manifest, "not_delivered", "审查存在阻断项")
+        _reconcile_lifecycle_failure(manifest, blocker)
+        atomic_write_json(run_dir / "manifest.json", manifest)
         return manifest
     try:
         write_markdown(run_dir)
         render_document(run_dir)
         manifest = load_json(run_dir / "manifest.json")
     except Exception as exc:
-        invalidate_delivery(run_dir, manifest, "failed", f"{type(exc).__name__}: {exc}")
+        blocker = f"{type(exc).__name__}: {exc}"
+        invalidate_delivery(run_dir, manifest, "failed", blocker)
         manifest["delivery"]["source_hash"] = report["source_hash"]
         manifest["delivery"]["evidence_hash"] = report["evidence_hash"]
+        _reconcile_lifecycle_failure(manifest, blocker, render_failed=True)
         atomic_write_json(run_dir / "manifest.json", manifest)
         raise
     atomic_write_json(run_dir / "manifest.json", manifest)
@@ -192,11 +208,7 @@ def accept_run(run_dir, evidence_path):
             "source": "acceptance", "reference": str(evidence_path), "summary": f"已导入真实验收证据，结论为 {conclusion}",
         }, datetime.now().astimezone().isoformat())
         invalidate_delivery(run_dir, manifest, "not_delivered", "已接受新证据，旧正式 Word 与新源稿不再对应")
-        manifest = _save_review_and_render(run_dir, manifest, updated, evidence)
-        if not manifest["review"]["word_ready"]:
-            set_lifecycle(manifest, "acceptance", "blocked", blocker="；".join(manifest["review"]["blockers"]))
-            atomic_write_json(run_dir / "manifest.json", manifest)
-        return manifest
+        return _save_review_and_render(run_dir, manifest, updated, evidence)
 
 
 def status_run(run_dir):

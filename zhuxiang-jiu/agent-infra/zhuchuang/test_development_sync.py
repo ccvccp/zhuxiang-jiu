@@ -404,3 +404,13 @@ def test_failed_health_check_fails_closed_without_deployed_milestone():
     assert milestones == []
     assert synced["lifecycle"]["status"] == "failed"
     assert updated["acceptance"]["content"]["conclusion"] == "pending"
+
+
+@pytest.mark.parametrize("field", ("commands", "health_checks"))
+@pytest.mark.parametrize("entry", (None, "bad"))
+def test_deployment_evidence_entries_must_be_objects(field, entry):
+    manifest, chapters, _ = merged_inputs()
+    payload = deployment_update()
+    payload["deployment"][field] = [entry]
+    with pytest.raises(ValueError, match=field):
+        apply_deployment_update(manifest, chapters, payload)

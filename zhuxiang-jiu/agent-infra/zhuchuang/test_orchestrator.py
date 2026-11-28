@@ -309,3 +309,102 @@ def test_sync_revalidate_and_accept_reject_existing_lifecycle_lock(tmp_path):
     ):
         with pytest.raises(ValueError, match="另一个生命周期写入者"):
             operation()
+
+
+def orchestrator_merge_update(run_id):
+    return {
+        "pull_requests": [{"number": 9, "url": "https://github.com/ccvccp/zhuxiang-jiu/pull/9", "state": "open", "merged": False, "review": "approved", "ci": "passed"}],
+        "merge": {"pull_request": 9, "commit": "c" * 40, "authorized": True, "run_id": run_id, "scope": "PR #9"},
+    }
+
+
+def orchestrator_deployment_update(run_id):
+    return {"deployment": {
+        "authorized": True,
+        "run_id": run_id,
+        "scope": f"deployment:production@{'c' * 40}",
+        "environment": "production",
+        "merge_commit": "c" * 40,
+        "commands": [{"command": "docker compose up -d", "executed_at": "2026-11-28T11:00:00+08:00", "exit_code": 0, "output_summary": "containers started"}],
+        "health_checks": [{"name": "api-health", "result": "passed", "output_summary": "HTTP 200"}],
+        "rollback": "restore previous approved container image",
+    }}
+
+
+def accept_passed(run_dir, tmp_path):
+    evidence_path = tmp_path / "passed-acceptance.json"
+    evidence_path.write_text(json.dumps(local_acceptance_evidence(run_dir), ensure_ascii=False), encoding="utf-8")
+    accepted = accept_run(run_dir, evidence_path)
+    assert accepted["lifecycle"] == {"stage": "delivered", "status": "completed", "awaiting": "", "blocker": ""}
+    return accepted
+
+
+def test_deployment_replay_after_acceptance_is_complete_noop(tmp_path):
+    _, run_dir = run_rule_pipeline(tmp_path)
+    merge_path = tmp_path / "merge.json"
+    merge_path.write_text(json.dumps(orchestrator_merge_update(run_dir.name)), encoding="utf-8")
+    sync_run(run_dir, merge_path)
+    deployment_path = tmp_path / "deployment.json"
+    deployment_path.write_text(json.dumps(orchestrator_deployment_update(run_dir.name)), encoding="utf-8")
+    deployed = sync_run(run_dir, deployment_path)
+    assert deployed["lifecycle"]["stage"] == "acceptance"
+    accepted = accept_passed(run_dir, tmp_path)
+    docx = run_dir / "创新规划设计部署验收.docx"
+    docx_before = docx.read_bytes()
+    chapters_before = (run_dir / "chapters.json").read_bytes()
+    manifest_before = (run_dir / "manifest.json").read_bytes()
+
+    replayed = sync_run(run_dir, deployment_path)
+
+    assert replayed == accepted
+    assert replayed["lifecycle"] == {"stage": "delivered", "status": "completed", "awaiting": "", "blocker": ""}
+    assert replayed["document"]["revision"] == accepted["document"]["revision"]
+    assert len(replayed["deployment"]["records"]) == 1
+    assert docx.read_bytes() == docx_before
+    assert (run_dir / "chapters.json").read_bytes() == chapters_before
+    assert (run_dir / "manifest.json").read_bytes() == manifest_before
+
+
+def test_accepted_render_exception_persists_blocked_lifecycle(tmp_path, monkeypatch):
+    _, run_dir = run_rule_pipeline(tmp_path)
+    evidence_path = tmp_path / "passed-acceptance.json"
+    evidence_path.write_text(json.dumps(local_acceptance_evidence(run_dir), ensure_ascii=False), encoding="utf-8")
+
+    def fail_render(_):
+        raise RuntimeError("forced render failure")
+
+    monkeypatch.setattr("orchestrator.render_document", fail_render)
+    with pytest.raises(RuntimeError, match="forced render failure"):
+        accept_run(run_dir, evidence_path)
+    manifest = load_json(run_dir / "manifest.json")
+    assert manifest["lifecycle"]["stage"] == "acceptance"
+    assert manifest["lifecycle"]["status"] == "blocked"
+    assert manifest["delivery"]["status"] == "failed"
+    assert manifest["document"]["status"] == "stale"
+    assert not (run_dir / ".lifecycle.lock").exists()
+
+
+@pytest.mark.parametrize("operation", ("sync", "revalidate"))
+def test_blocked_review_reconciles_previously_delivered_lifecycle(tmp_path, operation):
+    _, run_dir = run_rule_pipeline(tmp_path)
+    accept_passed(run_dir, tmp_path)
+    chapter_path = run_dir / "chapters.json"
+    chapters = load_json(chapter_path)
+    chapters["design"]["content"]["components"] = []
+    chapter_path.write_text(json.dumps(chapters, ensure_ascii=False), encoding="utf-8")
+
+    if operation == "sync":
+        update_path = tmp_path / "blocking-sync.json"
+        update_path.write_text(json.dumps({
+            "issues": [{"number": 8, "title": "统一智能 Agent", "url": "https://github.com/ccvccp/zhuxiang-jiu/issues/8"}],
+        }), encoding="utf-8")
+        manifest = sync_run(run_dir, update_path)
+    else:
+        manifest = revalidate_run(run_dir)
+
+    assert manifest["review"]["word_ready"] is False
+    assert manifest["lifecycle"]["stage"] == "acceptance"
+    assert manifest["lifecycle"]["status"] == "blocked"
+    assert manifest["delivery"]["status"] == "not_delivered"
+    assert manifest["document"]["status"] == "stale"
+    assert not (run_dir / "创新规划设计部署验收.docx").exists()
