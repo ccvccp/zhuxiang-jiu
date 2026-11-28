@@ -113,6 +113,7 @@ def apply_development_update(manifest, chapters, update):
         _append_unique(updated["acceptance"]["content"]["notes"], test_note)
         if tested["exit_code"] == 0:
             _append_unique(milestones, "code_tested")
+    atomic_merged_arrivals = set()
     for pr in pull_requests:
         number = _positive_number(pr.get("number"), "PR 编号")
         if pr.get("state") not in {"open", "closed"} or type(pr.get("merged")) is not bool:
@@ -126,6 +127,19 @@ def apply_development_update(manifest, chapters, update):
         path = f"/ccvccp/zhuxiang-jiu/pull/{number}"
         record = {"number": number, "url": _github_url(pr.get("url"), path), "state": pr["state"], "merged": pr["merged"], "review": pr["review"], "ci": pr["ci"]}
         existing = next((item for item in development["pull_requests"] if item["number"] == number), None)
+        if record["state"] == "closed" and record["merged"]:
+            expected_authorization = {"run_id": synced["run_id"], "scope": f"PR #{number}", "confirmed": True}
+            backed_by_recorded_merge = (
+                existing is not None
+                and existing["state"] == "closed"
+                and existing["merged"]
+                and bool(development["merge_commit"])
+                and synced["authorization"].get("merge") == expected_authorization
+            )
+            if not backed_by_recorded_merge:
+                if merge is None or merge.get("pull_request") != number:
+                    raise ValueError("新到达的 closed+merged PR 必须具有已记录或同批匹配的合并证据")
+                atomic_merged_arrivals.add(number)
         if existing is not None and existing["merged"]:
             record["state"] = "closed"
             record["merged"] = True
@@ -161,13 +175,18 @@ def apply_development_update(manifest, chapters, update):
         else:
             if current["stage"] in PROTECTED_STAGES:
                 raise ValueError("后期阶段不接受首次合并")
+            atomic_arrival = number in atomic_merged_arrivals
+            valid_pr_state = (
+                pr_record["state"] == "closed" and pr_record["merged"]
+                if atomic_arrival
+                else pr_record["state"] == "open" and not pr_record["merged"]
+            )
             if not (
-                pr_record["state"] == "open"
-                and not pr_record["merged"]
+                valid_pr_state
                 and pr_record["review"] == "approved"
                 and pr_record["ci"] == "passed"
             ):
-                raise ValueError("首次合并条件要求开放、未合并、审查通过且 CI 通过的 PR")
+                raise ValueError("首次合并条件要求合格的开放未合并 PR 或同批已合并 PR，且审查通过、CI 通过")
             development["merge_commit"] = commit
             pr_record["state"] = "closed"
             pr_record["merged"] = True
@@ -194,10 +213,10 @@ def apply_development_update(manifest, chapters, update):
             set_lifecycle(synced, "review", "blocked", blocker=f"{numbers} 的 CI 失败或审查要求修改")
         elif ready:
             set_lifecycle(synced, "awaiting_merge", "awaiting_confirmation", awaiting="merge")
+        elif current["stage"] == "awaiting_merge" and not open_prs:
+            set_lifecycle(synced, "development", "blocked", blocker="PR 已关闭或不再满足合并条件")
         elif tested is not None or open_prs:
             set_lifecycle(synced, "review", "in_progress")
-        elif current["stage"] == "awaiting_merge":
-            set_lifecycle(synced, "development", "blocked", blocker="PR 已关闭或不再满足合并条件")
         elif milestones:
             set_lifecycle(synced, "development", "in_progress")
     return synced, updated, milestones

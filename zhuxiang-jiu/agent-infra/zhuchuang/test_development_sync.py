@@ -269,3 +269,56 @@ def test_sync_does_not_mutate_original_manifest_chapters_or_update():
     assert manifest == original_manifest
     assert chapters == original_chapters
     assert payload == original_payload
+
+
+def test_unbacked_closed_merged_arrival_fails_without_blocking_later_merge():
+    manifest, chapters = inputs()
+    synced, updated, _ = apply_development_update(manifest, chapters, update())
+    original_synced = copy.deepcopy(synced)
+    original_updated = copy.deepcopy(updated)
+    arrival = {"pull_requests": [dict(update()["pull_requests"][0], state="closed", merged=True)]}
+    with pytest.raises(ValueError, match="合并证据"):
+        apply_development_update(synced, updated, arrival)
+    assert synced == original_synced
+    assert updated == original_updated
+    merged, _, _ = apply_development_update(synced, updated, {"merge": merge_payload()})
+    assert merged["development"]["merge_commit"] == "c" * 40
+    assert merged["development"]["pull_requests"][0]["merged"] is True
+
+
+def test_atomic_closed_merged_pr_and_matching_merge_are_reconciled():
+    manifest, chapters = inputs()
+    payload = update()
+    payload["pull_requests"][0].update(state="closed", merged=True)
+    payload["merge"] = merge_payload()
+    merged, merged_chapters, milestones = apply_development_update(manifest, chapters, payload)
+    assert "merged" in milestones
+    assert merged["development"]["merge_commit"] == "c" * 40
+    assert merged["development"]["pull_requests"][0]["state"] == "closed"
+    assert merged["development"]["pull_requests"][0]["merged"] is True
+    assert merged["authorization"]["merge"] == {"run_id": "run-1", "scope": "PR #9", "confirmed": True}
+    assert merged["lifecycle"]["stage"] == "awaiting_deployment"
+    replayed, replayed_chapters, _ = apply_development_update(merged, merged_chapters, payload)
+    assert replayed["development"] == merged["development"]
+    assert replayed_chapters == merged_chapters
+    conflicting = copy.deepcopy(payload)
+    conflicting["merge"]["commit"] = "d" * 40
+    with pytest.raises(ValueError, match="合并提交"):
+        apply_development_update(merged, merged_chapters, conflicting)
+
+
+def test_closed_unmerged_merge_gate_beats_successful_test_review_progress():
+    manifest, chapters = inputs()
+    synced, updated, _ = apply_development_update(manifest, chapters, update())
+    payload = {
+        "code_tested": update()["code_tested"],
+        "pull_requests": [dict(update()["pull_requests"][0], state="closed")],
+    }
+    closed, _, milestones = apply_development_update(synced, updated, payload)
+    assert "code_tested" in milestones
+    assert closed["lifecycle"] == {
+        "stage": "development",
+        "status": "blocked",
+        "awaiting": "",
+        "blocker": "PR 已关闭或不再满足合并条件",
+    }
