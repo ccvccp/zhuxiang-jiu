@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 SCHEMA_VERSION = "1.0"
+DOCX_NAME = "创新规划设计部署验收.docx"
 STAGES = ("planning", "design", "deployment", "acceptance")
 GENERATION_MODES = {"auto", "external", "rule", "mixed"}
 CHAPTER_FIELDS = {
