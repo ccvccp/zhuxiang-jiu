@@ -15,7 +15,7 @@ _CONFIRMATION_GATE_PATTERNS = (
     re.compile(rf"(?:经人工确认|人工确认)后方可(?:进行|执行)?{_REDLINE_SCOPE}"),
 )
 _COMPLETION_CLAIM = re.compile(
-    r"(?:已(?:经)?完成[^。；\n]*部署|已(?:经)?部署(?:完成|成功)|部署(?:已|已经)(?:完成|成功)|部署完成(?!后)|已(?:经)?上线|已(?:经)?发布)"
+    r"(?:已(?:经)?完成[^。；\n]*?部署|已(?:经)?部署(?:完成|成功)|部署(?:已|已经)(?:完成|成功)|部署完成(?!后)|已(?:经)?上线|已(?:经)?发布)"
 )
 _ACCEPTANCE_PASS_CLAIM = re.compile(r"(?:所有验收均已通过|全部验收(?:均)?通过|验收已(?:经)?通过|已(?:经)?通过验收)")
 _CLAIM_PATTERN = rf"(?:{_COMPLETION_CLAIM.pattern}|{_ACCEPTANCE_PASS_CLAIM.pattern})"

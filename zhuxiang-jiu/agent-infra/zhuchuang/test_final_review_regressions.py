@@ -535,6 +535,18 @@ def test_truth_explicit_negation_is_bound_to_negated_claim(stage, field, claim, 
     assert any(blocker in item for item in report["blockers"])
 
 
+@pytest.mark.parametrize("claim", [
+    "不表示任何环境已完成部署或已通过验收不过已完成生产部署",
+    "不表示任何环境已完成部署，随后已完成生产部署",
+])
+def test_truth_negated_completion_stops_at_nearest_deployment(claim):
+    chapters, evidence = fixture()
+    chapters["deployment"]["content"]["prerequisites"] = [claim]
+    report = review_chapters(chapters, evidence)
+    assert report["word_ready"] is False, report
+    assert any("部署完成声明" in item for item in report["blockers"])
+
+
 def test_redline_confirmation_accepts_prefixed_independent_sentence():
     chapters, evidence = fixture()
     chapters["deployment"]["content"]["confirmation_gates"] = [
